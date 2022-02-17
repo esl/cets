@@ -6,8 +6,10 @@
 all() -> [ets_tests].
  
 init_per_suite(Config) ->
-    {ok, Node2} = ct_slave:start(ct2, [{monitor_master, true}]),
-    [{node2, Node2}|Config].
+    Node2 = start_node(ct2),
+    Node3 = start_node(ct3),
+    Node4 = start_node(ct4),
+    [{nodes, [Node2, Node3, Node4]}|Config].
 
 end_per_suite(Config) ->
     Config.
@@ -19,7 +21,61 @@ end_per_testcase(ets_tests, Config) ->
     ok.
  
 ets_tests(Config) ->
-    Node2 = proplists:get_value(node2, Config),
-    kiss:start(tab1, #{}),
-    rpc:call(Node2, kiss, start, [tab1, #{}]),
+    Node1 = node(),
+    [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
+    Tab = tab1,
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid4} = start(Node4, Tab),
+    join(Node1, Pid3, Tab),
+    join(Node2, Pid4, Tab),
+    insert(Node1, Tab, {a}),
+    insert(Node2, Tab, {b}),
+    insert(Node3, Tab, {c}),
+    insert(Node4, Tab, {d}),
+    [{a},{c}] = dump(Node1, Tab),
+    [{b},{d}] = dump(Node2, Tab),
+    join(Node1, Pid2, Tab),
+    [{a},{b},{c},{d}] = dump(Node1, Tab),
+    [{a},{b},{c},{d}] = dump(Node2, Tab),
+    insert(Node1, Tab, {f}),
+    insert(Node4, Tab, {e}),
+    AF = [{a},{b},{c},{d},{e},{f}],
+    AF = dump(Node1, Tab),
+    AF = dump(Node2, Tab),
+    AF = dump(Node3, Tab),
+    AF = dump(Node4, Tab),
+    [Node2, Node3, Node4] = other_nodes(Node1, Tab),
+    [Node1, Node3, Node4] = other_nodes(Node2, Tab),
+    [Node1, Node2, Node4] = other_nodes(Node3, Tab),
+    [Node1, Node2, Node3] = other_nodes(Node4, Tab),
     ok.
+
+start(Node, Tab) ->
+    rpc(Node, kiss, start, [Tab, #{}]).
+
+insert(Node, Tab, Rec) ->
+    rpc(Node, kiss, insert, [Tab, Rec]).
+
+dump(Node, Tab) ->
+    rpc(Node, kiss, dump, [Tab]).
+
+other_nodes(Node, Tab) ->
+    rpc(Node, kiss, other_nodes, [Tab]).
+
+join(Node1, Node2, Tab) ->
+    rpc(Node1, kiss, join, [Node2, Tab]).
+
+rpc(Node, M, F, Args) ->
+    case rpc:call(Node, M, F, Args) of
+        {badrpc, Error} ->
+            ct:fail({badrpc, Error});
+        Other ->
+            Other
+    end.
+
+start_node(Sname) ->
+    {ok, Node} = ct_slave:start(Sname, [{monitor_master, true}]),
+    rpc:call(Node, code, add_paths, [code:get_path()]),
+    Node.
