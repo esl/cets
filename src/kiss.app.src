@@ -1,0 +1,9 @@
+{application, kiss,
+ [{description, "Simple Base"},
+  {vsn, "0.1"},
+  {modules, []},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []}
+% {mod, {kiss_app, []}
+  ]}.
