@@ -11,7 +11,7 @@
 
 %% We don't use monitors to avoid round-trips (that's why we don't use calls neither)
 -module(kiss).
--export([start/2, stop/1, dump/1, insert/2, join/3, other_nodes/1]).
+-export([start/2, stop/1, dump/1, insert/2, delete/2, delete_many/2, join/3, other_nodes/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -88,13 +88,13 @@ send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
                   [RemotePid, length(OurDump)], F).
 
 %% Only the node that owns the data could update/remove the data.
-%% Key is {USR, Sid}
+%% Ideally Key should contain inserter node info (for cleaning).
 insert(Tab, Rec) ->
     Servers = other_servers(Tab),
     ets:insert(Tab, Rec),
     %% Insert to other nodes and block till written
     Monitors = insert_to_remote_nodes(Servers, Rec),
-    wait_for_inserted(Monitors).
+    wait_for_updated(Monitors).
 
 insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec) ->
     Mon = erlang:monitor(process, ProxyPid),
@@ -103,14 +103,31 @@ insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec) ->
 insert_to_remote_nodes([], _Rec) ->
     [].
 
-wait_for_inserted([Mon | Monitors]) ->
+delete(Tab, Key) ->
+    delete_many(Tab, [Key]).
+
+%% A separate function for multidelete (because key COULD be a list, so no confusion)
+delete_many(Tab, Keys) ->
+    Servers = other_servers(Tab),
+    ets_delete_keys(Tab, Keys),
+    Monitors = delete_from_remote_nodes(Servers, Keys),
+    wait_for_updated(Monitors).
+
+delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys) ->
+    Mon = erlang:monitor(process, ProxyPid),
+    erlang:send(RemotePid, {delete_from_remote_node, Mon, self(), Keys}, [noconnect]),
+    [Mon | delete_from_remote_nodes(Servers, Keys)];
+delete_from_remote_nodes([], _Keys) ->
+    [].
+
+wait_for_updated([Mon | Monitors]) ->
     receive
-        {inserted, Mon2} when Mon2 =:= Mon ->
-            wait_for_inserted(Monitors);
+        {updated, Mon2} when Mon2 =:= Mon ->
+            wait_for_updated(Monitors);
         {'DOWN', Mon2, process, _Pid, _Reason} when Mon2 =:= Mon ->
-            wait_for_inserted(Monitors)
+            wait_for_updated(Monitors)
     end;
-wait_for_inserted([]) ->
+wait_for_updated([]) ->
     ok.
 
 other_servers(Tab) ->
@@ -147,7 +164,11 @@ handle_info({'DOWN', _Mon, process, Pid, _Reason}, State) ->
     handle_down(Pid, State);
 handle_info({insert_from_remote_node, Mon, Pid, Rec}, State = #{tab := Tab}) ->
     ets:insert(Tab, Rec),
-    Pid ! {inserted, Mon},
+    Pid ! {updated, Mon},
+    {noreply, State};
+handle_info({delete_from_remote_node, Mon, Pid, Keys}, State = #{tab := Tab}) ->
+    ets_delete_keys(Tab, Keys),
+    Pid ! {updated, Mon},
     {noreply, State}.
 
 terminate(_Reason, _State = #{tab := Tab}) ->
@@ -244,6 +265,12 @@ update_pt(Tab, Servers2) ->
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
+
+ets_delete_keys(Tab, [Key|Keys]) ->
+    ets:delete(Tab, Key),
+    ets_delete_keys(Tab, Keys);
+ets_delete_keys(_Tab, []) ->
+    ok.
 
 %% Cleanup
 call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
