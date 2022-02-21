@@ -6,6 +6,8 @@
 
 
 %% If we write in format {Key, WriterName}, we should resolve conflicts automatically.
+%%
+%% While Tab is an atom, we can join tables with different atoms for the local testing.
 
 %% We don't use monitors to avoid round-trips (that's why we don't use calls neither)
 -module(kiss).
@@ -26,19 +28,29 @@ stop(Tab) ->
 dump(Tab) ->
     ets:tab2list(Tab).
 
-join(RemotePid, Tab) when is_pid(RemotePid) ->
-    gen_server:call(Tab, {join, RemotePid}, infinity).
+%% Adds a node to a cluster.
+%% Writes from other nodes would wait for join completion.
+join(Tab, RemotePid) when is_pid(RemotePid) ->
+    F = fun() -> gen_server:call(Tab, {join, RemotePid}, infinity) end,
+    kiss_long:run("task=join table=~p remote_pid=~p remote_node=~p ",
+                  [Tab, RemotePid, node(RemotePid)], F).
 
-remote_add_node_to_schema(RemotePid, ServerPid, OtherNodes) ->
-    gen_server:call(RemotePid, {remote_add_node_to_schema, ServerPid, OtherNodes}, infinity).
+remote_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
+    F = fun() -> gen_server:call(RemotePid, {remote_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
+    kiss_long:run("task=remote_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
+                  [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
 
 remote_just_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
-    gen_server:call(RemotePid, {remote_just_add_node_to_schema, ServerPid, OtherPids}, infinity).
+    F = fun() -> gen_server:call(RemotePid, {remote_just_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
+    kiss_long:run("task=remote_just_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
+                  [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
 
 send_dump_to_remote_node(_RemotePid, _FromPid, []) ->
     skipped;
 send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
-    gen_server:call(RemotePid, {send_dump_to_remote_node, FromPid, OurDump}, infinity).
+    F = fun() -> gen_server:call(RemotePid, {send_dump_to_remote_node, FromPid, OurDump}, infinity) end,
+    kiss_long:run("task=send_dump_to_remote_node remote_pid=~p count=~p ",
+                  [RemotePid, length(OurDump)], F).
 
 %% Inserts do not override data (i.e. immunable)
 %% But we can remove data
@@ -189,3 +201,6 @@ handle_down(Pid, State = #{tab := Tab, other_servers := Servers}) ->
 %% Called each time other_servers changes
 update_pt(Tab, Servers2) ->
     kiss_pt:put(Tab, Servers2).
+
+pids_to_nodes(Pids) ->
+    lists:map(fun node/1, Pids).

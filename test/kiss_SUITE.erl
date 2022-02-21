@@ -3,7 +3,7 @@
  
 -compile([export_all]).
  
-all() -> [ets_tests].
+all() -> [test_multinode, test_locally].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -14,13 +14,13 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(ets_tests, Config) ->
+init_per_testcase(_, Config) ->
     Config.
  
-end_per_testcase(ets_tests, Config) ->
+end_per_testcase(_, Config) ->
     ok.
  
-ets_tests(Config) ->
+test_multinode(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
     Tab = tab1,
@@ -52,6 +52,16 @@ ets_tests(Config) ->
     [Node1, Node2, Node3] = other_nodes(Node4, Tab),
     ok.
 
+test_locally(Config) ->
+    {ok, Pid1} = kiss:start(t1, #{}),
+    {ok, Pid2} = kiss:start(t2, #{}),
+    kiss:join(t1, Pid2),
+    kiss:insert(t1, {1}),
+    kiss:insert(t1, {1}),
+    kiss:insert(t2, {2}),
+    D = kiss:dump(t1),
+    D = kiss:dump(t2).
+
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).
 
@@ -65,7 +75,7 @@ other_nodes(Node, Tab) ->
     rpc(Node, kiss, other_nodes, [Tab]).
 
 join(Node1, Node2, Tab) ->
-    rpc(Node1, kiss, join, [Node2, Tab]).
+    rpc(Node1, kiss, join, [Tab, Node2]).
 
 rpc(Node, M, F, Args) ->
     case rpc:call(Node, M, F, Args) of
