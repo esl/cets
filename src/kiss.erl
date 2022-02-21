@@ -32,10 +32,16 @@ dump(Tab) ->
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
 join(LockKey, Tab, RemotePid) when is_pid(RemotePid) ->
-    Start = os:timestamp(),
-    F = fun() -> join_loop(LockKey, Tab, RemotePid, Start) end,
-    kiss_long:run("task=join table=~p remote_pid=~p remote_node=~p ",
-                  [Tab, RemotePid, node(RemotePid)], F).
+    Servers = other_servers(Tab),
+    case lists:keymember(RemotePid, 1, Servers) of
+        true ->
+            {error, already_joined};
+        false ->
+                Start = os:timestamp(),
+                F = fun() -> join_loop(LockKey, Tab, RemotePid, Start) end,
+                kiss_long:run("task=join table=~p remote_pid=~p remote_node=~p ",
+                              [Tab, RemotePid, node(RemotePid)], F)
+    end.
 
 join_loop(LockKey, Tab, RemotePid, Start) ->
     F = fun() ->

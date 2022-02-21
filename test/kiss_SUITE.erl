@@ -3,7 +3,7 @@
  
 -compile([export_all]).
  
-all() -> [test_multinode, test_locally].
+all() -> [test_multinode, test_multinode_auto_discovery, test_locally].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -14,6 +14,9 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
+init_per_testcase(test_multinode_auto_discovery, Config) ->
+    ct:make_priv_dir(),
+    Config;
 init_per_testcase(_, Config) ->
     Config.
  
@@ -50,6 +53,22 @@ test_multinode(Config) ->
     [Node1, Node3, Node4] = other_nodes(Node2, Tab),
     [Node1, Node2, Node4] = other_nodes(Node3, Tab),
     [Node1, Node2, Node3] = other_nodes(Node4, Tab),
+    ok.
+
+test_multinode_auto_discovery(Config) ->
+    Node1 = node(),
+    [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
+    Tab = tab2,
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco.txt"),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = kiss_discovery:start(#{tables => [Tab], disco_file => FileName}),
+    %% Waits for the first check
+    ok = gen_server:call(Disco, ping),
+    [Node2] = other_nodes(Node1, Tab),
     ok.
 
 test_locally(_Config) ->
