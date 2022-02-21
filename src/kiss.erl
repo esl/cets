@@ -19,8 +19,15 @@
 -behaviour(gen_server).
 
 %% Table and server has the same name
-start(Tab, _Opts) when is_atom(Tab) ->
-    gen_server:start({local, Tab}, ?MODULE, [Tab], []).
+%% Opts:
+%% - handle_down = fun(#{remote_pid => Pid, table => Tab})
+%%   Called when a remote node goes down. Do not update other nodes data
+%%   from this function (otherwise circular locking could happen - use spawn
+%%   to make a new async process if you need to update).
+%%   i.e. any functions that replicate changes are not allowed (i.e. insert/2,
+%%   remove/2).
+start(Tab, Opts) when is_atom(Tab) ->
+    gen_server:start({local, Tab}, ?MODULE, [Tab, Opts], []).
 
 stop(Tab) ->
     gen_server:stop(Tab).
@@ -80,10 +87,8 @@ send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
     kiss_long:run("task=send_dump_to_remote_node remote_pid=~p count=~p ",
                   [RemotePid, length(OurDump)], F).
 
-%% Inserts do not override data (i.e. immunable)
-%% But we can remove data
-%% Key is {USR, Sid, UpdateNumber}
-%% Where first UpdateNumber is 0
+%% Only the node that owns the data could update/remove the data.
+%% Key is {USR, Sid}
 insert(Tab, Rec) ->
     Servers = other_servers(Tab),
     ets:insert(Tab, Rec),
@@ -115,11 +120,11 @@ other_servers(Tab) ->
 other_nodes(Tab) ->
     lists:sort([node(Pid) || {Pid, _} <- other_servers(Tab)]).
 
-init([Tab]) ->
+init([Tab, Opts]) ->
     ets:new(Tab, [ordered_set, named_table,
                   public, {read_concurrency, true}]),
     update_pt(Tab, []),
-    {ok, #{tab => Tab, other_servers => []}}.
+    {ok, #{tab => Tab, other_servers => [], opts => Opts}}.
 
 handle_call({join, RemotePid}, _From, State) ->
     handle_join(RemotePid, State);
@@ -138,7 +143,7 @@ handle_call({insert, Rec}, _From, State = #{tab := Tab}) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', _Mon, Pid, _Reason}, State) ->
+handle_info({'DOWN', _Mon, process, Pid, _Reason}, State) ->
     handle_down(Pid, State);
 handle_info({insert_from_remote_node, Mon, Pid, Rec}, State = #{tab := Tab}) ->
     ets:insert(Tab, Rec),
@@ -220,11 +225,18 @@ handle_send_dump_to_remote_node(_FromPid, Dump, State = #{tab := Tab}) ->
 insert_many(Tab, Recs) ->
     ets:insert(Tab, Recs).
 
-handle_down(Pid, State = #{tab := Tab, other_servers := Servers}) ->
-    %% Down from a proxy
-    Servers2 = lists:keydelete(Pid, 2, Servers),
-    update_pt(Tab, Servers2),
-    {noreply, State#{other_servers => Servers2}}.
+handle_down(ProxyPid, State = #{tab := Tab, other_servers := Servers}) ->
+    case lists:keytake(ProxyPid, 2, Servers) of
+        {value, {RemotePid, _}, Servers2} ->
+            %% Down from a proxy
+            update_pt(Tab, Servers2),
+            call_user_handle_down(RemotePid, State),
+            {noreply, State#{other_servers => Servers2}};
+        false ->
+            %% This should not happen
+            error_logger:error_msg("handle_down failed proxy_pid=~p state=~0p", [ProxyPid, State]),
+            {noreply, State}
+    end.
 
 %% Called each time other_servers changes
 update_pt(Tab, Servers2) ->
@@ -232,3 +244,20 @@ update_pt(Tab, Servers2) ->
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
+
+%% Cleanup
+call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
+    case Opts of
+        #{handle_down := F} ->
+            try
+                FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
+                kiss_long:run("task=call_user_handle_down table=~p remote_pid=~p remote_node=~p ",
+                              [Tab, RemotePid, node(RemotePid)], FF)
+            catch Class:Error:Stacktrace ->
+                error_logger:error_msg("what=call_user_handle_down_failed table=~p "
+                                       "remote_pid=~p remote_node=~p class=~p reason=~0p stacktrace=~0p",
+                                       [Tab, RemotePid, node(RemotePid), Class, Error, Stacktrace])
+            end;
+        _ ->
+            ok
+    end.

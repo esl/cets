@@ -3,7 +3,8 @@
  
 -compile([export_all]).
  
-all() -> [test_multinode, test_multinode_auto_discovery, test_locally].
+all() -> [test_multinode, test_multinode_auto_discovery, test_locally,
+          handle_down_is_called].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -80,6 +81,20 @@ test_locally(_Config) ->
     kiss:insert(t2, {2}),
     D = kiss:dump(t1),
     D = kiss:dump(t2).
+
+handle_down_is_called(_Config) ->
+    Parent = self(),
+    DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) ->
+                     Parent ! down_called
+             end,
+    {ok, Pid1} = kiss:start(d1, #{handle_down => DownFn}),
+    {ok, Pid2} = kiss:start(d2, #{}),
+    kiss:join(lock1, d1, Pid2),
+    exit(Pid2, oops),
+    receive
+        down_called -> ok
+    after 5000 -> ct:fail(timeout)
+    end.
 
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).
