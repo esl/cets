@@ -5,7 +5,7 @@
 %% So, we use a file with nodes to connect as a discovery mechanism
 %% (so, you can hardcode nodes or use your method of filling it)
 -module(kiss_discovery).
--export([start/1]).
+-export([start/1, start_link/1, add_table/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -13,13 +13,38 @@
 
 %% disco_file
 %% tables
-start(Opts = #{disco_file := _, tables := _}) ->
-    gen_server:start(?MODULE, [Opts], []).
+start(Opts) ->
+    start_common(start, Opts).
+
+start_link(Opts) ->
+    start_common(start_link, Opts).
+
+start_common(F, Opts = #{disco_file := _}) ->
+    Args =
+        case Opts of
+            #{name := Name} ->
+                [{local, Name}, ?MODULE, [Opts], []];
+            _ ->
+                [?MODULE, [Opts], []]
+        end,
+    apply(gen_server, F, Args).
+
+add_table(Server, Table) ->
+    gen_server:call(Server, {add_table, Table}).
 
 init([Opts]) ->
     self() ! check,
-    {ok, Opts#{results => []}}.
+    Tables = maps:get(tables, Opts, []),
+    {ok, Opts#{results => [], tables => Tables}}.
 
+handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
+    case lists:member(Table, Tables) of
+        true ->
+            {reply, {error, already_added}, State};
+        false ->
+            State2 = State#{tables => [Table | Tables]},
+            {reply, ok, handle_check(State2)}
+    end;
 handle_call(_Reply, _From, State) ->
     {reply, ok, State}.
 
@@ -35,6 +60,9 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+handle_check(State = #{tables := []}) ->
+    %% No tables to track, skip
+    schedule_check(State);
 handle_check(State = #{disco_file := Filename, tables := Tables}) ->
     State2 = case file:read_file(Filename) of
                  {error, Reason} ->
@@ -48,11 +76,17 @@ handle_check(State = #{disco_file := Filename, tables := Tables}) ->
                      report_results(Results, State),
                      State#{results => Results}
              end,
-    schedule_check(),
-    State2.
+    schedule_check(State2).
 
-schedule_check() ->
-    erlang:send_after(5000, self(), check).
+schedule_check(State) ->
+    case State of
+        #{timer_ref := OldRef} ->
+            erlang:cancel_timer(OldRef);
+        _ ->
+            ok
+    end,
+    TimerRef = erlang:send_after(5000, self(), check),
+    State#{timer_ref => TimerRef}.
 
 
 do_join(Tab, Node) ->
