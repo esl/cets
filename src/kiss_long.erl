@@ -1,13 +1,25 @@
 -module(kiss_long).
 -export([run/3]).
+-export([run_safely/3]).
+
+run_safely(InfoText, InfoArgs, Fun) ->
+    run(InfoText, InfoArgs, Fun, true).
 
 run(InfoText, InfoArgs, Fun) ->
+    run(InfoText, InfoArgs, Fun, false).
+
+run(InfoText, InfoArgs, Fun, Catch) ->
     Parent = self(),
     Start = os:timestamp(),
     error_logger:info_msg("what=long_task_started " ++ InfoText, InfoArgs),
     Pid = spawn_mon(InfoText, InfoArgs, Parent, Start),
     try
             Fun()
+        catch Class:Reason:Stacktrace when Catch ->
+            error_logger:info_msg("what=long_task_failed "
+                                  "class=~p reason=~0p stacktrace=~0p " ++ InfoText,
+                                  [Class, Reason, Stacktrace] ++ InfoArgs),
+            {error, {Class, Reason, Stacktrace}}
         after
             Diff = diff(Start),
             error_logger:info_msg("what=long_task_finished time=~p ms " ++ InfoText,

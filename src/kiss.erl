@@ -51,6 +51,9 @@ join(LockKey, Tab, RemotePid) when is_pid(RemotePid) ->
     end.
 
 join_loop(LockKey, Tab, RemotePid, Start) ->
+    %% Only one join at a time:
+    %% - for performance reasons, we don't want to cause too much load for active nodes
+    %% - to avoid deadlocks, because joining does gen_server calls
     F = fun() ->
         Diff = timer:now_diff(os:timestamp(), Start) div 1000,
         %% Getting the lock could take really long time in case nodes are
@@ -72,20 +75,20 @@ join_loop(LockKey, Tab, RemotePid, Start) ->
 
 remote_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
     F = fun() -> gen_server:call(RemotePid, {remote_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
-    kiss_long:run("task=remote_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
-                  [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
+    kiss_long:run_safely("task=remote_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
+                         [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
 
 remote_just_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
     F = fun() -> gen_server:call(RemotePid, {remote_just_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
-    kiss_long:run("task=remote_just_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
-                  [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
+    kiss_long:run_safely("task=remote_just_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
+                         [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
 
 send_dump_to_remote_node(_RemotePid, _FromPid, []) ->
     skipped;
 send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
     F = fun() -> gen_server:call(RemotePid, {send_dump_to_remote_node, FromPid, OurDump}, infinity) end,
-    kiss_long:run("task=send_dump_to_remote_node remote_pid=~p count=~p ",
-                  [RemotePid, length(OurDump)], F).
+    kiss_long:run_safely("task=send_dump_to_remote_node remote_pid=~p count=~p ",
+                         [RemotePid, length(OurDump)], F).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
@@ -122,16 +125,15 @@ delete_from_remote_nodes([], _Keys) ->
 
 wait_for_updated([Mon | Monitors]) ->
     receive
-        {updated, Mon2} when Mon2 =:= Mon ->
+        {updated, Mon} ->
             wait_for_updated(Monitors);
-        {'DOWN', Mon2, process, _Pid, _Reason} when Mon2 =:= Mon ->
+        {'DOWN', Mon, process, _Pid, _Reason} ->
             wait_for_updated(Monitors)
     end;
 wait_for_updated([]) ->
     ok.
 
 other_servers(Tab) ->
-%   gen_server:call(Tab, get_other_servers).
     kiss_pt:get(Tab).
 
 other_nodes(Tab) ->
@@ -151,8 +153,6 @@ handle_call({remote_just_add_node_to_schema, ServerPid, OtherPids}, _From, State
     handle_remote_just_add_node_to_schema(ServerPid, OtherPids, State);
 handle_call({send_dump_to_remote_node, FromPid, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(FromPid, Dump, State);
-handle_call(get_other_servers, _From, State = #{other_servers := Servers}) ->
-    {reply, Servers, State};
 handle_call({insert, Rec}, _From, State = #{tab := Tab}) ->
     ets:insert(Tab, Rec),
     {reply, ok, State}.
@@ -186,20 +186,22 @@ handle_join(RemotePid, State = #{tab := Tab, other_servers := Servers}) when is_
             {reply, ok, State};
         false ->
             KnownPids = [Pid || {Pid, _} <- Servers],
-            %% TODO can crash
-            case remote_add_node_to_schema(RemotePid, self(), KnownPids) of
+            Self = self(),
+            %% Remote gen_server calls here are "safe"
+            case remote_add_node_to_schema(RemotePid, Self, KnownPids) of
                 {ok, Dump, OtherPids} ->
+                    NewPids = [RemotePid | OtherPids],
                     %% Let all nodes to know each other
-                    [remote_just_add_node_to_schema(Pid, self(), KnownPids) || Pid <- OtherPids],
-                    [remote_just_add_node_to_schema(Pid, self(), [RemotePid | OtherPids]) || Pid <- KnownPids],
-                    Servers2 = lists:usort(start_proxies_for([RemotePid | OtherPids], Servers) ++ Servers),
+                    [remote_just_add_node_to_schema(Pid, Self, KnownPids) || Pid <- OtherPids],
+                    [remote_just_add_node_to_schema(Pid, Self, NewPids) || Pid <- KnownPids],
+                    Servers2 = add_servers(NewPids, Servers),
                     %% Ask our node to replicate data there before applying the dump
                     update_pt(Tab, Servers2),
                     OurDump = dump(Tab),
                     %% Send to all nodes from that partition
-                    [send_dump_to_remote_node(Pid, self(), OurDump) || Pid <- [RemotePid | OtherPids]],
+                    [send_dump_to_remote_node(Pid, Self, OurDump) || Pid <- NewPids],
                     %% Apply to our nodes
-                    [send_dump_to_remote_node(Pid, self(), Dump) || Pid <- KnownPids],
+                    [send_dump_to_remote_node(Pid, Self, Dump) || Pid <- KnownPids],
                     insert_many(Tab, Dump),
                     %% Add ourself into remote schema
                     %% Add remote nodes into our schema
@@ -220,10 +222,13 @@ handle_remote_add_node_to_schema(ServerPid, OtherPids, State = #{tab := Tab}) ->
     end.
 
 handle_remote_just_add_node_to_schema(RemotePid, OtherPids, State = #{tab := Tab, other_servers := Servers}) ->
-    Servers2 = lists:usort(start_proxies_for([RemotePid | OtherPids], Servers) ++ Servers),
+    Servers2 = add_servers([RemotePid | OtherPids], Servers),
     update_pt(Tab, Servers2),
     KnownPids = [Pid || {Pid, _} <- Servers],
     {reply, {ok, KnownPids}, State#{other_servers => Servers2}}.
+
+add_servers(Pids, Servers) ->
+    lists:sort(start_proxies_for(Pids, Servers) ++ Servers).
 
 start_proxies_for([RemotePid | OtherPids], AlreadyAddedNodes)
   when is_pid(RemotePid), RemotePid =/= self() ->
@@ -276,15 +281,9 @@ ets_delete_keys(_Tab, []) ->
 call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
-            try
-                FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
-                kiss_long:run("task=call_user_handle_down table=~p remote_pid=~p remote_node=~p ",
-                              [Tab, RemotePid, node(RemotePid)], FF)
-            catch Class:Error:Stacktrace ->
-                error_logger:error_msg("what=call_user_handle_down_failed table=~p "
-                                       "remote_pid=~p remote_node=~p class=~p reason=~0p stacktrace=~0p",
-                                       [Tab, RemotePid, node(RemotePid), Class, Error, Stacktrace])
-            end;
+            FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
+            kiss_long:run_safely("task=call_user_handle_down table=~p remote_pid=~p remote_node=~p ",
+                                 [Tab, RemotePid, node(RemotePid)], FF);
         _ ->
             ok
     end.
