@@ -1,10 +1,12 @@
 %% Joins table together when a new node appears
 -module(kiss_discovery).
+-behaviour(gen_server).
+
 -export([start/1, start_link/1, add_table/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 
 -type backend_state() :: term().
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
@@ -103,4 +105,4 @@ report_results(Results, _State = #{results := OldResults}) ->
 
 report_result(Map) ->
     Text = [io_lib:format("~0p=~0p ", [K, V]) || {K, V} <- maps:to_list(Map)],
-    error_logger:info_msg("discovery ~s", [Text]).
+    ?LOG_INFO(#{what => discovery_change, result => Text}).

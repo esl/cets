@@ -1,51 +1,49 @@
 -module(kiss_long).
--export([run/3]).
--export([run_safely/3]).
+-export([run/2]).
+-export([run_safely/2]).
 
-run_safely(InfoText, InfoArgs, Fun) ->
-    run(InfoText, InfoArgs, Fun, true).
+-include_lib("kernel/include/logger.hrl").
 
-run(InfoText, InfoArgs, Fun) ->
-    run(InfoText, InfoArgs, Fun, false).
+run_safely(Info, Fun) ->
+    run(Info, Fun, true).
 
-run(InfoText, InfoArgs, Fun, Catch) ->
+run(Info, Fun) ->
+    run(Info, Fun, false).
+
+run(Info, Fun, Catch) ->
     Parent = self(),
     Start = os:timestamp(),
-    error_logger:info_msg("what=long_task_started " ++ InfoText, InfoArgs),
-    Pid = spawn_mon(InfoText, InfoArgs, Parent, Start),
+    ?LOG_INFO(Info#{what => long_task_started}),
+    Pid = spawn_mon(Info, Parent, Start),
     try
             Fun()
         catch Class:Reason:Stacktrace when Catch ->
-            error_logger:info_msg("what=long_task_failed "
-                                  "class=~p reason=~0p stacktrace=~0p " ++ InfoText,
-                                  [Class, Reason, Stacktrace] ++ InfoArgs),
+            ?LOG_INFO(Info#{what => long_task_failed, class => Class,
+                            reason => Reason, stacktrace => Stacktrace}),
             {error, {Class, Reason, Stacktrace}}
         after
             Diff = diff(Start),
-            error_logger:info_msg("what=long_task_finished time=~p ms " ++ InfoText,
-                                  [Diff] ++ InfoArgs),
+            ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
             Pid ! stop
     end.
 
-spawn_mon(InfoText, InfoArgs, Parent, Start) ->
-    spawn_link(fun() -> run_monitor(InfoText, InfoArgs, Parent, Start) end).
+spawn_mon(Info, Parent, Start) ->
+    spawn_link(fun() -> run_monitor(Info, Parent, Start) end).
 
-run_monitor(InfoText, InfoArgs, Parent, Start) ->
+run_monitor(Info, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
-    monitor_loop(Mon, InfoText, InfoArgs, Start).
+    monitor_loop(Mon, Info, Start).
 
-monitor_loop(Mon, InfoText, InfoArgs, Start) ->
+monitor_loop(Mon, Info, Start) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-            error_logger:error_msg("what=long_task_failed reason=~p " ++ InfoText,
-                                   [Reason] ++ InfoArgs),
+            ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
             ok;
         stop -> ok
         after 5000 ->
             Diff = diff(Start),
-            error_logger:info_msg("what=long_task_progress time=~p ms " ++ InfoText,
-                                  [Diff] ++ InfoArgs),
-            monitor_loop(Mon, InfoText, InfoArgs, Start)
+            ?LOG_INFO(Info#{what => long_task_progress, time_ms => Diff}),
+            monitor_loop(Mon, Info, Start)
     end.
 
 diff(Start) ->

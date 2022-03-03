@@ -8,14 +8,16 @@
 -behaviour(kiss_discovery).
 -export([init/1, get_nodes/1]).
 
+-include_lib("kernel/include/logger.hrl").
+
 init(Opts) ->
     Opts.
 
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
-            error_logger:error_msg("what=discovery_failed filename=~0p reason=~0p",
-                                   [Filename, Reason]),
+            ?LOG_ERROR(#{what => discovery_failed,
+                         filename => Filename, reason => Reason}),
             {{error, Reason}, State};
         {ok, Text} ->
             Lines = binary:split(Text, [<<"\r">>, <<"\n">>, <<" ">>], [global]),
