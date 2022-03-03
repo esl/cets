@@ -185,39 +185,47 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-handle_join(RemotePid, State = #{tab := Tab, other_servers := Servers}) when is_pid(RemotePid) ->
+handle_join(RemotePid, State = #{other_servers := Servers}) when is_pid(RemotePid) ->
     case has_remote_pid(RemotePid, Servers) of
         true ->
             %% Already added
             {reply, ok, State};
         false ->
-            KnownPids = servers_to_pids(Servers),
-            Self = self(),
-            %% Remote gen_server calls here are "safe"
-            case remote_add_node_to_schema(RemotePid, Self, KnownPids, true) of
-                {ok, Dump, OtherPids} ->
-                    NewPids = [RemotePid | OtherPids],
-                    %% Let all nodes to know each other
-                    [remote_add_node_to_schema(Pid, Self, KnownPids, false) || Pid <- OtherPids],
-                    [remote_add_node_to_schema(Pid, Self, NewPids, false) || Pid <- KnownPids],
-                    Servers2 = add_servers(NewPids, Servers),
-                    %% Ask our node to replicate data there before applying the dump
-                    kiss_pt:put(Tab, Servers2),
-                    OurDump = dump(Tab),
-                    %% Send to all nodes from that partition
-                    [send_dump_to_remote_node(Pid, Self, OurDump) || Pid <- NewPids],
-                    %% Apply to our nodes
-                    [send_dump_to_remote_node(Pid, Self, Dump) || Pid <- KnownPids],
-                    ets:insert(Tab, Dump),
-                    %% Add ourself into remote schema
-                    %% Add remote nodes into our schema
-                    %% Copy from our node / Copy into our node
-                    {reply, ok, State#{other_servers => Servers2}};
-               Other ->
-                    ?LOG_ERROR(#{what => remote_add_node_to_schema, reason => Other}),
-                    {reply, {error, remote_add_node_to_schema_failed}, State}
-            end
+            handle_join2(RemotePid, State)
     end.
+
+handle_join2(RemotePid, State = #{other_servers := Servers}) ->
+    KnownPids = servers_to_pids(Servers),
+    %% Remote gen_server calls here are "safe"
+    case remote_add_node_to_schema(RemotePid, self(), KnownPids, true) of
+        {ok, Dump, OtherPids} ->
+            handle_join3(RemotePid, Dump, OtherPids, KnownPids, State);
+       Other ->
+            ?LOG_ERROR(#{what => remote_add_node_to_schema, reason => Other}),
+            {reply, {error, remote_add_node_to_schema_failed}, State}
+    end.
+
+handle_join3(RemotePid, Dump, OtherPids, KnownPids,
+             State = #{tab := Tab, other_servers := Servers}) ->
+    Self = self(),
+    NewPids = [RemotePid | OtherPids],
+    %% Let all nodes to know each other
+    [remote_add_node_to_schema(Pid, Self, KnownPids, false) || Pid <- OtherPids],
+    [remote_add_node_to_schema(Pid, Self, NewPids, false) || Pid <- KnownPids],
+    Servers2 = add_servers(NewPids, Servers),
+    %% Ask our node to replicate data there before applying the dump
+    kiss_pt:put(Tab, Servers2),
+    OurDump = dump(Tab),
+    %% A race condition is possible: when the remote node inserts a deleted record
+    %% Send to all nodes from that partition
+    [send_dump_to_remote_node(Pid, Self, OurDump) || Pid <- NewPids],
+    %% Apply to our nodes
+    [send_dump_to_remote_node(Pid, Self, Dump) || Pid <- KnownPids],
+    ets:insert(Tab, Dump),
+    %% Add ourself into remote schema
+    %% Add remote nodes into our schema
+    %% Copy from our node / Copy into our node
+    {reply, ok, State#{other_servers => Servers2}}.
 
 handle_remote_add_node_to_schema(RemotePid, OtherPids, ReturnDump,
                                  State = #{tab := Tab, other_servers := Servers}) ->
