@@ -1,9 +1,4 @@
-%% AWS autodiscovery is kinda bad.
-%% - UDP broadcasts do not work
-%% - AWS CLI needs access
-%% - DNS does not allow to list subdomains
-%% So, we use a file with nodes to connect as a discovery mechanism
-%% (so, you can hardcode nodes or use your method of filling it)
+%% Joins table together when a new node appears
 -module(kiss_discovery).
 -export([start/1, start_link/1, add_table/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -11,31 +6,38 @@
 
 -behaviour(gen_server).
 
-%% disco_file
-%% tables
+-type backend_state() :: term().
+-type get_nodes_result() :: {ok, [node()]} | {error, term()}.
+
+-callback init(map()) -> backend_state().
+-callback get_nodes(backend_state()) -> {get_nodes_result(), backend_state()}.
+
 start(Opts) ->
     start_common(start, Opts).
 
 start_link(Opts) ->
     start_common(start_link, Opts).
 
-start_common(F, Opts = #{disco_file := _}) ->
+start_common(F, Opts) ->
     Args =
         case Opts of
             #{name := Name} ->
-                [{local, Name}, ?MODULE, [Opts], []];
+                [{local, Name}, ?MODULE, Opts, []];
             _ ->
-                [?MODULE, [Opts], []]
+                [?MODULE, Opts, []]
         end,
     apply(gen_server, F, Args).
 
 add_table(Server, Table) ->
     gen_server:call(Server, {add_table, Table}).
 
-init([Opts]) ->
+init(Opts) ->
+    Mod = maps:get(backend_module, Opts, kiss_discovery_file),
     self() ! check,
     Tables = maps:get(tables, Opts, []),
-    {ok, Opts#{results => [], tables => Tables}}.
+    BackendState = Mod:init(Opts),
+    {ok, #{results => [], tables => Tables,
+           backend_module => Mod, backend_state => BackendState}}.
 
 handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
     case lists:member(Table, Tables) of
@@ -48,7 +50,7 @@ handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
 handle_call(_Reply, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(Msg, State) ->
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(check, State) ->
@@ -63,31 +65,27 @@ code_change(_OldVsn, State, _Extra) ->
 handle_check(State = #{tables := []}) ->
     %% No tables to track, skip
     schedule_check(State);
-handle_check(State = #{disco_file := Filename, tables := Tables}) ->
-    State2 = case file:read_file(Filename) of
-                 {error, Reason} ->
-                     error_logger:error_msg("what=discovery_failed filename=~0p reason=~0p",
-                                            [Filename, Reason]),
-                     State;
-                 {ok, Text} ->
-                     Lines = binary:split(Text, [<<"\r">>, <<"\n">>, <<" ">>], [global]),
-                     Nodes = [binary_to_atom(X, latin1) || X <- Lines, X =/= <<>>],
-                     Results = [do_join(Tab, Node) || Tab <- Tables, Node <- Nodes, node() =/= Node],
-                     report_results(Results, State),
-                     State#{results => Results}
-             end,
-    schedule_check(State2).
+handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
+    {Res, BackendState2} = Mod:get_nodes(BackendState),
+    State2 = handle_get_nodes_result(Res, State),
+    schedule_check(State2#{backend_state => BackendState2}).
+
+handle_get_nodes_result({error, _Reason}, State) ->
+    State;
+handle_get_nodes_result({ok, Nodes}, State = #{tables := Tables}) ->
+    Results = [do_join(Tab, Node) || Tab <- Tables, Node <- Nodes, node() =/= Node],
+    report_results(Results, State),
+    State#{results => Results}.
 
 schedule_check(State) ->
-    case State of
-        #{timer_ref := OldRef} ->
-            erlang:cancel_timer(OldRef);
-        _ ->
-            ok
-    end,
+    cancel_old_timer(State),
     TimerRef = erlang:send_after(5000, self(), check),
     State#{timer_ref => TimerRef}.
 
+cancel_old_timer(#{timer_ref := OldRef}) ->
+    erlang:cancel_timer(OldRef);
+cancel_old_timer(_State) ->
+    ok.
 
 do_join(Tab, Node) ->
     %% That would trigger autoconnect for the first time
@@ -99,9 +97,9 @@ do_join(Tab, Node) ->
             #{what => pid_not_found, reason => Other, node => Node, table => Tab}
     end.
 
-report_results(Results, State = #{results := OldResults}) ->
+report_results(Results, _State = #{results := OldResults}) ->
     Changed = Results -- OldResults,
-    [report_result(Result) || Result <- Results].
+    [report_result(Result) || Result <- Changed].
 
 report_result(Map) ->
     Text = [io_lib:format("~0p=~0p ", [K, V]) || {K, V} <- maps:to_list(Map)],
