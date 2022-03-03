@@ -11,12 +11,14 @@
 
 %% We don't use monitors to avoid round-trips (that's why we don't use calls neither)
 -module(kiss).
+-behaviour(gen_server).
+
 -export([start/2, stop/1, dump/1, insert/2, delete/2, delete_many/2, join/3, other_nodes/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 
 %% Table and server has the same name
 %% Opts:
@@ -46,8 +48,8 @@ join(LockKey, Tab, RemotePid) when is_pid(RemotePid) ->
         false ->
                 Start = os:timestamp(),
                 F = fun() -> join_loop(LockKey, Tab, RemotePid, Start) end,
-                kiss_long:run("task=join table=~p remote_pid=~p remote_node=~p ",
-                              [Tab, RemotePid, node(RemotePid)], F)
+                kiss_long:run(#{task => join, table => Tab, remote_pid => RemotePid,
+                                remote_node => node(RemotePid)}, F)
     end.
 
 join_loop(LockKey, Tab, RemotePid, Start) ->
@@ -58,7 +60,7 @@ join_loop(LockKey, Tab, RemotePid, Start) ->
         Diff = timer:now_diff(os:timestamp(), Start) div 1000,
         %% Getting the lock could take really long time in case nodes are
         %% overloaded or joining is already in progress on another node
-        error_logger:info_msg("what=join_got_lock table=~p after_time=~p ms", [Tab, Diff]),
+        ?LOG_INFO(#{what => join_got_lock, table => Tab, after_time_ms => Diff}),
         gen_server:call(Tab, {join, RemotePid}, infinity)
         end,
     LockRequest = {LockKey, self()},
@@ -67,7 +69,7 @@ join_loop(LockKey, Tab, RemotePid, Start) ->
     Retries = 1,
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
-            error_logger:error_msg("what=join_retry reason=lock_aborted", []),
+            ?LOG_ERROR(#{what => join_retry, reason => lock_aborted}),
             join_loop(LockKey, Tab, RemotePid, Start);
         Result ->
             Result
@@ -75,20 +77,25 @@ join_loop(LockKey, Tab, RemotePid, Start) ->
 
 remote_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
     F = fun() -> gen_server:call(RemotePid, {remote_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
-    kiss_long:run_safely("task=remote_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
-                         [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
+    Info = #{task => remote_add_node_to_schema,
+             remote_pid => RemotePid, remote_node => node(RemotePid),
+             other_pids => OtherPids, other_nodes => pids_to_nodes(OtherPids)},
+    kiss_long:run_safely(Info, F).
 
 remote_just_add_node_to_schema(RemotePid, ServerPid, OtherPids) ->
     F = fun() -> gen_server:call(RemotePid, {remote_just_add_node_to_schema, ServerPid, OtherPids}, infinity) end,
-    kiss_long:run_safely("task=remote_just_add_node_to_schema remote_pid=~p remote_node=~p other_pids=~0p other_nodes=~0p ",
-                         [RemotePid, node(RemotePid), OtherPids, pids_to_nodes(OtherPids)], F).
+    Info = #{task => remote_just_add_node_to_schema,
+             remote_pid => RemotePid, remote_node => node(RemotePid),
+             other_pids => OtherPids, other_nodes => pids_to_nodes(OtherPids)},
+    kiss_long:run_safely(Info, F).
 
 send_dump_to_remote_node(_RemotePid, _FromPid, []) ->
     skipped;
 send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
     F = fun() -> gen_server:call(RemotePid, {send_dump_to_remote_node, FromPid, OurDump}, infinity) end,
-    kiss_long:run_safely("task=send_dump_to_remote_node remote_pid=~p count=~p ",
-                         [RemotePid, length(OurDump)], F).
+    Info = #{task => send_dump_to_remote_node,
+             remote_pid => RemotePid, count => length(OurDump)},
+    kiss_long:run_safely(Info, F).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
@@ -101,7 +108,8 @@ insert(Tab, Rec) ->
 
 insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec) ->
     Mon = erlang:monitor(process, ProxyPid),
-    erlang:send(RemotePid, {insert_from_remote_node, Mon, self(), Rec}, [noconnect, nosuspend]),
+    Msg = {insert_from_remote_node, Mon, self(), Rec},
+    send_to_remote(RemotePid, Msg),
     [Mon | insert_to_remote_nodes(Servers, Rec)];
 insert_to_remote_nodes([], _Rec) ->
     [].
@@ -118,10 +126,14 @@ delete_many(Tab, Keys) ->
 
 delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys) ->
     Mon = erlang:monitor(process, ProxyPid),
-    erlang:send(RemotePid, {delete_from_remote_node, Mon, self(), Keys}, [noconnect, nosuspend]),
+    Msg = {delete_from_remote_node, Mon, self(), Keys},
+    send_to_remote(RemotePid, Msg),
     [Mon | delete_from_remote_nodes(Servers, Keys)];
 delete_from_remote_nodes([], _Keys) ->
     [].
+
+send_to_remote(RemotePid, Msg) ->
+    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
 wait_for_updated([Mon | Monitors]) ->
     receive
@@ -208,7 +220,7 @@ handle_join(RemotePid, State = #{tab := Tab, other_servers := Servers}) when is_
                     %% Copy from our node / Copy into our node
                     {reply, ok, State#{other_servers => Servers2}};
                Other ->
-                    error_logger:error_msg("remote_add_node_to_schema failed ~p", [Other]),
+                    ?LOG_ERROR(#{what => remote_add_node_to_schema, reason => Other}),
                     {reply, {error, remote_add_node_to_schema_failed}, State}
             end
     end.
@@ -238,7 +250,8 @@ start_proxies_for([RemotePid | OtherPids], AlreadyAddedNodes)
             erlang:monitor(process, ProxyPid),
             [{RemotePid, ProxyPid} | start_proxies_for(OtherPids, AlreadyAddedNodes)];
         true ->
-            error_logger:info_msg("what=already_added remote_pid=~p node=~p", [RemotePid, node(RemotePid)]),
+            ?LOG_INFO(#{what => already_added,
+                        remote_pid => RemotePid, remote_node => node(RemotePid)}),
             start_proxies_for(OtherPids, AlreadyAddedNodes)
     end;
 start_proxies_for([], _AlreadyAddedNodes) ->
@@ -260,7 +273,7 @@ handle_down(ProxyPid, State = #{tab := Tab, other_servers := Servers}) ->
             {noreply, State#{other_servers => Servers2}};
         false ->
             %% This should not happen
-            error_logger:error_msg("handle_down failed proxy_pid=~p state=~0p", [ProxyPid, State]),
+            ?LOG_ERROR(#{what => handle_down_failed, proxy_pid => ProxyPid, state => State}),
             {noreply, State}
     end.
 
@@ -282,8 +295,9 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
             FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
-            kiss_long:run_safely("task=call_user_handle_down table=~p remote_pid=~p remote_node=~p ",
-                                 [Tab, RemotePid, node(RemotePid)], FF);
+            Info = #{task => call_user_handle_down, table => Tab,
+                     remote_pid => RemotePid, remote_node => node(RemotePid)},
+            kiss_long:run_safely(Info, FF);
         _ ->
             ok
     end.
