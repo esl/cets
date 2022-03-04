@@ -41,10 +41,7 @@ dump(Tab) ->
     ets:tab2list(Tab).
 
 remote_dump(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, remote_dump, infinity) end,
-    Info = #{task => remote_dump,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+    short_call(RemotePid, remote_dump).
 
 send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
     Msg = {send_dump_to_remote_node, NewPids, OurDump},
@@ -81,32 +78,26 @@ other_servers(Server) ->
     gen_server:call(Server, other_servers).
 
 other_nodes(Server) ->
-    lists:usort(pids_to_nodes(servers_to_pids(other_servers(Server)))).
+    lists:usort(pids_to_nodes(other_pids(Server))).
 
 other_pids(Server) ->
     servers_to_pids(other_servers(Server)).
 
 pause(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, pause, infinity) end,
-    Info = #{task => pause,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+    short_call(RemotePid, pause).
 
 unpause(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, unpause, infinity) end,
-    Info = #{task => unpause,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+    short_call(RemotePid, unpause).
 
 sync(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, sync, infinity) end,
-    Info = #{task => sync,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+    short_call(RemotePid, sync).
 
 ping(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, ping, infinity) end,
-    Info = #{task => ping,
+    short_call(RemotePid, ping).
+
+short_call(RemotePid, Msg) ->
+    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
+    Info = #{task => Msg,
              remote_pid => RemotePid, remote_node => node(RemotePid)},
     kiss_long:run_safely(Info, F).
 
@@ -242,7 +233,7 @@ insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec, FromPid) ->
     %% Reply would be routed directly to FromPid
     Msg = {insert_from_remote_node, Mon, FromPid, Rec},
     send_to_remote(RemotePid, Msg),
-    [Mon|insert_to_remote_nodes(Servers, Rec, FromPid)];
+    [Mon | insert_to_remote_nodes(Servers, Rec, FromPid)];
 insert_to_remote_nodes([], _Rec, _FromPid) ->
     [].
 
@@ -257,7 +248,7 @@ delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys, FromPid) ->
     %% Reply would be routed directly to FromPid
     Msg = {delete_from_remote_node, Mon, FromPid, Keys},
     send_to_remote(RemotePid, Msg),
-    [Mon|delete_from_remote_nodes(Servers, Keys, FromPid)];
+    [Mon | delete_from_remote_nodes(Servers, Keys, FromPid)];
 delete_from_remote_nodes([], _Keys, _FromPid) ->
     [].
 
