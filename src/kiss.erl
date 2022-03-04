@@ -107,20 +107,19 @@ init([Tab, Opts]) ->
     {ok, #{tab => Tab, other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
 
-
 handle_call({insert, Rec}, From, State = #{paused := false}) ->
     handle_insert(Rec, From, State);
 handle_call({delete, Keys}, From, State = #{paused := false}) ->
     handle_delete(Keys, From, State);
-handle_call(remote_dump, _From, State = #{tab := Tab}) ->
-    {reply, {ok, dump(Tab)}, State};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
-handle_call(sync, _From, State) ->
-    handle_sync(State),
+handle_call(sync, _From, State = #{other_servers := Servers}) ->
+    [ping(Pid) || Pid <- servers_to_pids(Servers)],
     {reply, ok, State};
 handle_call(ping, _From, State) ->
     {reply, ping, State};
+handle_call(remote_dump, _From, State = #{tab := Tab}) ->
+    {reply, {ok, dump(Tab)}, State};
 handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State) ->
@@ -259,7 +258,3 @@ handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
     State2 = State#{pause => false, backlog := [], pause_monitor => undefined},
     {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
-
-handle_sync(#{other_servers := Servers}) ->
-    [ping(Pid) || Pid <- servers_to_pids(Servers)],
-    ok.
