@@ -90,10 +90,11 @@ cancel_old_timer(_State) ->
     ok.
 
 do_join(Tab, Node) ->
+    LocalPid = whereis(Tab),
     %% That would trigger autoconnect for the first time
     case rpc:call(Node, erlang, whereis, [Tab]) of
-        Pid when is_pid(Pid) ->
-            Result = kiss:join(kiss_discovery, Tab, Pid),
+        Pid when is_pid(Pid), is_pid(LocalPid) ->
+            Result = kiss_join:join(kiss_discovery, #{table => Tab}, LocalPid, Pid),
             #{what => join_result, result => Result, node => Node, table => Tab};
         Other ->
             #{what => pid_not_found, reason => Other, node => Node, table => Tab}

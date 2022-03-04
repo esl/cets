@@ -13,7 +13,10 @@
 -module(kiss).
 -behaviour(gen_server).
 
--export([start/2, stop/1, dump/1, insert/2, delete/2, delete_many/2, join/3, other_nodes/1]).
+-export([start/2, stop/1, insert/2, delete/2, delete_many/2]).
+-export([dump/1, remote_dump/1, send_dump_to_remote_node/3]).
+-export([other_nodes/1, other_pids/1]).
+-export([pause/1, unpause/1, sync/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -37,63 +40,14 @@ stop(Tab) ->
 dump(Tab) ->
     ets:tab2list(Tab).
 
-%% Adds a node to a cluster.
-%% Writes from other nodes would wait for join completion.
-%% LockKey should be the same on all nodes.
-join(LockKey, Tab, RemotePid) when is_pid(RemotePid) ->
-    Servers = other_servers(Tab),
-    case lists:keymember(RemotePid, 1, Servers) of
-        true ->
-            {error, already_joined};
-        false ->
-                Start = os:timestamp(),
-                F = fun() -> join_loop(LockKey, Tab, RemotePid, Start) end,
-                kiss_long:run(#{task => join, table => Tab,
-                                remote_pid => RemotePid,
-                                remote_node => node(RemotePid)}, F)
-    end.
-
-join_loop(LockKey, Tab, RemotePid, Start) ->
-    %% Only one join at a time:
-    %% - for performance reasons, we don't want to cause too much load for active nodes
-    %% - to avoid deadlocks, because joining does gen_server calls
-    F = fun() ->
-        Diff = timer:now_diff(os:timestamp(), Start) div 1000,
-        %% Getting the lock could take really long time in case nodes are
-        %% overloaded or joining is already in progress on another node
-        ?LOG_INFO(#{what => join_got_lock, table => Tab, after_time_ms => Diff}),
-        gen_server:call(Tab, {join, RemotePid}, infinity)
-        end,
-    LockRequest = {LockKey, self()},
-    %% Just lock all nodes, no magic here :)
-    Nodes = [node() | nodes()],
-    Retries = 1,
-    case global:trans(LockRequest, F, Nodes, Retries) of
-        aborted ->
-            ?LOG_ERROR(#{what => join_retry, reason => lock_aborted}),
-            join_loop(LockKey, Tab, RemotePid, Start);
-        Result ->
-            Result
-    end.
-
-remote_add_node_to_schema(RemotePid, ServerPid, OtherPids, ReturnDump) ->
-    Msg = {remote_add_node_to_schema, ServerPid, OtherPids, ReturnDump},
-    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
-    Info = #{task => remote_add_node_to_schema, return_dump => ReturnDump,
-             remote_pid => RemotePid, remote_node => node(RemotePid),
-             other_pids => OtherPids, other_nodes => pids_to_nodes(OtherPids)},
-    kiss_long:run_safely(Info, F).
-
-get_other_pids(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, get_other_pids, infinity) end,
-    Info = #{task => get_other_pids,
+remote_dump(RemotePid) ->
+    F = fun() -> gen_server:call(RemotePid, remote_dump, infinity) end,
+    Info = #{task => remote_dump,
              remote_pid => RemotePid, remote_node => node(RemotePid)},
     kiss_long:run_safely(Info, F).
 
-send_dump_to_remote_node(_RemotePid, _FromPid, []) ->
-    skipped;
-send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
-    Msg = {send_dump_to_remote_node, FromPid, OurDump},
+send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
+    Msg = {send_dump_to_remote_node, NewPids, OurDump},
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
     Info = #{task => send_dump_to_remote_node,
              remote_pid => RemotePid, count => length(OurDump)},
@@ -126,8 +80,11 @@ wait_for_updated([]) ->
 other_servers(Server) ->
     gen_server:call(Server, other_servers).
 
-other_nodes(Tab) ->
-    lists:usort(pids_to_nodes(servers_to_pids(other_servers(Tab)))).
+other_nodes(Server) ->
+    lists:usort(pids_to_nodes(servers_to_pids(other_servers(Server)))).
+
+other_pids(Server) ->
+    servers_to_pids(other_servers(Server)).
 
 pause(RemotePid) ->
     F = fun() -> gen_server:call(RemotePid, pause, infinity) end,
@@ -141,22 +98,35 @@ unpause(RemotePid) ->
              remote_pid => RemotePid, remote_node => node(RemotePid)},
     kiss_long:run_safely(Info, F).
 
+sync(RemotePid) ->
+    F = fun() -> gen_server:call(RemotePid, sync, infinity) end,
+    Info = #{task => sync,
+             remote_pid => RemotePid, remote_node => node(RemotePid)},
+    kiss_long:run_safely(Info, F).
+
+ping(RemotePid) ->
+    F = fun() -> gen_server:call(RemotePid, ping, infinity) end,
+    Info = #{task => ping,
+             remote_pid => RemotePid, remote_node => node(RemotePid)},
+    kiss_long:run_safely(Info, F).
+
 init([Tab, Opts]) ->
     ets:new(Tab, [ordered_set, named_table,
                   public, {read_concurrency, true}]),
     {ok, #{tab => Tab, other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
 
+handle_call(remote_dump, _From, State = #{tab := Tab}) ->
+    {reply, {ok, dump(Tab)}, State};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
-handle_call(get_other_pids, _From, State = #{other_servers := Servers}) ->
-    {reply, {ok, servers_to_pids(Servers)}, State};
-handle_call({join, RemotePid}, _From, State) ->
-    handle_join(RemotePid, State);
-handle_call({remote_add_node_to_schema, ServerPid, OtherPids, ReturnDump}, _From, State) ->
-    handle_remote_add_node_to_schema(ServerPid, OtherPids, ReturnDump, State);
-handle_call({send_dump_to_remote_node, FromPid, Dump}, _From, State) ->
-    handle_send_dump_to_remote_node(FromPid, Dump, State);
+handle_call(sync, _From, State) ->
+    handle_sync(State),
+    {reply, ok, State};
+handle_call(ping, _From, State) ->
+    {reply, ping, State};
+handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
+    handle_send_dump_to_remote_node(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State) ->
     Mon = erlang:monitor(process, FromPid),
     {reply, ok, State#{pause => true, pause_monitor => Mon}};
@@ -189,73 +159,10 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-handle_join(RemotePid, State = #{other_servers := Servers}) when is_pid(RemotePid) ->
-    case has_remote_pid(RemotePid, Servers) of
-        true ->
-            %% Already added
-            {reply, ok, State};
-        false ->
-            handle_join2(RemotePid, State)
-    end.
-
-handle_join2(RemotePid, State = #{other_servers := Servers}) ->
-    KnownPids = servers_to_pids(Servers),
-    case get_other_pids(RemotePid) of
-        {ok, OtherPids} ->
-            AllPids = KnownPids ++ OtherPids,
-            [pause(Pid) || Pid <- AllPids],
-            try
-                handle_join3(RemotePid, OtherPids, KnownPids, State)
-            after
-                [unpause(Pid) || Pid <- AllPids]
-            end;
-       Other ->
-            ?LOG_ERROR(#{what => get_other_pids_failed, reason => Other}),
-            {reply, {error, get_other_pids_failed}, State}
-    end.
-
-handle_join3(RemotePid, OtherPids, KnownPids, State) ->
-    %% Remote gen_server calls here are "safe"
-    case remote_add_node_to_schema(RemotePid, self(), KnownPids, true) of
-        {ok, Dump, OtherPids} ->
-            handle_join4(RemotePid, Dump, OtherPids, KnownPids, State);
-       Other ->
-            ?LOG_ERROR(#{what => remote_add_node_to_schema, reason => Other}),
-            {reply, {error, remote_add_node_to_schema_failed}, State}
-    end.
-
-handle_join4(RemotePid, Dump, OtherPids, KnownPids,
-             State = #{tab := Tab, other_servers := Servers}) ->
-    Self = self(),
-    NewPids = [RemotePid | OtherPids],
-    %% Let all nodes to know each other
-    [remote_add_node_to_schema(Pid, Self, KnownPids, false) || Pid <- OtherPids],
-    [remote_add_node_to_schema(Pid, Self, NewPids, false) || Pid <- KnownPids],
+handle_send_dump_to_remote_node(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+    ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    %% Ask our node to replicate data there before applying the dump
-    OurDump = dump(Tab),
-    %% A race condition is possible: when the remote node inserts a deleted record
-    %% Send to all nodes from that partition
-    [send_dump_to_remote_node(Pid, Self, OurDump) || Pid <- NewPids],
-    %% Apply to our nodes
-    [send_dump_to_remote_node(Pid, Self, Dump) || Pid <- KnownPids],
-    ets:insert(Tab, Dump),
-    %% Add ourself into remote schema
-    %% Add remote nodes into our schema
-    %% Copy from our node / Copy into our node
     {reply, ok, State#{other_servers => Servers2}}.
-
-handle_remote_add_node_to_schema(RemotePid, OtherPids, ReturnDump,
-                                 State = #{tab := Tab, other_servers := Servers}) ->
-    Servers2 = add_servers([RemotePid | OtherPids], Servers),
-    KnownPids = servers_to_pids(Servers),
-    Dump = case ReturnDump of true -> dump(Tab); false -> not_requested end,
-    {reply, {ok, Dump, KnownPids}, State#{other_servers => Servers2}}.
-
-handle_send_dump_to_remote_node(_FromPid, Dump, State = #{tab := Tab}) ->
-    ets:insert(Tab, Dump),
-    {reply, ok, State}.
 
 handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
     ?LOG_ERROR(#{what => pause_owner_crashed, state => State, paused_by_pid => PausedByPid}),
@@ -368,4 +275,8 @@ handle_unpause(State = #{pause := false}) ->
 handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
     State2 = State#{pause => false, backlog := [], pause_monitor => undefined},
-    {reply, ok, apply_backlog(Backlog, State2)}.
+    {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
+
+handle_sync(#{other_servers := Servers}) ->
+    [ping(Pid) || Pid <- servers_to_pids(Servers)],
+    ok.
