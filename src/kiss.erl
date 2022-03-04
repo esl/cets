@@ -95,41 +95,17 @@ send_dump_to_remote_node(RemotePid, FromPid, OurDump) ->
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
-insert(Tab, Rec) ->
-    Servers = other_servers(Tab),
-    ets:insert(Tab, Rec),
-    %% Insert to other nodes and block till written
-    Monitors = insert_to_remote_nodes(Servers, Rec),
+insert(Server, Rec) ->
+    {ok, Monitors} = gen_server:call(Server, {insert, Rec}),
     wait_for_updated(Monitors).
-
-insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec) ->
-    Mon = erlang:monitor(process, ProxyPid),
-    Msg = {insert_from_remote_node, Mon, self(), Rec},
-    send_to_remote(RemotePid, Msg),
-    [Mon | insert_to_remote_nodes(Servers, Rec)];
-insert_to_remote_nodes([], _Rec) ->
-    [].
 
 delete(Tab, Key) ->
     delete_many(Tab, [Key]).
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
-delete_many(Tab, Keys) ->
-    Servers = other_servers(Tab),
-    ets_delete_keys(Tab, Keys),
-    Monitors = delete_from_remote_nodes(Servers, Keys),
+delete_many(Server, Keys) ->
+    {ok, Monitors} = gen_server:call(Server, {delete, Keys}),
     wait_for_updated(Monitors).
-
-delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys) ->
-    Mon = erlang:monitor(process, ProxyPid),
-    Msg = {delete_from_remote_node, Mon, self(), Keys},
-    send_to_remote(RemotePid, Msg),
-    [Mon | delete_from_remote_nodes(Servers, Keys)];
-delete_from_remote_nodes([], _Keys) ->
-    [].
-
-send_to_remote(RemotePid, Msg) ->
-    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
 wait_for_updated([Mon | Monitors]) ->
     receive
@@ -159,9 +135,10 @@ handle_call({remote_add_node_to_schema, ServerPid, OtherPids, ReturnDump}, _From
     handle_remote_add_node_to_schema(ServerPid, OtherPids, ReturnDump, State);
 handle_call({send_dump_to_remote_node, FromPid, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(FromPid, Dump, State);
-handle_call({insert, Rec}, _From, State = #{tab := Tab}) ->
-    ets:insert(Tab, Rec),
-    {reply, ok, State}.
+handle_call({insert, Rec}, From, State) ->
+    handle_insert(Rec, From, State);
+handle_call({delete, Keys}, From, State) ->
+    handle_delete(Keys, From, State).
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -300,3 +277,36 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
 reply_updated(Pid, Mon) ->
     %% We really don't wanna block this process
     erlang:send(Pid, {updated, Mon}, [noconnect, nosuspend]).
+
+send_to_remote(RemotePid, Msg) ->
+    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
+
+handle_insert(Rec, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
+    ets:insert(Tab, Rec),
+    %% Insert to other nodes and block till written
+    Monitors = insert_to_remote_nodes(Servers, Rec, FromPid),
+    {reply, {ok, Monitors}, State}.
+
+insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec, FromPid) ->
+    Mon = erlang:monitor(process, ProxyPid),
+    %% Reply would be routed directly to FromPid
+    Msg = {insert_from_remote_node, Mon, FromPid, Rec},
+    send_to_remote(RemotePid, Msg),
+    [Mon|insert_to_remote_nodes(Servers, Rec, FromPid)];
+insert_to_remote_nodes([], _Rec, _FromPid) ->
+    [].
+
+handle_delete(Keys, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
+    ets_delete_keys(Tab, Keys),
+    %% Insert to other nodes and block till written
+    Monitors = delete_from_remote_nodes(Servers, Keys, FromPid),
+    {reply, {ok, Monitors}, State}.
+
+delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys, FromPid) ->
+    Mon = erlang:monitor(process, ProxyPid),
+    %% Reply would be routed directly to FromPid
+    Msg = {delete_from_remote_node, Mon, FromPid, Keys},
+    send_to_remote(RemotePid, Msg),
+    [Mon|delete_from_remote_nodes(Servers, Keys, FromPid)];
+delete_from_remote_nodes([], _Keys, _FromPid) ->
+    [].
