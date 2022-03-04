@@ -117,8 +117,8 @@ wait_for_updated([Mon | Monitors]) ->
 wait_for_updated([]) ->
     ok.
 
-other_servers(Tab) ->
-    kiss_pt:get(Tab).
+other_servers(Server) ->
+    gen_server:call(Server, other_servers).
 
 other_nodes(Tab) ->
     lists:usort(pids_to_nodes(servers_to_pids(other_servers(Tab)))).
@@ -126,9 +126,10 @@ other_nodes(Tab) ->
 init([Tab, Opts]) ->
     ets:new(Tab, [ordered_set, named_table,
                   public, {read_concurrency, true}]),
-    kiss_pt:put(Tab, []),
     {ok, #{tab => Tab, other_servers => [], opts => Opts}}.
 
+handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
+    {reply, Servers, State};
 handle_call({join, RemotePid}, _From, State) ->
     handle_join(RemotePid, State);
 handle_call({remote_add_node_to_schema, ServerPid, OtherPids, ReturnDump}, _From, State) ->
@@ -154,8 +155,7 @@ handle_info({delete_from_remote_node, Mon, Pid, Keys}, State = #{tab := Tab}) ->
     reply_updated(Pid, Mon),
     {noreply, State}.
 
-terminate(_Reason, _State = #{tab := Tab}) ->
-    kiss_pt:put(Tab, []),
+terminate(_Reason, _State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -191,7 +191,6 @@ handle_join3(RemotePid, Dump, OtherPids, KnownPids,
     [remote_add_node_to_schema(Pid, Self, NewPids, false) || Pid <- KnownPids],
     Servers2 = add_servers(NewPids, Servers),
     %% Ask our node to replicate data there before applying the dump
-    kiss_pt:put(Tab, Servers2),
     OurDump = dump(Tab),
     %% A race condition is possible: when the remote node inserts a deleted record
     %% Send to all nodes from that partition
@@ -207,7 +206,6 @@ handle_join3(RemotePid, Dump, OtherPids, KnownPids,
 handle_remote_add_node_to_schema(RemotePid, OtherPids, ReturnDump,
                                  State = #{tab := Tab, other_servers := Servers}) ->
     Servers2 = add_servers([RemotePid | OtherPids], Servers),
-    kiss_pt:put(Tab, Servers2),
     KnownPids = servers_to_pids(Servers),
     Dump = case ReturnDump of true -> dump(Tab); false -> not_requested end,
     {reply, {ok, Dump, KnownPids}, State#{other_servers => Servers2}}.
@@ -216,11 +214,10 @@ handle_send_dump_to_remote_node(_FromPid, Dump, State = #{tab := Tab}) ->
     ets:insert(Tab, Dump),
     {reply, ok, State}.
 
-handle_down(ProxyPid, State = #{tab := Tab, other_servers := Servers}) ->
+handle_down(ProxyPid, State = #{other_servers := Servers}) ->
     case lists:keytake(ProxyPid, 2, Servers) of
         {value, {RemotePid, _}, Servers2} ->
             %% Down from a proxy
-            kiss_pt:put(Tab, Servers2),
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers => Servers2}};
         false ->
