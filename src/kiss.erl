@@ -17,11 +17,12 @@
 -export([dump/1, remote_dump/1, send_dump_to_remote_node/3]).
 -export([other_nodes/1, other_pids/1]).
 -export([pause/1, unpause/1, sync/1]).
-
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -include_lib("kernel/include/logger.hrl").
+
+%% API functions
 
 %% Table and server has the same name
 %% Opts:
@@ -40,8 +41,8 @@ stop(Tab) ->
 dump(Tab) ->
     ets:tab2list(Tab).
 
-remote_dump(RemotePid) ->
-    short_call(RemotePid, remote_dump).
+remote_dump(Pid) ->
+    short_call(Pid, remote_dump).
 
 send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
     Msg = {send_dump_to_remote_node, NewPids, OurDump},
@@ -64,16 +65,6 @@ delete_many(Server, Keys) ->
     {ok, Monitors} = gen_server:call(Server, {delete, Keys}),
     wait_for_updated(Monitors).
 
-wait_for_updated([Mon | Monitors]) ->
-    receive
-        {updated, Mon} ->
-            wait_for_updated(Monitors);
-        {'DOWN', Mon, process, _Pid, _Reason} ->
-            wait_for_updated(Monitors)
-    end;
-wait_for_updated([]) ->
-    ok.
-
 other_servers(Server) ->
     gen_server:call(Server, other_servers).
 
@@ -95,11 +86,7 @@ sync(RemotePid) ->
 ping(RemotePid) ->
     short_call(RemotePid, ping).
 
-short_call(RemotePid, Msg) ->
-    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
-    Info = #{task => Msg,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+%% gen_server callbacks
 
 init([Tab, Opts]) ->
     ets:new(Tab, [ordered_set, named_table,
@@ -150,13 +137,17 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-handle_send_dump_to_remote_node(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+%% Internal logic
+
+handle_send_dump_to_remote_node(NewPids, Dump,
+                                State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, State#{other_servers => Servers2}}.
 
 handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
-    ?LOG_ERROR(#{what => pause_owner_crashed, state => State, paused_by_pid => PausedByPid}),
+    ?LOG_ERROR(#{what => pause_owner_crashed,
+                 state => State, paused_by_pid => PausedByPid}),
     handle_unpause(State);
 handle_down(_Mon, ProxyPid, State = #{other_servers := Servers}) ->
     case lists:keytake(ProxyPid, 2, Servers) of
@@ -166,7 +157,8 @@ handle_down(_Mon, ProxyPid, State = #{other_servers := Servers}) ->
             {noreply, State#{other_servers => Servers2}};
         false ->
             %% This should not happen
-            ?LOG_ERROR(#{what => handle_down_failed, proxy_pid => ProxyPid, state => State}),
+            ?LOG_ERROR(#{what => handle_down_failed,
+                         proxy_pid => ProxyPid, state => State}),
             {noreply, State}
     end.
 
@@ -203,18 +195,6 @@ servers_to_pids(Servers) ->
 has_remote_pid(RemotePid, Servers) ->
     lists:keymember(RemotePid, 1, Servers).
 
-%% Cleanup
-call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
-    case Opts of
-        #{handle_down := F} ->
-            FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
-            Info = #{task => call_user_handle_down, table => Tab,
-                     remote_pid => RemotePid, remote_node => node(RemotePid)},
-            kiss_long:run_safely(Info, FF);
-        _ ->
-            ok
-    end.
-
 reply_updated(Pid, Mon) ->
     %% We really don't wanna block this process
     erlang:send(Pid, {updated, Mon}, [noconnect, nosuspend]).
@@ -222,13 +202,15 @@ reply_updated(Pid, Mon) ->
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
-handle_insert(Rec, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
+handle_insert(Rec, _From = {FromPid, _},
+              State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Rec),
     %% Insert to other nodes and block till written
     Monitors = replicate(Servers, remote_insert, Rec, FromPid),
     {reply, {ok, Monitors}, State}.
 
-handle_delete(Keys, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
+handle_delete(Keys, _From = {FromPid, _},
+              State = #{tab := Tab, other_servers := Servers}) ->
     ets_delete_keys(Tab, Keys),
     %% Insert to other nodes and block till written
     Monitors = replicate(Servers, remote_delete, Keys, FromPid),
@@ -243,12 +225,28 @@ replicate([{RemotePid, ProxyPid} | Servers], Cmd, Payload, FromPid) ->
 replicate([], _Cmd, _Payload, _FromPid) ->
     [].
 
-apply_backlog([{Msg, From}|Backlog], State) ->
+wait_for_updated([Mon | Monitors]) ->
+    receive
+        {updated, Mon} ->
+            wait_for_updated(Monitors);
+        {'DOWN', Mon, process, _Pid, _Reason} ->
+            wait_for_updated(Monitors)
+    end;
+wait_for_updated([]) ->
+    ok.
+
+apply_backlog([{Msg, From} | Backlog], State) ->
     {reply, Reply, State2} = handle_call(Msg, From, State),
     gen_server:reply(From, Reply),
     apply_backlog(Backlog, State2);
 apply_backlog([], State) ->
     State.
+
+short_call(RemotePid, Msg) ->
+    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
+    Info = #{task => Msg,
+             remote_pid => RemotePid, remote_node => node(RemotePid)},
+    kiss_long:run_safely(Info, F).
 
 %% Theoretically we can support mupltiple pauses (but no need for now because
 %% we pause in the global locked function)
@@ -258,3 +256,15 @@ handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
     State2 = State#{pause => false, backlog := [], pause_monitor => undefined},
     {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
+
+%% Cleanup
+call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
+    case Opts of
+        #{handle_down := F} ->
+            FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
+            Info = #{task => call_user_handle_down, table => Tab,
+                     remote_pid => RemotePid, remote_node => node(RemotePid)},
+            kiss_long:run_safely(Info, FF);
+        _ ->
+            ok
+    end.
