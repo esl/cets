@@ -24,10 +24,10 @@ handle_cast(_Msg, State) ->
 
 handle_info({'DOWN', MonRef, process, Pid, _Reason}, State = #{mon := MonRef}) ->
     ?LOG_ERROR(#{what => node_down, remote_pid => Pid, node => node(Pid)}),
-    {stop, State};
+    {stop, normal, State};
 handle_info({'DOWN', MonRef, process, Pid, _Reason}, State = #{pmon := MonRef}) ->
     ?LOG_ERROR(#{what => parent_process_down, parent_pid => Pid}),
-    {stop, State}.
+    {stop, normal, State}.
 
 terminate(_Reason, _State) ->
     ok.
