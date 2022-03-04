@@ -107,6 +107,11 @@ init([Tab, Opts]) ->
     {ok, #{tab => Tab, other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
 
+
+handle_call({insert, Rec}, From, State = #{paused := false}) ->
+    handle_insert(Rec, From, State);
+handle_call({delete, Keys}, From, State = #{paused := false}) ->
+    handle_delete(Keys, From, State);
 handle_call(remote_dump, _From, State = #{tab := Tab}) ->
     {reply, {ok, dump(Tab)}, State};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
@@ -124,25 +129,21 @@ handle_call(pause, _From = {FromPid, _}, State) ->
 handle_call(unpause, _From, State) ->
     handle_unpause(State);
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
-    {noreply, State#{backlog => [{Msg, From} | Backlog]}};
-handle_call({insert, Rec}, From, State) ->
-    handle_insert(Rec, From, State);
-handle_call({delete, Keys}, From, State) ->
-    handle_delete(Keys, From, State).
+    {noreply, State#{backlog => [{Msg, From} | Backlog]}}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State);
-handle_info({insert_from_remote_node, Mon, Pid, Rec}, State = #{tab := Tab}) ->
+handle_info({remote_insert, Mon, Pid, Rec}, State = #{tab := Tab}) ->
     ets:insert(Tab, Rec),
     reply_updated(Pid, Mon),
     {noreply, State};
-handle_info({delete_from_remote_node, Mon, Pid, Keys}, State = #{tab := Tab}) ->
+handle_info({remote_delete, Mon, Pid, Keys}, State = #{tab := Tab}) ->
     ets_delete_keys(Tab, Keys),
     reply_updated(Pid, Mon),
-    {noreply, State}.
+    {noreply, State};
+handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
+    handle_down(Mon, Pid, State).
 
 terminate(_Reason, _State) ->
     ok.
@@ -225,31 +226,22 @@ send_to_remote(RemotePid, Msg) ->
 handle_insert(Rec, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Rec),
     %% Insert to other nodes and block till written
-    Monitors = insert_to_remote_nodes(Servers, Rec, FromPid),
+    Monitors = replicate(Servers, remote_insert, Rec, FromPid),
     {reply, {ok, Monitors}, State}.
-
-insert_to_remote_nodes([{RemotePid, ProxyPid} | Servers], Rec, FromPid) ->
-    Mon = erlang:monitor(process, ProxyPid),
-    %% Reply would be routed directly to FromPid
-    Msg = {insert_from_remote_node, Mon, FromPid, Rec},
-    send_to_remote(RemotePid, Msg),
-    [Mon | insert_to_remote_nodes(Servers, Rec, FromPid)];
-insert_to_remote_nodes([], _Rec, _FromPid) ->
-    [].
 
 handle_delete(Keys, _From = {FromPid, _}, State = #{tab := Tab, other_servers := Servers}) ->
     ets_delete_keys(Tab, Keys),
     %% Insert to other nodes and block till written
-    Monitors = delete_from_remote_nodes(Servers, Keys, FromPid),
+    Monitors = replicate(Servers, remote_delete, Keys, FromPid),
     {reply, {ok, Monitors}, State}.
 
-delete_from_remote_nodes([{RemotePid, ProxyPid} | Servers], Keys, FromPid) ->
+replicate([{RemotePid, ProxyPid} | Servers], Cmd, Payload, FromPid) ->
     Mon = erlang:monitor(process, ProxyPid),
     %% Reply would be routed directly to FromPid
-    Msg = {delete_from_remote_node, Mon, FromPid, Keys},
+    Msg = {Cmd, Mon, FromPid, Payload},
     send_to_remote(RemotePid, Msg),
-    [Mon | delete_from_remote_nodes(Servers, Keys, FromPid)];
-delete_from_remote_nodes([], _Keys, _FromPid) ->
+    [Mon | replicate(Servers, Cmd, Payload, FromPid)];
+replicate([], _Cmd, _Payload, _FromPid) ->
     [].
 
 apply_backlog([{Msg, From}|Backlog], State) ->
