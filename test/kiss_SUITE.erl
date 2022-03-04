@@ -1,9 +1,10 @@
 -module(kiss_SUITE).
 -include_lib("common_test/include/ct.hrl").
  
--compile([export_all]).
+-compile([export_all, nowarn_export_all]).
  
-all() -> [test_multinode, test_multinode_auto_discovery, test_locally,
+all() -> [test_multinode, node_list_is_correct,
+          test_multinode_auto_discovery, test_locally,
           handle_down_is_called].
  
 init_per_suite(Config) ->
@@ -28,19 +29,19 @@ test_multinode(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
     Tab = tab1,
-    {ok, _Pid1} = start(Node1, Tab),
+    {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
     {ok, Pid4} = start(Node4, Tab),
-    join(Node1, Pid3, Tab),
-    join(Node2, Pid4, Tab),
+    ok = join(Node1, Tab, Pid3, Pid1),
+    ok = join(Node2, Tab, Pid4, Pid2),
     insert(Node1, Tab, {a}),
     insert(Node2, Tab, {b}),
     insert(Node3, Tab, {c}),
     insert(Node4, Tab, {d}),
     [{a}, {c}] = dump(Node1, Tab),
     [{b}, {d}] = dump(Node2, Tab),
-    join(Node1, Pid2, Tab),
+    ok = join(Node1, Tab, Pid2, Pid1),
     [{a}, {b}, {c}, {d}] = dump(Node1, Tab),
     [{a}, {b}, {c}, {d}] = dump(Node2, Tab),
     insert(Node1, Tab, {f}),
@@ -52,10 +53,6 @@ test_multinode(Config) ->
                X = dump(Node4, Tab)
            end,
     Same([{a}, {b}, {c}, {d}, {e}, {f}]),
-    [Node2, Node3, Node4] = other_nodes(Node1, Tab),
-    [Node1, Node3, Node4] = other_nodes(Node2, Tab),
-    [Node1, Node2, Node4] = other_nodes(Node3, Tab),
-    [Node1, Node2, Node3] = other_nodes(Node4, Tab),
     delete(Node1, Tab, e),
     Same([{a}, {b}, {c}, {d}, {f}]),
     delete(Node4, Tab, a),
@@ -67,12 +64,29 @@ test_multinode(Config) ->
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
     ok.
 
-test_multinode_auto_discovery(Config) ->
+node_list_is_correct(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
+    Tab = tab3,
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid4} = start(Node4, Tab),
+    ok = join(Node1, Tab, Pid3, Pid1),
+    ok = join(Node2, Tab, Pid4, Pid2),
+    ok = join(Node1, Tab, Pid2, Pid1),
+    [Node2, Node3, Node4] = other_nodes(Node1, Tab),
+    [Node1, Node3, Node4] = other_nodes(Node2, Tab),
+    [Node1, Node2, Node4] = other_nodes(Node3, Tab),
+    [Node1, Node2, Node3] = other_nodes(Node4, Tab),
+    ok.
+
+test_multinode_auto_discovery(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
     Tab = tab2,
     {ok, _Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
     Dir = proplists:get_value(priv_dir, Config),
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco.txt"),
@@ -84,9 +98,9 @@ test_multinode_auto_discovery(Config) ->
     ok.
 
 test_locally(_Config) ->
-    {ok, _Pid1} = kiss:start(t1, #{}),
+    {ok, Pid1} = kiss:start(t1, #{}),
     {ok, Pid2} = kiss:start(t2, #{}),
-    kiss:join(lock1, t1, Pid2),
+    ok = kiss_join:join(lock1, #{table => [t1, t2]}, Pid1, Pid2),
     kiss:insert(t1, {1}),
     kiss:insert(t1, {1}),
     kiss:insert(t2, {2}),
@@ -100,7 +114,7 @@ handle_down_is_called(_Config) ->
              end,
     {ok, Pid1} = kiss:start(d1, #{handle_down => DownFn}),
     {ok, Pid2} = kiss:start(d2, #{}),
-    kiss:join(lock1, d1, Pid2),
+    ok = kiss_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
     exit(Pid2, oops),
     receive
         down_called -> ok
@@ -125,8 +139,8 @@ dump(Node, Tab) ->
 other_nodes(Node, Tab) ->
     rpc(Node, kiss, other_nodes, [Tab]).
 
-join(Node1, Node2, Tab) ->
-    rpc(Node1, kiss, join, [lock1, Tab, Node2]).
+join(Node1, Tab, Pid1, Pid2) ->
+    rpc(Node1, kiss_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
 
 rpc(Node, M, F, Args) ->
     case rpc:call(Node, M, F, Args) of
