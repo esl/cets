@@ -5,7 +5,8 @@
  
 all() -> [test_multinode, node_list_is_correct,
           test_multinode_auto_discovery, test_locally,
-          handle_down_is_called].
+          handle_down_is_called,
+          events_are_applied_in_the_correct_order_after_unpause].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -120,6 +121,24 @@ handle_down_is_called(_Config) ->
         down_called -> ok
     after 5000 -> ct:fail(timeout)
     end.
+
+events_are_applied_in_the_correct_order_after_unpause(_Config) ->
+    T = t4,
+    {ok, Pid} = kiss:start(T, #{}),
+    ok = kiss:pause(Pid),
+    R1 = kiss:insert_request(T, {1}),
+    R2 = kiss:delete_request(T, 1),
+    kiss:delete_request(T, 2),
+    kiss:insert_request(T, {2}),
+    kiss:insert_request(T, {3}),
+    kiss:insert_request(T, {4}),
+    kiss:insert_request(T, {5}),
+    R3 = kiss:insert_request(T, [{6}, {7}]),
+    R4 = kiss:delete_many_request(T, [5, 4]),
+    [] = lists:sort(kiss:dump(T)),
+    ok = kiss:unpause(Pid),
+    [ok = kiss:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
+    [{2}, {3}, {6}, {7}] = lists:sort(kiss:dump(T)).
 
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).

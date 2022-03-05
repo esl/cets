@@ -19,6 +19,7 @@
 -export([pause/1, unpause/1, sync/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
+-export([insert_request/2, delete_request/2, delete_many_request/2, wait_response/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -64,6 +65,23 @@ delete(Tab, Key) ->
 delete_many(Server, Keys) ->
     {ok, Monitors} = gen_server:call(Server, {delete, Keys}),
     wait_for_updated(Monitors).
+
+insert_request(Server, Rec) ->
+    gen_server:send_request(Server, {insert, Rec}).
+
+delete_request(Tab, Key) ->
+    delete_many_request(Tab, [Key]).
+
+delete_many_request(Server, Keys) ->
+    gen_server:send_request(Server, {delete, Keys}).
+
+wait_response(RequestId, Timeout) ->
+    case gen_server:wait_response(RequestId, Timeout) of
+        {reply, {ok, Monitors}} ->
+            wait_for_updated(Monitors);
+        Other ->
+            Other
+    end.
 
 other_servers(Server) ->
     gen_server:call(Server, other_servers).
@@ -111,7 +129,7 @@ handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State) ->
     Mon = erlang:monitor(process, FromPid),
-    {reply, ok, State#{pause => true, pause_monitor => Mon}};
+    {reply, ok, State#{paused => true, pause_monitor => Mon}};
 handle_call(unpause, _From, State) ->
     handle_unpause(State);
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
@@ -148,7 +166,8 @@ handle_send_dump_to_remote_node(NewPids, Dump,
 handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
     ?LOG_ERROR(#{what => pause_owner_crashed,
                  state => State, paused_by_pid => PausedByPid}),
-    handle_unpause(State);
+    {reply, ok, State2} = handle_unpause(State),
+    {noreply, State2};
 handle_down(_Mon, ProxyPid, State = #{other_servers := Servers}) ->
     case lists:keytake(ProxyPid, 2, Servers) of
         {value, {RemotePid, _}, Servers2} ->
@@ -250,11 +269,11 @@ short_call(RemotePid, Msg) ->
 
 %% Theoretically we can support mupltiple pauses (but no need for now because
 %% we pause in the global locked function)
-handle_unpause(State = #{pause := false}) ->
+handle_unpause(State = #{paused := false}) ->
     {reply, {error, already_unpaused}, State};
 handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
-    State2 = State#{pause => false, backlog := [], pause_monitor => undefined},
+    State2 = State#{paused => false, backlog := [], pause_monitor => undefined},
     {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
 
 %% Cleanup
