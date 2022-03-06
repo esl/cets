@@ -28,7 +28,7 @@ handle_cast(_Msg, State) ->
 
 handle_info(check, State) ->
     handle_check(State),
-    {stop, normal, State}.
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -52,9 +52,9 @@ handle_check(State = #{mon_tab := MonTab}) ->
 
 check_loop([{Mon, Pid}|List], MonTab) ->
     case is_process_alive(Pid) of
-        true ->
-            ets:delete(MonTab, Mon);
         false ->
+            ets:delete(MonTab, Mon);
+        true ->
             ok
     end,
     check_loop(List, MonTab);

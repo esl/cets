@@ -7,7 +7,8 @@ all() -> [test_multinode, node_list_is_correct,
           test_multinode_auto_discovery, test_locally,
           handle_down_is_called,
           events_are_applied_in_the_correct_order_after_unpause,
-          write_returns_if_remote_server_crashes].
+          write_returns_if_remote_server_crashes,
+          mon_cleaner_works].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -149,6 +150,36 @@ write_returns_if_remote_server_crashes(_Config) ->
     R = kiss:insert_request(c1, {1}),
     exit(Pid2, oops),
     ok = kiss:wait_response(R, 5000).
+
+mon_cleaner_works(_Config) ->
+    {ok, Pid1} = kiss:start(c3, #{}),
+    %% Suspend, so to avoid unexpected check
+    sys:suspend(c3_mon),
+    %% Two cases to check: an alive process and a dead process 
+    R = kiss:insert_request(c3, {2}),
+    %% Ensure insert_request reaches the server
+    kiss:ping(Pid1),
+    %% There is one monitor
+    [_] = ets:tab2list(c3_mon),
+    {Pid, Mon} = spawn_monitor(fun() -> kiss:insert_request(c3, {1}) end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} -> ok
+    after 5000 -> ct:fail(timeout)
+    end,
+    %% Ensure insert_request reaches the server
+    kiss:ping(Pid1),
+    %% There are two monitors
+    [_, _] = ets:tab2list(c3_mon),
+    %% Force check
+    sys:resume(c3_mon),
+    c3_mon ! check,
+    %% Ensure, that check is finished
+    sys:get_state(c3_mon),
+    %% A monitor for a dead process is removed
+    [_] = ets:tab2list(c3_mon),
+    %% The monitor is finally removed once wait_response returns
+    ok = kiss:wait_response(R, 5000),
+    [] = ets:tab2list(c3_mon).
 
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).
