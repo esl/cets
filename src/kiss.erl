@@ -21,6 +21,7 @@
 -export([dump/1, remote_dump/1, send_dump_to_remote_node/3]).
 -export([other_nodes/1, other_pids/1]).
 -export([pause/1, unpause/1, sync/1, ping/1]).
+-export([info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([insert_request/2, delete_request/2, delete_many_request/2, wait_response/2]).
@@ -108,13 +109,16 @@ sync(RemotePid) ->
 ping(RemotePid) ->
     short_call(RemotePid, ping).
 
+info(Server) ->
+    gen_server:call(Server, get_info).
+
 %% gen_server callbacks
 
 init([Tab, Opts]) ->
-    MonTabName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
+    MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
-    MonTab = ets:new(MonTabName, [public, named_table]),
-    kiss_mon_cleaner:start_link(MonTabName, MonTab),
+    ets:new(MonTab, [public, named_table]),
+    kiss_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
@@ -139,6 +143,8 @@ handle_call(pause, _From = {FromPid, _}, State) ->
     {reply, ok, State#{paused => true, pause_monitor => Mon}};
 handle_call(unpause, _From, State) ->
     handle_unpause(State);
+handle_call(get_info, _From, State) ->
+    handle_get_info(State);
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
     {noreply, State#{backlog => [{Msg, From} | Backlog]}}.
 
@@ -306,6 +312,13 @@ handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
     State2 = State#{paused => false, backlog := [], pause_monitor => undefined},
     {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
+
+handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->
+    Info = #{table => Tab,
+             nodes => lists:usort(pids_to_nodes([self() | Servers])),
+             size => ets:info(Tab, size),
+             memory => ets:info(Tab, memory)},
+    {reply, Info, State}.
 
 %% Cleanup
 call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->

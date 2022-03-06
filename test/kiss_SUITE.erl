@@ -98,6 +98,8 @@ test_multinode_auto_discovery(Config) ->
     %% Waits for the first check
     ok = gen_server:call(Disco, ping),
     [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}]
+        = kiss_discovery:info(Disco),
     ok.
 
 test_locally(_Config) ->
