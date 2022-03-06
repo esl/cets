@@ -1,14 +1,19 @@
-%% Very simple multinode ETS writer
-%% One file, everything is simple, but we don't silently hide race conditions
-%% No transactions
-%% We don't use rpc module, because it is one gen_server
-
-
-%% If we write in format {Key, WriterName}, we should resolve conflicts automatically.
-%%
+%% Very simple multinode ETS writer.
+%% One file, everything is simple, but we don't silently hide race conditions.
+%% No transactions support.
+%% We don't use rpc module, because it is a single gen_server.
+%% We use MonTab table instead of monitors to detect if one of remote servers
+%% is down and would not send a replication result.
 %% While Tab is an atom, we can join tables with different atoms for the local testing.
-
-%% We don't use monitors to avoid round-trips (that's why we don't use calls neither)
+%% We pause writes when a new node is joining (we resume them again). It is to
+%% ensure that all writes would be bulk copied.
+%% We support merging data on join by default.
+%% We do not check if we override data during join So, it is up to the user
+%% to ensure that merging would survive overrides. Two ways to do it:
+%% - Write each key once and only once (basically add a reference into a key)
+%% - Add writer pid() or writer node() as a key. And do a proper cleanups using handle_down.
+%%   (the data could still get overwritten though if a node joins back way too quick
+%%    and cleaning is done outside of handle_down)
 -module(kiss).
 -behaviour(gen_server).
 
@@ -249,8 +254,8 @@ handle_delete(Keys, _From = {FromPid, Mon},
     {reply, {ok, WaitInfo}, State}.
 
 replicate(Mon, Servers, Cmd, Payload, FromPid, MonTab) ->
-    ets:insert(MonTab, {Mon, FromPid}),
     replicate2(Mon, Servers, Cmd, Payload, FromPid),
+    ets:insert(MonTab, {Mon, FromPid}),
     {Mon, Servers, MonTab}.
 
 replicate2(Mon, [RemotePid | Servers], Cmd, Payload, FromPid) ->
