@@ -6,7 +6,8 @@
 all() -> [test_multinode, node_list_is_correct,
           test_multinode_auto_discovery, test_locally,
           handle_down_is_called,
-          events_are_applied_in_the_correct_order_after_unpause].
+          events_are_applied_in_the_correct_order_after_unpause,
+          write_returns_if_remote_server_crashes].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -139,6 +140,15 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     ok = kiss:unpause(Pid),
     [ok = kiss:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(kiss:dump(T)).
+
+write_returns_if_remote_server_crashes(_Config) ->
+    {ok, Pid1} = kiss:start(c1, #{}),
+    {ok, Pid2} = kiss:start(c2, #{}),
+    ok = kiss_join:join(lock1, #{table => [c1, c2]}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R = kiss:insert_request(c1, {1}),
+    exit(Pid2, oops),
+    ok = kiss:wait_response(R, 5000).
 
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).
