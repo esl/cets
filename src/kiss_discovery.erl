@@ -2,7 +2,7 @@
 -module(kiss_discovery).
 -behaviour(gen_server).
 
--export([start/1, start_link/1, add_table/2]).
+-export([start/1, start_link/1, add_table/2, info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -33,6 +33,13 @@ start_common(F, Opts) ->
 add_table(Server, Table) ->
     gen_server:call(Server, {add_table, Table}).
 
+get_tables(Server) ->
+    gen_server:call(Server, get_tables).
+
+info(Server) ->
+    {ok, Tables} = get_tables(Server),
+    [kiss:info(Tab) || Tab <- Tables].
+
 init(Opts) ->
     Mod = maps:get(backend_module, Opts, kiss_discovery_file),
     self() ! check,
@@ -49,6 +56,8 @@ handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
             State2 = State#{tables => [Table | Tables]},
             {reply, ok, handle_check(State2)}
     end;
+handle_call(get_tables, _From, State = #{tables := Tables}) ->
+    {reply, {ok, Tables}, State};
 handle_call(_Reply, _From, State) ->
     {reply, ok, State}.
 
