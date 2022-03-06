@@ -109,6 +109,7 @@ init([Tab, Opts]) ->
     MonTabName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
     MonTab = ets:new(MonTabName, [public]),
+    kiss_mon_cleaner:start_link(MonTabName, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
@@ -169,7 +170,7 @@ handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
                  state => State, paused_by_pid => PausedByPid}),
     {reply, ok, State2} = handle_unpause(State),
     {noreply, State2};
-handle_down(Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+handle_down(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
     case lists:member(RemotePid, Servers) of
         true ->
             Servers2 = lists:delete(RemotePid, Servers),
@@ -178,8 +179,9 @@ handle_down(Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTa
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers => Servers2}};
         false ->
-            %% Caller process is DOWN
-            ets:delete(MonTab, Mon),
+            %% This should not happen
+            ?LOG_ERROR(#{what => handle_down_failed,
+                         remote_pid => RemotePid, state => State}),
             {noreply, State}
     end.
 
@@ -232,22 +234,21 @@ reply_updated(Pid, Mon) ->
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
-handle_insert(Rec, _From = {FromPid, _},
+handle_insert(Rec, _From = {FromPid, Mon},
               State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
     ets:insert(Tab, Rec),
     %% Insert to other nodes and block till written
-    WaitInfo = replicate(Servers, remote_insert, Rec, FromPid, MonTab),
+    WaitInfo = replicate(Mon, Servers, remote_insert, Rec, FromPid, MonTab),
     {reply, {ok, WaitInfo}, State}.
 
-handle_delete(Keys, _From = {FromPid, _},
+handle_delete(Keys, _From = {FromPid, Mon},
               State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
     ets_delete_keys(Tab, Keys),
     %% Insert to other nodes and block till written
-    WaitInfo = replicate(Servers, remote_delete, Keys, FromPid, MonTab),
+    WaitInfo = replicate(Mon, Servers, remote_delete, Keys, FromPid, MonTab),
     {reply, {ok, WaitInfo}, State}.
 
-replicate(Servers, Cmd, Payload, FromPid, MonTab) ->
-    Mon = erlang:monitor(process, FromPid),
+replicate(Mon, Servers, Cmd, Payload, FromPid, MonTab) ->
     ets:insert(MonTab, {Mon, FromPid}),
     replicate2(Mon, Servers, Cmd, Payload, FromPid),
     {Mon, Servers, MonTab}.
