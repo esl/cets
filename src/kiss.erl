@@ -254,16 +254,16 @@ handle_delete(Keys, _From = {FromPid, Mon},
     {reply, {ok, WaitInfo}, State}.
 
 replicate(Mon, Servers, Cmd, Payload, FromPid, MonTab) ->
-    replicate2(Mon, Servers, Cmd, Payload, FromPid),
+    %% Reply would be routed directly to FromPid
+    Msg = {Cmd, Mon, FromPid, Payload},
+    replicate2(Servers, Msg),
     ets:insert(MonTab, {Mon, FromPid}),
     {Mon, Servers, MonTab}.
 
-replicate2(Mon, [RemotePid | Servers], Cmd, Payload, FromPid) ->
-    %% Reply would be routed directly to FromPid
-    Msg = {Cmd, Mon, FromPid, Payload},
+replicate2([RemotePid | Servers], Msg) ->
     send_to_remote(RemotePid, Msg),
-    replicate2(Mon, Servers, Cmd, Payload, FromPid);
-replicate2(_Mon, [], _Cmd, _Payload, _FromPid) ->
+    replicate2(Servers, Msg);
+replicate2([], _Msg) ->
     ok.
 
 wait_for_updated({Mon, Servers, MonTab}) ->
