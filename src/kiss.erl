@@ -2,7 +2,6 @@
 %% One file, everything is simple, but we don't silently hide race conditions
 %% No transactions
 %% We don't use rpc module, because it is one gen_server
-%% We monitor a proxy module (so, no remote monitors on each insert)
 
 
 %% If we write in format {Key, WriterName}, we should resolve conflicts automatically.
@@ -63,8 +62,8 @@ delete(Tab, Key) ->
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
 delete_many(Server, Keys) ->
-    {ok, Monitors} = gen_server:call(Server, {delete, Keys}),
-    wait_for_updated(Monitors).
+    {ok, WaitInfo} = gen_server:call(Server, {delete, Keys}),
+    wait_for_updated(WaitInfo).
 
 insert_request(Server, Rec) ->
     gen_server:send_request(Server, {insert, Rec}).
@@ -77,8 +76,8 @@ delete_many_request(Server, Keys) ->
 
 wait_response(RequestId, Timeout) ->
     case gen_server:wait_response(RequestId, Timeout) of
-        {reply, {ok, Monitors}} ->
-            wait_for_updated(Monitors);
+        {reply, {ok, WaitInfo}} ->
+            wait_for_updated(WaitInfo);
         Other ->
             Other
     end.
@@ -107,9 +106,11 @@ ping(RemotePid) ->
 %% gen_server callbacks
 
 init([Tab, Opts]) ->
-    ets:new(Tab, [ordered_set, named_table,
-                  public, {read_concurrency, true}]),
-    {ok, #{tab => Tab, other_servers => [], opts => Opts, backlog => [],
+    MonTabName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
+    ets:new(Tab, [ordered_set, named_table, public]),
+    MonTab = ets:new(MonTabName, [public]),
+    {ok, #{tab => Tab, mon_tab => MonTab,
+           other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
 
 handle_call({insert, Rec}, From, State = #{paused := false}) ->
@@ -168,35 +169,45 @@ handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
                  state => State, paused_by_pid => PausedByPid}),
     {reply, ok, State2} = handle_unpause(State),
     {noreply, State2};
-handle_down(_Mon, ProxyPid, State = #{other_servers := Servers}) ->
-    case lists:keytake(ProxyPid, 2, Servers) of
-        {value, {RemotePid, _}, Servers2} ->
+handle_down(Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+    case lists:member(RemotePid, Servers) of
+        true ->
+            Servers2 = lists:delete(RemotePid, Servers),
+            notify_remote_down(RemotePid, MonTab),
             %% Down from a proxy
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers => Servers2}};
         false ->
-            %% This should not happen
-            ?LOG_ERROR(#{what => handle_down_failed,
-                         proxy_pid => ProxyPid, state => State}),
+            %% Caller process is DOWN
+            ets:delete(MonTab, Mon),
             {noreply, State}
     end.
 
-add_servers(Pids, Servers) ->
-    lists:sort(start_proxies_for(Pids, Servers) ++ Servers).
+notify_remote_down(RemotePid, MonTab) ->
+    List = ets:tab2list(MonTab),
+    notify_remote_down_loop(RemotePid, List).
 
-start_proxies_for([RemotePid | OtherPids], Servers)
+notify_remote_down_loop(RemotePid, [{Mon, Pid}|List]) ->
+    Pid ! {'DOWN', Mon, process, RemotePid, notify_remote_down},
+    notify_remote_down_loop(RemotePid, List);
+notify_remote_down_loop(_RemotePid, []) ->
+    ok.
+
+add_servers(Pids, Servers) ->
+    lists:sort(add_servers2(Pids, Servers) ++ Servers).
+
+add_servers2([RemotePid | OtherPids], Servers)
   when is_pid(RemotePid), RemotePid =/= self() ->
     case has_remote_pid(RemotePid, Servers) of
         false ->
-            {ok, ProxyPid} = kiss_proxy:start(RemotePid),
-            erlang:monitor(process, ProxyPid),
-            [{RemotePid, ProxyPid} | start_proxies_for(OtherPids, Servers)];
+            erlang:monitor(process, RemotePid),
+            [RemotePid | add_servers2(OtherPids, Servers)];
         true ->
             ?LOG_INFO(#{what => already_added,
                         remote_pid => RemotePid, remote_node => node(RemotePid)}),
-            start_proxies_for(OtherPids, Servers)
+            add_servers2(OtherPids, Servers)
     end;
-start_proxies_for([], _Servers) ->
+add_servers2([], _Servers) ->
     [].
 
 pids_to_nodes(Pids) ->
@@ -209,50 +220,64 @@ ets_delete_keys(_Tab, []) ->
     ok.
 
 servers_to_pids(Servers) ->
-    [Pid || {Pid, _} <- Servers].
+    [Pid || Pid <- Servers].
 
 has_remote_pid(RemotePid, Servers) ->
-    lists:keymember(RemotePid, 1, Servers).
+    lists:member(RemotePid, Servers).
 
 reply_updated(Pid, Mon) ->
     %% We really don't wanna block this process
-    erlang:send(Pid, {updated, Mon}, [noconnect, nosuspend]).
+    erlang:send(Pid, {updated, Mon, self()}, [noconnect, nosuspend]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
 handle_insert(Rec, _From = {FromPid, _},
-              State = #{tab := Tab, other_servers := Servers}) ->
+              State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
     ets:insert(Tab, Rec),
     %% Insert to other nodes and block till written
-    Monitors = replicate(Servers, remote_insert, Rec, FromPid),
-    {reply, {ok, Monitors}, State}.
+    WaitInfo = replicate(Servers, remote_insert, Rec, FromPid, MonTab),
+    {reply, {ok, WaitInfo}, State}.
 
 handle_delete(Keys, _From = {FromPid, _},
-              State = #{tab := Tab, other_servers := Servers}) ->
+              State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
     ets_delete_keys(Tab, Keys),
     %% Insert to other nodes and block till written
-    Monitors = replicate(Servers, remote_delete, Keys, FromPid),
-    {reply, {ok, Monitors}, State}.
+    WaitInfo = replicate(Servers, remote_delete, Keys, FromPid, MonTab),
+    {reply, {ok, WaitInfo}, State}.
 
-replicate([{RemotePid, ProxyPid} | Servers], Cmd, Payload, FromPid) ->
-    Mon = erlang:monitor(process, ProxyPid),
+replicate(Servers, Cmd, Payload, FromPid, MonTab) ->
+    Mon = erlang:monitor(process, FromPid),
+    ets:insert(MonTab, {Mon, FromPid}),
+    replicate2(Mon, Servers, Cmd, Payload, FromPid),
+    {Mon, Servers, MonTab}.
+
+replicate2(Mon, [RemotePid | Servers], Cmd, Payload, FromPid) ->
     %% Reply would be routed directly to FromPid
     Msg = {Cmd, Mon, FromPid, Payload},
     send_to_remote(RemotePid, Msg),
-    [Mon | replicate(Servers, Cmd, Payload, FromPid)];
-replicate([], _Cmd, _Payload, _FromPid) ->
-    [].
-
-wait_for_updated([Mon | Monitors]) ->
-    receive
-        {updated, Mon} ->
-            wait_for_updated(Monitors);
-        {'DOWN', Mon, process, _Pid, _Reason} ->
-            wait_for_updated(Monitors)
-    end;
-wait_for_updated([]) ->
+    replicate2(Mon, Servers, Cmd, Payload, FromPid);
+replicate2(_Mon, [], _Cmd, _Payload, _FromPid) ->
     ok.
+
+wait_for_updated({Mon, Servers, MonTab}) ->
+    try
+        wait_for_updated2(Mon, Servers)
+    after
+        ets:delete(MonTab, Mon)
+    end.
+
+wait_for_updated2(_Mon, []) ->
+    ok;
+wait_for_updated2(Mon, Servers) ->
+    receive
+        {updated, Mon, Pid} ->
+            Servers2 = lists:delete(Pid, Servers),
+            wait_for_updated2(Mon, Servers2);
+        {'DOWN', Mon, process, Pid, _Reason} ->
+            Servers2 = lists:delete(Pid, Servers),
+            wait_for_updated2(Mon, Servers2)
+    end.
 
 apply_backlog([{Msg, From} | Backlog], State) ->
     {reply, Reply, State2} = handle_call(Msg, From, State),
