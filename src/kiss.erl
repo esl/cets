@@ -190,7 +190,7 @@ notify_remote_down(RemotePid, MonTab) ->
     notify_remote_down_loop(RemotePid, List).
 
 notify_remote_down_loop(RemotePid, [{Mon, Pid}|List]) ->
-    Pid ! {'DOWN', Mon, process, RemotePid, notify_remote_down},
+    Pid ! {remote_down, Mon, RemotePid},
     notify_remote_down_loop(RemotePid, List);
 notify_remote_down_loop(_RemotePid, []) ->
     ok.
@@ -275,7 +275,7 @@ wait_for_updated2(Mon, Servers) ->
         {updated, Mon, Pid} ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2);
-        {'DOWN', Mon, process, Pid, _Reason} ->
+        {remote_down, Mon, Pid} ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2)
     end.
