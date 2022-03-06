@@ -20,7 +20,7 @@
 -export([start/2, stop/1, insert/2, delete/2, delete_many/2]).
 -export([dump/1, remote_dump/1, send_dump_to_remote_node/3]).
 -export([other_nodes/1, other_pids/1]).
--export([pause/1, unpause/1, sync/1]).
+-export([pause/1, unpause/1, sync/1, ping/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([insert_request/2, delete_request/2, delete_many_request/2, wait_response/2]).
@@ -113,7 +113,7 @@ ping(RemotePid) ->
 init([Tab, Opts]) ->
     MonTabName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
-    MonTab = ets:new(MonTabName, [public]),
+    MonTab = ets:new(MonTabName, [public, named_table]),
     kiss_mon_cleaner:start_link(MonTabName, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
