@@ -8,7 +8,7 @@ all() -> [test_multinode, node_list_is_correct,
           handle_down_is_called,
           events_are_applied_in_the_correct_order_after_unpause,
           write_returns_if_remote_server_crashes,
-          mon_cleaner_works].
+          mon_cleaner_works, sync_using_name_works].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -182,6 +182,10 @@ mon_cleaner_works(_Config) ->
     %% The monitor is finally removed once wait_response returns
     ok = kiss:wait_response(R, 5000),
     [] = ets:tab2list(c3_mon).
+
+sync_using_name_works(_Config) ->
+    {ok, _Pid1} = kiss:start(c4, #{}),
+    kiss:sync(c4).
 
 start(Node, Tab) ->
     rpc(Node, kiss, start, [Tab, #{}]).

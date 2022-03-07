@@ -298,11 +298,13 @@ apply_backlog([{Msg, From} | Backlog], State) ->
 apply_backlog([], State) ->
     State.
 
-short_call(RemotePid, Msg) ->
+short_call(RemotePid, Msg) when is_pid(RemotePid) ->
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
     Info = #{task => Msg,
              remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F).
+    kiss_long:run_safely(Info, F);
+short_call(Name, Msg) when is_atom(Name) ->
+    short_call(whereis(Name), Msg).
 
 %% Theoretically we can support mupltiple pauses (but no need for now because
 %% we pause in the global locked function)
