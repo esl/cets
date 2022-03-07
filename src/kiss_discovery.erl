@@ -58,14 +58,19 @@ handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
     end;
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
     {reply, {ok, Tables}, State};
-handle_call(_Reply, _From, State) ->
-    {reply, ok, State}.
+handle_call(Msg, From, State) ->
+    ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
+    {reply, {error, unexpected_call}, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 handle_info(check, State) ->
-    {noreply, handle_check(State)}.
+    {noreply, handle_check(State)};
+handle_info(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -114,5 +119,4 @@ report_results(Results, _State = #{results := OldResults}) ->
     [report_result(Result) || Result <- Changed].
 
 report_result(Map) ->
-    Text = [io_lib:format("~0p=~0p ", [K, V]) || {K, V} <- maps:to_list(Map)],
-    ?LOG_INFO(#{what => discovery_change, result => Text}).
+    ?LOG_INFO(Map).

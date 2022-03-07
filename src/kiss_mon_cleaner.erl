@@ -20,14 +20,19 @@ init([MonTab]) ->
     schedule_check(State),
     {ok, State}.
 
-handle_call(_Reply, _From, State) ->
-    {reply, ok, State}.
+handle_call(Msg, From, State) ->
+    ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
+    {reply, {error, unexpected_call}, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 handle_info(check, State) ->
     handle_check(State),
+    {noreply, State};
+handle_info(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
 terminate(_Reason, _State) ->

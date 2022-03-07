@@ -146,9 +146,16 @@ handle_call(unpause, _From, State) ->
 handle_call(get_info, _From, State) ->
     handle_get_info(State);
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
-    {noreply, State#{backlog => [{Msg, From} | Backlog]}}.
+    case should_backlogged(Msg) of
+        true ->
+            {noreply, State#{backlog => [{Msg, From} | Backlog]}};
+        false ->
+            ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
+            {reply, {error, unexpected_call}, State}
+    end.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 handle_info({remote_insert, Mon, Pid, Rec}, State = #{tab := Tab}) ->
@@ -160,7 +167,10 @@ handle_info({remote_delete, Mon, Pid, Keys}, State = #{tab := Tab}) ->
     reply_updated(Pid, Mon),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State).
+    handle_down(Mon, Pid, State);
+handle_info(Msg, State) ->
+    ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -333,3 +343,7 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
         _ ->
             ok
     end.
+
+should_backlogged({insert, _}) -> true;
+should_backlogged({delete, _}) -> true;
+should_backlogged(_) -> false.

@@ -96,7 +96,7 @@ test_multinode_auto_discovery(Config) ->
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     {ok, Disco} = kiss_discovery:start(#{tables => [Tab], disco_file => FileName}),
     %% Waits for the first check
-    ok = gen_server:call(Disco, ping),
+    sys:get_state(Disco),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}]
         = kiss_discovery:info(Disco),
