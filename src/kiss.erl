@@ -174,7 +174,7 @@ handle_call(ping, _From, State) ->
 handle_call(table_name, _From, State = #{tab := Tab}) ->
     {reply, {ok, Tab}, State};
 handle_call(remote_dump, From, State = #{tab := Tab}) ->
-    %% Do not block the main process (also reduces GC)
+    %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
 handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
