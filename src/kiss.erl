@@ -144,6 +144,7 @@ info(Server) ->
 
 -spec init(term()) -> {ok, state()}.
 init({Tab, Opts}) ->
+    process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
     ets:new(MonTab, [public, named_table]),
