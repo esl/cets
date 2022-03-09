@@ -11,14 +11,7 @@ blocking(F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-            Res = try
-                      F()
-                  catch Class:Reason:Stacktrace ->
-                      ?LOG_ERROR(#{what => blocking_call_failed,
-                                   class => Class, reason => Reason,
-                                   stacktrace => Stacktrace}),
-                      {error, {Class, Reason, Stacktrace}}
-                  end,
+            Res = kiss_safety:run(#{what => blocking_call_failed}, F),
             Pid ! {result, Ref, Res}
         end),
     receive
