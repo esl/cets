@@ -6,15 +6,20 @@
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
 join(LockKey, Info, LocalPid, RemotePid) when is_pid(LocalPid), is_pid(RemotePid) ->
-    Info2 = Info#{local_pid => LocalPid, remote_pid => RemotePid, remote_node => node(RemotePid)},
+    Info2 = Info#{local_pid => LocalPid,
+                  remote_pid => RemotePid, remote_node => node(RemotePid)},
+    F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid) end,
+    kiss_safety:run(Info2#{what => join_failed}, F).
+
+join1(LockKey, Info, LocalPid, RemotePid) ->
     OtherPids = kiss:other_pids(LocalPid),
     case lists:member(RemotePid, OtherPids) of
         true ->
             {error, already_joined};
         false ->
                 Start = os:timestamp(),
-                F = fun() -> join_loop(LockKey, Info2, LocalPid, RemotePid, Start) end,
-                kiss_long:run(Info2#{task => join}, F)
+                F = fun() -> join_loop(LockKey, Info, LocalPid, RemotePid, Start) end,
+                kiss_long:run(Info#{task => join}, F)
     end.
 
 join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->

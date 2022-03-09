@@ -16,11 +16,10 @@ run(Info, Fun, Catch) ->
     ?LOG_INFO(Info#{what => long_task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
-            Fun()
-        catch Class:Reason:Stacktrace when Catch ->
-            ?LOG_INFO(Info#{what => long_task_failed, class => Class,
-                            reason => Reason, stacktrace => Stacktrace}),
-            {error, {Class, Reason, Stacktrace}}
+            case Catch of
+                true -> kiss_safety:run(Info#{what => long_task_failed}, Fun);
+                false -> Fun()
+            end
         after
             Diff = diff(Start),
             ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
