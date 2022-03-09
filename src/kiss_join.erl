@@ -50,11 +50,17 @@ join2(_Info, LocalPid, RemotePid) ->
     try
         kiss:sync(LocalPid),
         kiss:sync(RemotePid),
-        {ok, LocalDump} = kiss:remote_dump(LocalPid),
-        {ok, RemoteDump} = kiss:remote_dump(RemotePid),
+        {ok, LocalDump} = remote_or_local_dump(LocalPid),
+        {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         [kiss:send_dump_to_remote_node(Pid, LocPids, LocalDump) || Pid <- RemPids],
         [kiss:send_dump_to_remote_node(Pid, RemPids, RemoteDump) || Pid <- LocPids],
         ok
     after
         [kiss:unpause(Pid) || Pid <- AllPids]
     end.
+
+remote_or_local_dump(Pid) when node(Pid) =:= node() ->
+    {ok, Tab} = kiss:table_name(Pid),
+    {ok, kiss:dump(Tab)}; %% Reduce copying
+remote_or_local_dump(Pid) ->
+    kiss:remote_dump(Pid). %% We actually need to ask the remote process

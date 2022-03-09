@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 -export([start/2, stop/1, insert/2, delete/2, delete_many/2]).
--export([dump/1, remote_dump/1, send_dump_to_remote_node/3]).
+-export([dump/1, remote_dump/1, send_dump_to_remote_node/3, table_name/1]).
 -export([other_nodes/1, other_pids/1]).
 -export([pause/1, unpause/1, sync/1, ping/1]).
 -export([info/1]).
@@ -64,6 +64,11 @@ dump(Tab) ->
 -spec remote_dump(server()) -> term().
 remote_dump(Server) ->
     short_call(Server, remote_dump).
+
+table_name(Tab) when is_atom(Tab) ->
+    Tab;
+table_name(Server) ->
+    short_call(Server, table_name).
 
 send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
     Msg = {send_dump_to_remote_node, NewPids, OurDump},
@@ -166,8 +171,12 @@ handle_call(sync, _From, State = #{other_servers := Servers}) ->
     {reply, ok, State};
 handle_call(ping, _From, State) ->
     {reply, ping, State};
-handle_call(remote_dump, _From, State = #{tab := Tab}) ->
-    {reply, {ok, dump(Tab)}, State};
+handle_call(table_name, _From, State = #{tab := Tab}) ->
+    {reply, {ok, Tab}, State};
+handle_call(remote_dump, From, State = #{tab := Tab}) ->
+    %% Do not block the main process (also reduces GC)
+    proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
+    {noreply, State};
 handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State) ->
