@@ -26,7 +26,8 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
         %% Getting the lock could take really long time in case nodes are
         %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
-        join2(Info, LocalPid, RemotePid)
+        %% Do joining in a separate process to reduce GC
+        kiss_clean:blocking(fun() -> join2(Info, LocalPid, RemotePid) end)
         end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
