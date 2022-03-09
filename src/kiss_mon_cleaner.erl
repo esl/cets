@@ -12,13 +12,20 @@
 
 -include_lib("kernel/include/logger.hrl").
 
-start_link(Name, MonTab) ->
-    gen_server:start_link({local, Name}, ?MODULE, [MonTab], []).
+-type timer_ref() :: reference() | undefined.
+-type state() :: #{
+        mon_tab := atom(),
+        interval := non_neg_integer(),
+        timer_ref := timer_ref()
+       }.
 
-init([MonTab]) ->
-    State = #{mon_tab => MonTab, interval => 30000},
-    schedule_check(State),
-    {ok, State}.
+start_link(Name, MonTab) ->
+    gen_server:start_link({local, Name}, ?MODULE, MonTab, []).
+
+-spec init(atom()) -> {ok, state()}.
+init(MonTab) ->
+    State = #{mon_tab => MonTab, interval => 30000, timer_ref => undefined},
+    {ok, schedule_check(State)}.
 
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
@@ -29,8 +36,7 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info(check, State) ->
-    handle_check(State),
-    {noreply, State};
+    {noreply, handle_check(State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -41,16 +47,18 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec schedule_check(state()) -> state().
 schedule_check(State = #{interval := Interval}) ->
     cancel_old_timer(State),
     TimerRef = erlang:send_after(Interval, self(), check),
-    State#{timer_ref => TimerRef}.
+    State#{timer_ref := TimerRef}.
 
-cancel_old_timer(#{timer_ref := OldRef}) ->
+cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
     erlang:cancel_timer(OldRef);
 cancel_old_timer(_State) ->
     ok.
 
+-spec handle_check(state()) -> state().
 handle_check(State = #{mon_tab := MonTab}) ->
     check_loop(ets:tab2list(MonTab), MonTab),
     schedule_check(State).

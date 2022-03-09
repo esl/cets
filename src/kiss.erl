@@ -28,6 +28,20 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type server() :: atom() | pid().
+-type request_id() :: term().
+-type backlog_msg() :: {insert, term()} | {delete, term()}.
+-type from() :: {pid(), reference()}.
+-type backlog_entry() :: {backlog_msg(), from()}.
+-type state() :: #{
+        tab := atom(),
+        mon_tab := atom(),
+        other_servers := [pid()],
+        opts := map(),
+        backlog := [backlog_entry()],
+        paused := false,
+        pause_monitor := undefined | reference()}.
+
 %% API functions
 
 %% Table and server has the same name
@@ -39,7 +53,7 @@
 %%   i.e. any functions that replicate changes are not allowed (i.e. insert/2,
 %%   remove/2).
 start(Tab, Opts) when is_atom(Tab) ->
-    gen_server:start({local, Tab}, ?MODULE, [Tab, Opts], []).
+    gen_server:start({local, Tab}, ?MODULE, {Tab, Opts}, []).
 
 stop(Tab) ->
     gen_server:stop(Tab).
@@ -47,8 +61,9 @@ stop(Tab) ->
 dump(Tab) ->
     ets:tab2list(Tab).
 
-remote_dump(Pid) ->
-    short_call(Pid, remote_dump).
+-spec remote_dump(server()) -> term().
+remote_dump(Server) ->
+    short_call(Server, remote_dump).
 
 send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
     Msg = {send_dump_to_remote_node, NewPids, OurDump},
@@ -59,27 +74,34 @@ send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
+-spec insert(server(), tuple()) -> ok.
 insert(Server, Rec) ->
     {ok, Monitors} = gen_server:call(Server, {insert, Rec}),
     wait_for_updated(Monitors).
 
-delete(Tab, Key) ->
-    delete_many(Tab, [Key]).
+-spec delete(server(), term()) -> ok.
+delete(Server, Key) ->
+    delete_many(Server, [Key]).
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
+-spec delete_many(server(), [term()]) -> ok.
 delete_many(Server, Keys) ->
     {ok, WaitInfo} = gen_server:call(Server, {delete, Keys}),
     wait_for_updated(WaitInfo).
 
+-spec insert_request(server(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
     gen_server:send_request(Server, {insert, Rec}).
 
+-spec delete_request(server(), term()) -> request_id().
 delete_request(Tab, Key) ->
     delete_many_request(Tab, [Key]).
 
+-spec delete_many_request(server(), term()) -> request_id().
 delete_many_request(Server, Keys) ->
     gen_server:send_request(Server, {delete, Keys}).
 
+-spec wait_response(request_id(), non_neg_integer() | timeout) -> term().
 wait_response(RequestId, Timeout) ->
     case gen_server:wait_response(RequestId, Timeout) of
         {reply, {ok, WaitInfo}} ->
@@ -94,27 +116,34 @@ other_servers(Server) ->
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
+-spec other_pids(server()) -> [pid()].
 other_pids(Server) ->
     servers_to_pids(other_servers(Server)).
 
-pause(RemotePid) ->
-    short_call(RemotePid, pause).
+-spec pause(server()) -> term().
+pause(Server) ->
+    short_call(Server, pause).
 
-unpause(RemotePid) ->
-    short_call(RemotePid, unpause).
+-spec unpause(server()) -> term().
+unpause(Server) ->
+    short_call(Server, unpause).
 
-sync(RemotePid) ->
-    short_call(RemotePid, sync).
+-spec sync(server()) -> term().
+sync(Server) ->
+    short_call(Server, sync).
 
-ping(RemotePid) ->
-    short_call(RemotePid, ping).
+-spec ping(server()) -> term().
+ping(Server) ->
+    short_call(Server, ping).
 
+-spec info(server()) -> term().
 info(Server) ->
     gen_server:call(Server, get_info).
 
 %% gen_server callbacks
 
-init([Tab, Opts]) ->
+-spec init(term()) -> {ok, state()}.
+init({Tab, Opts}) ->
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
     ets:new(MonTab, [public, named_table]),
@@ -123,6 +152,8 @@ init([Tab, Opts]) ->
            other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
 
+-spec handle_call(term(), from(), state()) ->
+        {noreply, state()} | {reply, term(), state()}.
 handle_call({insert, Rec}, From, State = #{paused := false}) ->
     handle_insert(Rec, From, State);
 handle_call({delete, Keys}, From, State = #{paused := false}) ->
@@ -140,7 +171,7 @@ handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State) ->
     Mon = erlang:monitor(process, FromPid),
-    {reply, ok, State#{paused => true, pause_monitor => Mon}};
+    {reply, ok, State#{paused := true, pause_monitor := Mon}};
 handle_call(unpause, _From, State) ->
     handle_unpause(State);
 handle_call(get_info, _From, State) ->
@@ -148,16 +179,18 @@ handle_call(get_info, _From, State) ->
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
     case should_backlogged(Msg) of
         true ->
-            {noreply, State#{backlog => [{Msg, From} | Backlog]}};
+            {noreply, State#{backlog := [{Msg, From} | Backlog]}};
         false ->
             ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
             {reply, {error, unexpected_call}, State}
     end.
 
+-spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
+-spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({remote_insert, Mon, Pid, Rec}, State = #{tab := Tab}) ->
     ets:insert(Tab, Rec),
     reply_updated(Pid, Mon),
@@ -184,7 +217,7 @@ handle_send_dump_to_remote_node(NewPids, Dump,
                                 State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, State#{other_servers => Servers2}}.
+    {reply, ok, State#{other_servers := Servers2}}.
 
 handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
     ?LOG_ERROR(#{what => pause_owner_crashed,
@@ -198,7 +231,7 @@ handle_down(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonT
             notify_remote_down(RemotePid, MonTab),
             %% Down from a proxy
             call_user_handle_down(RemotePid, State),
-            {noreply, State#{other_servers => Servers2}};
+            {noreply, State#{other_servers := Servers2}};
         false ->
             %% This should not happen
             ?LOG_ERROR(#{what => handle_down_failed,
@@ -308,6 +341,7 @@ apply_backlog([{Msg, From} | Backlog], State) ->
 apply_backlog([], State) ->
     State.
 
+-spec short_call(server(), term()) -> term().
 short_call(RemotePid, Msg) when is_pid(RemotePid) ->
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
     Info = #{task => Msg,
@@ -322,7 +356,7 @@ handle_unpause(State = #{paused := false}) ->
     {reply, {error, already_unpaused}, State};
 handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
     erlang:demonitor(Mon, [flush]),
-    State2 = State#{paused => false, backlog := [], pause_monitor => undefined},
+    State2 = State#{paused := false, backlog := [], pause_monitor := undefined},
     {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
 
 handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->

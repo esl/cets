@@ -11,6 +11,15 @@
 -type backend_state() :: term().
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
 
+-type from() :: {pid(), reference()}.
+-type state() :: #{
+        results := [term()],
+        tables := [atom()],
+        backend_module := module(),
+        backend_state := state(),
+        timer_ref := reference() | undefined
+       }.
+
 -callback init(map()) -> backend_state().
 -callback get_nodes(backend_state()) -> {get_nodes_result(), backend_state()}.
 
@@ -40,20 +49,23 @@ info(Server) ->
     {ok, Tables} = get_tables(Server),
     [kiss:info(Tab) || Tab <- Tables].
 
+-spec init(term()) -> {ok, state()}.
 init(Opts) ->
     Mod = maps:get(backend_module, Opts, kiss_discovery_file),
     self() ! check,
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
     {ok, #{results => [], tables => Tables,
-           backend_module => Mod, backend_state => BackendState}}.
+           backend_module => Mod, backend_state => BackendState,
+           timer_ref => undefined}}.
 
+-spec handle_call(term(), from(), state()) -> {reply, term(), state()}.
 handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
     case lists:member(Table, Tables) of
         true ->
             {reply, {error, already_added}, State};
         false ->
-            State2 = State#{tables => [Table | Tables]},
+            State2 = State#{tables := [Table | Tables]},
             {reply, ok, handle_check(State2)}
     end;
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
@@ -62,10 +74,12 @@ handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
 
+-spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
+-spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info(check, State) ->
     {noreply, handle_check(State)};
 handle_info(Msg, State) ->
@@ -78,27 +92,28 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec handle_check(state()) -> state().
 handle_check(State = #{tables := []}) ->
     %% No tables to track, skip
     schedule_check(State);
 handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
     {Res, BackendState2} = Mod:get_nodes(BackendState),
     State2 = handle_get_nodes_result(Res, State),
-    schedule_check(State2#{backend_state => BackendState2}).
+    schedule_check(State2#{backend_state := BackendState2}).
 
 handle_get_nodes_result({error, _Reason}, State) ->
     State;
 handle_get_nodes_result({ok, Nodes}, State = #{tables := Tables}) ->
     Results = [do_join(Tab, Node) || Tab <- Tables, Node <- Nodes, node() =/= Node],
     report_results(Results, State),
-    State#{results => Results}.
+    State#{results := Results}.
 
 schedule_check(State) ->
     cancel_old_timer(State),
     TimerRef = erlang:send_after(5000, self(), check),
-    State#{timer_ref => TimerRef}.
+    State#{timer_ref := TimerRef}.
 
-cancel_old_timer(#{timer_ref := OldRef}) ->
+cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
     erlang:cancel_timer(OldRef);
 cancel_old_timer(_State) ->
     ok.
