@@ -14,7 +14,7 @@
 %% - Add writer pid() or writer node() as a key. And do a proper cleanups using handle_down.
 %%   (the data could still get overwritten though if a node joins back way too quick
 %%    and cleaning is done outside of handle_down)
--module(kiss).
+-module(cets).
 -behaviour(gen_server).
 
 -export([start/2, stop/1, insert/2, delete/2, delete_many/2]).
@@ -75,7 +75,7 @@ send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
     Info = #{task => send_dump_to_remote_node,
              remote_pid => RemotePid, count => length(OurDump)},
-    kiss_long:run_safely(Info, F).
+    cets_long:run_safely(Info, F).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
@@ -123,7 +123,7 @@ other_nodes(Server) ->
 
 -spec other_pids(server()) -> [pid()].
 other_pids(Server) ->
-    servers_to_pids(other_servers(Server)).
+    other_servers(Server).
 
 -spec pause(server()) -> term().
 pause(Server) ->
@@ -153,7 +153,7 @@ init({Tab, Opts}) ->
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     ets:new(Tab, [ordered_set, named_table, public]),
     ets:new(MonTab, [public, named_table]),
-    kiss_mon_cleaner:start_link(MonTab, MonTab),
+    cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
            paused => false, pause_monitor => undefined}}.
@@ -167,7 +167,7 @@ handle_call({delete, Keys}, From, State = #{paused := false}) ->
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
 handle_call(sync, _From, State = #{other_servers := Servers}) ->
-    [ping(Pid) || Pid <- servers_to_pids(Servers)],
+    [ping(Pid) || Pid <- Servers],
     {reply, ok, State};
 handle_call(ping, _From, State) ->
     {reply, ping, State};
@@ -187,7 +187,9 @@ handle_call(unpause, _From, State) ->
 handle_call(get_info, _From, State) ->
     handle_get_info(State);
 handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
-    case should_backlogged(Msg) of
+    %% Backlog is a list of pending operation, when our server is paused.
+    %% The list would be applied, once our server is unpaused.
+    case should_backlog(Msg) of
         true ->
             {noreply, State#{backlog := [{Msg, From} | Backlog]}};
         false ->
@@ -259,6 +261,7 @@ notify_remote_down_loop(RemotePid, [{Mon, Pid} | List]) ->
 notify_remote_down_loop(_RemotePid, []) ->
     ok.
 
+%% Merge two lists of pids, create the missing monitors.
 add_servers(Pids, Servers) ->
     lists:sort(add_servers2(Pids, Servers) ++ Servers).
 
@@ -284,9 +287,6 @@ ets_delete_keys(Tab, [Key | Keys]) ->
     ets_delete_keys(Tab, Keys);
 ets_delete_keys(_Tab, []) ->
     ok.
-
-servers_to_pids(Servers) ->
-    [Pid || Pid <- Servers].
 
 has_remote_pid(RemotePid, Servers) ->
     lists:member(RemotePid, Servers).
@@ -325,6 +325,8 @@ replicate2([RemotePid | Servers], Msg) ->
 replicate2([], _Msg) ->
     ok.
 
+%% Wait for response from the remote nodes that the operation is completed.
+%% remote_down is sent by the local server, if the remote server is down.
 wait_for_updated({Mon, Servers, MonTab}) ->
     try
         wait_for_updated2(Mon, Servers)
@@ -339,6 +341,9 @@ wait_for_updated2(Mon, Servers) ->
         {updated, Mon, Pid} ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2);
+        %% What happens if the main server dies?
+        %% Technically, we could add a monitor, so we detect that case.
+        %% But if the server dies, we should stop the node anyway.
         {remote_down, Mon, Pid} ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2)
@@ -356,7 +361,7 @@ short_call(RemotePid, Msg) when is_pid(RemotePid) ->
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
     Info = #{task => Msg,
              remote_pid => RemotePid, remote_node => node(RemotePid)},
-    kiss_long:run_safely(Info, F);
+    cets_long:run_safely(Info, F);
 short_call(Name, Msg) when is_atom(Name) ->
     short_call(whereis(Name), Msg).
 
@@ -383,11 +388,11 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
             Info = #{task => call_user_handle_down, table => Tab,
                      remote_pid => RemotePid, remote_node => node(RemotePid)},
-            kiss_long:run_safely(Info, FF);
+            cets_long:run_safely(Info, FF);
         _ ->
             ok
     end.
 
-should_backlogged({insert, _}) -> true;
-should_backlogged({delete, _}) -> true;
-should_backlogged(_) -> false.
+should_backlog({insert, _}) -> true;
+should_backlog({delete, _}) -> true;
+should_backlog(_) -> false.

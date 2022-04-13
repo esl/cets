@@ -4,8 +4,8 @@
 %% - DNS does not allow to list subdomains
 %% So, we use a file with nodes to connect as a discovery mechanism
 %% (so, you can hardcode nodes or use your method of filling it)
--module(kiss_discovery_file).
--behaviour(kiss_discovery).
+-module(cets_discovery_file).
+-behaviour(cets_discovery).
 -export([init/1, get_nodes/1]).
 
 -include_lib("kernel/include/logger.hrl").

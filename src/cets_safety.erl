@@ -1,4 +1,4 @@
--module(kiss_safety).
+-module(cets_safety).
 -export([run/2]).
 -include_lib("kernel/include/logger.hrl").
 

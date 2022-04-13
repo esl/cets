@@ -1,4 +1,4 @@
--module(kiss_SUITE).
+-module(cets_SUITE).
 -include_lib("common_test/include/ct.hrl").
  
 -compile([export_all, nowarn_export_all]).
@@ -94,32 +94,32 @@ test_multinode_auto_discovery(Config) ->
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco.txt"),
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = kiss_discovery:start(#{tables => [Tab], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
     %% Waits for the first check
     sys:get_state(Disco),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}]
-        = kiss_discovery:info(Disco),
+        = cets_discovery:info(Disco),
     ok.
 
 test_locally(_Config) ->
-    {ok, Pid1} = kiss:start(t1, #{}),
-    {ok, Pid2} = kiss:start(t2, #{}),
-    ok = kiss_join:join(lock1, #{table => [t1, t2]}, Pid1, Pid2),
-    kiss:insert(t1, {1}),
-    kiss:insert(t1, {1}),
-    kiss:insert(t2, {2}),
-    D = kiss:dump(t1),
-    D = kiss:dump(t2).
+    {ok, Pid1} = cets:start(t1, #{}),
+    {ok, Pid2} = cets:start(t2, #{}),
+    ok = cets_join:join(lock1, #{table => [t1, t2]}, Pid1, Pid2),
+    cets:insert(t1, {1}),
+    cets:insert(t1, {1}),
+    cets:insert(t2, {2}),
+    D = cets:dump(t1),
+    D = cets:dump(t2).
 
 handle_down_is_called(_Config) ->
     Parent = self(),
     DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) ->
                      Parent ! down_called
              end,
-    {ok, Pid1} = kiss:start(d1, #{handle_down => DownFn}),
-    {ok, Pid2} = kiss:start(d2, #{}),
-    ok = kiss_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
+    {ok, Pid1} = cets:start(d1, #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(d2, #{}),
+    ok = cets_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
     exit(Pid2, oops),
     receive
         down_called -> ok
@@ -128,48 +128,48 @@ handle_down_is_called(_Config) ->
 
 events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     T = t4,
-    {ok, Pid} = kiss:start(T, #{}),
-    ok = kiss:pause(Pid),
-    R1 = kiss:insert_request(T, {1}),
-    R2 = kiss:delete_request(T, 1),
-    kiss:delete_request(T, 2),
-    kiss:insert_request(T, {2}),
-    kiss:insert_request(T, {3}),
-    kiss:insert_request(T, {4}),
-    kiss:insert_request(T, {5}),
-    R3 = kiss:insert_request(T, [{6}, {7}]),
-    R4 = kiss:delete_many_request(T, [5, 4]),
-    [] = lists:sort(kiss:dump(T)),
-    ok = kiss:unpause(Pid),
-    [ok = kiss:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
-    [{2}, {3}, {6}, {7}] = lists:sort(kiss:dump(T)).
+    {ok, Pid} = cets:start(T, #{}),
+    ok = cets:pause(Pid),
+    R1 = cets:insert_request(T, {1}),
+    R2 = cets:delete_request(T, 1),
+    cets:delete_request(T, 2),
+    cets:insert_request(T, {2}),
+    cets:insert_request(T, {3}),
+    cets:insert_request(T, {4}),
+    cets:insert_request(T, {5}),
+    R3 = cets:insert_request(T, [{6}, {7}]),
+    R4 = cets:delete_many_request(T, [5, 4]),
+    [] = lists:sort(cets:dump(T)),
+    ok = cets:unpause(Pid),
+    [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
+    [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
 
 write_returns_if_remote_server_crashes(_Config) ->
-    {ok, Pid1} = kiss:start(c1, #{}),
-    {ok, Pid2} = kiss:start(c2, #{}),
-    ok = kiss_join:join(lock1, #{table => [c1, c2]}, Pid1, Pid2),
+    {ok, Pid1} = cets:start(c1, #{}),
+    {ok, Pid2} = cets:start(c2, #{}),
+    ok = cets_join:join(lock1, #{table => [c1, c2]}, Pid1, Pid2),
     sys:suspend(Pid2),
-    R = kiss:insert_request(c1, {1}),
+    R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
-    ok = kiss:wait_response(R, 5000).
+    ok = cets:wait_response(R, 5000).
 
 mon_cleaner_works(_Config) ->
-    {ok, Pid1} = kiss:start(c3, #{}),
+    {ok, Pid1} = cets:start(c3, #{}),
     %% Suspend, so to avoid unexpected check
     sys:suspend(c3_mon),
     %% Two cases to check: an alive process and a dead process 
-    R = kiss:insert_request(c3, {2}),
+    R = cets:insert_request(c3, {2}),
     %% Ensure insert_request reaches the server
-    kiss:ping(Pid1),
+    cets:ping(Pid1),
     %% There is one monitor
     [_] = ets:tab2list(c3_mon),
-    {Pid, Mon} = spawn_monitor(fun() -> kiss:insert_request(c3, {1}) end),
+    {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
     receive
         {'DOWN', Mon, process, Pid, _Reason} -> ok
     after 5000 -> ct:fail(timeout)
     end,
     %% Ensure insert_request reaches the server
-    kiss:ping(Pid1),
+    cets:ping(Pid1),
     %% There are two monitors
     [_, _] = ets:tab2list(c3_mon),
     %% Force check
@@ -180,33 +180,33 @@ mon_cleaner_works(_Config) ->
     %% A monitor for a dead process is removed
     [_] = ets:tab2list(c3_mon),
     %% The monitor is finally removed once wait_response returns
-    ok = kiss:wait_response(R, 5000),
+    ok = cets:wait_response(R, 5000),
     [] = ets:tab2list(c3_mon).
 
 sync_using_name_works(_Config) ->
-    {ok, _Pid1} = kiss:start(c4, #{}),
-    kiss:sync(c4).
+    {ok, _Pid1} = cets:start(c4, #{}),
+    cets:sync(c4).
 
 start(Node, Tab) ->
-    rpc(Node, kiss, start, [Tab, #{}]).
+    rpc(Node, cets, start, [Tab, #{}]).
 
 insert(Node, Tab, Rec) ->
-    rpc(Node, kiss, insert, [Tab, Rec]).
+    rpc(Node, cets, insert, [Tab, Rec]).
 
 delete(Node, Tab, Key) ->
-    rpc(Node, kiss, delete, [Tab, Key]).
+    rpc(Node, cets, delete, [Tab, Key]).
 
 delete_many(Node, Tab, Keys) ->
-    rpc(Node, kiss, delete_many, [Tab, Keys]).
+    rpc(Node, cets, delete_many, [Tab, Keys]).
 
 dump(Node, Tab) ->
-    rpc(Node, kiss, dump, [Tab]).
+    rpc(Node, cets, dump, [Tab]).
 
 other_nodes(Node, Tab) ->
-    rpc(Node, kiss, other_nodes, [Tab]).
+    rpc(Node, cets, other_nodes, [Tab]).
 
 join(Node1, Tab, Pid1, Pid2) ->
-    rpc(Node1, kiss_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
+    rpc(Node1, cets_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
 
 rpc(Node, M, F, Args) ->
     case rpc:call(Node, M, F, Args) of
