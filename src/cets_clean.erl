@@ -1,4 +1,4 @@
--module(kiss_clean).
+-module(cets_clean).
 -export([blocking/1]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -11,7 +11,7 @@ blocking(F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-            Res = kiss_safety:run(#{what => blocking_call_failed}, F),
+            Res = cets_safety:run(#{what => blocking_call_failed}, F),
             Pid ! {result, Ref, Res}
         end),
     receive

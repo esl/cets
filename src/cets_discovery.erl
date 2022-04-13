@@ -1,5 +1,5 @@
 %% Joins table together when a new node appears
--module(kiss_discovery).
+-module(cets_discovery).
 -behaviour(gen_server).
 
 -export([start/1, start_link/1, add_table/2, info/1]).
@@ -47,11 +47,11 @@ get_tables(Server) ->
 
 info(Server) ->
     {ok, Tables} = get_tables(Server),
-    [kiss:info(Tab) || Tab <- Tables].
+    [cets:info(Tab) || Tab <- Tables].
 
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
-    Mod = maps:get(backend_module, Opts, kiss_discovery_file),
+    Mod = maps:get(backend_module, Opts, cets_discovery_file),
     self() ! check,
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
@@ -123,7 +123,7 @@ do_join(Tab, Node) ->
     %% That would trigger autoconnect for the first time
     case rpc:call(Node, erlang, whereis, [Tab]) of
         Pid when is_pid(Pid), is_pid(LocalPid) ->
-            Result = kiss_join:join(kiss_discovery, #{table => Tab}, LocalPid, Pid),
+            Result = cets_join:join(cets_discovery, #{table => Tab}, LocalPid, Pid),
             #{what => join_result, result => Result, node => Node, table => Tab};
         Other ->
             #{what => pid_not_found, reason => Other, node => Node, table => Tab}

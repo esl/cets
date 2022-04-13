@@ -3,7 +3,7 @@
 %% Unless the caller process crashes.
 %% This server removes such entries from the MonTab.
 %% We don't expect the MonTab to be extremely big, so this check should be quick.
--module(kiss_mon_cleaner).
+-module(cets_mon_cleaner).
 -behaviour(gen_server).
 
 -export([start_link/2]).

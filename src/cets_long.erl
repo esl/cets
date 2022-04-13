@@ -1,4 +1,4 @@
--module(kiss_long).
+-module(cets_long).
 -export([run/2]).
 -export([run_safely/2]).
 
@@ -17,7 +17,7 @@ run(Info, Fun, Catch) ->
     Pid = spawn_mon(Info, Parent, Start),
     try
             case Catch of
-                true -> kiss_safety:run(Info#{what => long_task_failed}, Fun);
+                true -> cets_safety:run(Info#{what => long_task_failed}, Fun);
                 false -> Fun()
             end
         after

@@ -1,9 +1,9 @@
-{application, kiss,
- [{description, "Simple Base"},
+{application, cets,
+ [{description, "Clustered Erlang Term Storage"},
   {vsn, "0.1"},
   {modules, []},
   {registered, []},
   {applications, [kernel, stdlib]},
   {env, []}
-% {mod, {kiss_app, []}
+% {mod, {cets_app, []}
   ]}.
