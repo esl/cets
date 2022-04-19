@@ -17,14 +17,15 @@
 -module(cets).
 -behaviour(gen_server).
 
--export([start/2, stop/1, insert/2, delete/2, delete_many/2]).
+-export([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2]).
 -export([dump/1, remote_dump/1, send_dump_to_remote_node/3, table_name/1]).
 -export([other_nodes/1, other_pids/1]).
 -export([pause/1, unpause/1, sync/1, ping/1]).
 -export([info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
--export([insert_request/2, delete_request/2, delete_many_request/2, wait_response/2]).
+-export([insert_request/2, insert_many_request/2,
+         delete_request/2, delete_many_request/2, wait_response/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -80,8 +81,13 @@ send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
 -spec insert(server(), tuple()) -> ok.
-insert(Server, Rec) ->
+insert(Server, Rec) when is_tuple(Rec) ->
     {ok, Monitors} = gen_server:call(Server, {insert, Rec}),
+    wait_for_updated(Monitors).
+
+-spec insert_many(server(), list(tuple())) -> ok.
+insert_many(Server, Records) when is_list(Records) ->
+    {ok, Monitors} = gen_server:call(Server, {insert, Records}),
     wait_for_updated(Monitors).
 
 -spec delete(server(), term()) -> ok.
@@ -97,6 +103,10 @@ delete_many(Server, Keys) ->
 -spec insert_request(server(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
     gen_server:send_request(Server, {insert, Rec}).
+
+-spec insert_many_request(server(), [tuple()]) -> request_id().
+insert_many_request(Server, Records) ->
+    gen_server:send_request(Server, {insert, Records}).
 
 -spec delete_request(server(), term()) -> request_id().
 delete_request(Tab, Key) ->
