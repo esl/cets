@@ -8,7 +8,8 @@ all() -> [test_multinode, node_list_is_correct,
           handle_down_is_called,
           events_are_applied_in_the_correct_order_after_unpause,
           write_returns_if_remote_server_crashes,
-          mon_cleaner_works, sync_using_name_works].
+          mon_cleaner_works, sync_using_name_works,
+          insert_many_request].
  
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -61,7 +62,7 @@ test_multinode(Config) ->
     delete(Node4, Tab, a),
     Same([{b}, {c}, {d}, {f}]),
     %% Bulk operations are supported
-    insert(Node4, Tab, [{m}, {a}, {n}, {y}]),
+    insert_many(Node4, Tab, [{m}, {a}, {n}, {y}]),
     Same([{a}, {b}, {c}, {d}, {f}, {m}, {n}, {y}]),
     delete_many(Node4, Tab, [a,n]),
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
@@ -187,11 +188,20 @@ sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),
     cets:sync(c4).
 
+insert_many_request(_Config) ->
+    {ok, Pid} = cets:start(c5, #{}),
+    R = cets:insert_many_request(Pid, [{a}, {b}]),
+    ok = cets:wait_response(R, 5000),
+    [{a}, {b}] = ets:tab2list(c5).
+
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
 
 insert(Node, Tab, Rec) ->
     rpc(Node, cets, insert, [Tab, Rec]).
+
+insert_many(Node, Tab, Records) ->
+    rpc(Node, cets, insert_many, [Tab, Records]).
 
 delete(Node, Tab, Key) ->
     rpc(Node, cets, delete, [Tab, Key]).
