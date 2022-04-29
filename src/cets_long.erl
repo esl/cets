@@ -1,8 +1,24 @@
+%% Helper to log long running operations.
 -module(cets_long).
--export([run/2]).
--export([run_safely/2]).
+-export([run_spawn/2, run/2, run_safely/2]).
 
 -include_lib("kernel/include/logger.hrl").
+
+%% Spawn a new process to do some memory-intensive task
+%% This allows to reduce GC on the parent process
+%% Wait for function to finish
+%% Handles errors
+run_spawn(Info, F) ->
+    Pid = self(),
+    Ref = make_ref(),
+    proc_lib:spawn_link(fun() ->
+            Res = cets_long:run_safely(Info, F),
+            Pid ! {result, Ref, Res}
+        end),
+    receive
+        {result, Ref, Res} ->
+            Res
+    end.
 
 run_safely(Info, Fun) ->
     run(Info, Fun, true).
@@ -17,7 +33,7 @@ run(Info, Fun, Catch) ->
     Pid = spawn_mon(Info, Parent, Start),
     try
             case Catch of
-                true -> cets_safety:run(Info#{what => long_task_failed}, Fun);
+                true -> just_run_safely(Info#{what => long_task_failed}, Fun);
                 false -> Fun()
             end
         after
@@ -47,3 +63,11 @@ monitor_loop(Mon, Info, Start) ->
 
 diff(Start) ->
     erlang:system_time(millisecond) - Start.
+
+just_run_safely(Info, Fun) ->
+    try
+        Fun()
+    catch Class:Reason:Stacktrace ->
+              ?LOG_ERROR(Info#{class => Class, reason => Reason, stacktrace => Stacktrace}),
+              {error, {Class, Reason, Stacktrace}}
+    end.
