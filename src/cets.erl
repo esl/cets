@@ -342,8 +342,6 @@ wait_for_updated2(Mon, Servers) ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2);
         %% What happens if the main server dies?
-        %% Technically, we could add a monitor, so we detect that case.
-        %% But if the server dies, we should stop the node anyway.
         {remote_down, Mon, Pid} ->
             Servers2 = lists:delete(Pid, Servers),
             wait_for_updated2(Mon, Servers2)
