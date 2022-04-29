@@ -1,3 +1,4 @@
+%% Helper to log long running operations.
 -module(cets_long).
 -export([run/2]).
 -export([run_safely/2]).
@@ -17,7 +18,7 @@ run(Info, Fun, Catch) ->
     Pid = spawn_mon(Info, Parent, Start),
     try
             case Catch of
-                true -> cets_safety:run(Info#{what => long_task_failed}, Fun);
+                true -> just_run_safely(Info#{what => long_task_failed}, Fun);
                 false -> Fun()
             end
         after
@@ -47,3 +48,11 @@ monitor_loop(Mon, Info, Start) ->
 
 diff(Start) ->
     erlang:system_time(millisecond) - Start.
+
+just_run_safely(Info, Fun) ->
+    try
+        Fun()
+    catch Class:Reason:Stacktrace ->
+              ?LOG_ERROR(Info#{class => Class, reason => Reason, stacktrace => Stacktrace}),
+              {error, {Class, Reason, Stacktrace}}
+    end.

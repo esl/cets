@@ -11,7 +11,7 @@ blocking(F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-            Res = cets_safety:run(#{what => blocking_call_failed}, F),
+            Res = cets_long:run_safely(#{what => blocking_call_failed}, F),
             Pid ! {result, Ref, Res}
         end),
     receive
