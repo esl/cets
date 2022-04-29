@@ -133,6 +133,7 @@ pause(Server) ->
 unpause(Server) ->
     short_call(Server, unpause).
 
+%% Waits till all pending operations are applied.
 -spec sync(server()) -> term().
 sync(Server) ->
     short_call(Server, sync).
@@ -166,9 +167,13 @@ handle_call({delete, Keys}, From, State = #{paused := false}) ->
     handle_delete(Keys, From, State);
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
-handle_call(sync, _From, State = #{other_servers := Servers}) ->
-    [ping(Pid) || Pid <- Servers],
-    {reply, ok, State};
+handle_call(sync, From, State = #{other_servers := Servers}) ->
+    %% Do spawn to avoid any possible deadlocks
+    proc_lib:spawn(fun() ->
+            [ping(Pid) || Pid <- Servers],
+            gen_server:reply(From, ok)
+        end),
+    {noreply, State};
 handle_call(ping, _From, State) ->
     {reply, ping, State};
 handle_call(table_name, _From, State = #{tab := Tab}) ->
