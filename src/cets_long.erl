@@ -12,7 +12,7 @@ run(Info, Fun) ->
 
 run(Info, Fun, Catch) ->
     Parent = self(),
-    Start = os:timestamp(),
+    Start = erlang:system_time(millisecond),
     ?LOG_INFO(Info#{what => long_task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
@@ -46,4 +46,4 @@ monitor_loop(Mon, Info, Start) ->
     end.
 
 diff(Start) ->
-    timer:now_diff(os:timestamp(), Start) div 1000.
+    erlang:system_time(millisecond) - Start.

@@ -17,7 +17,7 @@ join1(LockKey, Info, LocalPid, RemotePid) ->
         true ->
             {error, already_joined};
         false ->
-                Start = os:timestamp(),
+                Start = erlang:system_time(millisecond),
                 F = fun() -> join_loop(LockKey, Info, LocalPid, RemotePid, Start) end,
                 cets_long:run(Info#{task => join}, F)
     end.
@@ -27,7 +27,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
     %% - for performance reasons, we don't want to cause too much load for active nodes
     %% - to avoid deadlocks, because joining does gen_server calls
     F = fun() ->
-        Diff = timer:now_diff(os:timestamp(), Start) div 1000,
+        Diff = erlang:system_time(millisecond) - Start,
         %% Getting the lock could take really long time in case nodes are
         %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
