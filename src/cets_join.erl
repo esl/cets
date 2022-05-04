@@ -52,7 +52,7 @@ join2(_Info, LocalPid, RemotePid) ->
     LocPids = [LocalPid|LocalOtherPids],
     RemPids = [RemotePid|RemoteOtherPids],
     AllPids = LocPids ++ RemPids,
-    [cets:pause(Pid) || Pid <- AllPids],
+    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
@@ -65,7 +65,7 @@ join2(_Info, LocalPid, RemotePid) ->
         [cets:send_dump_to_remote_node(Pid, RemPids, RemoteDump) || Pid <- LocPids],
         ok
     after
-        [cets:unpause(Pid) || Pid <- AllPids]
+        [cets:unpause(Pid, Ref) || {Pid, Ref} <- Paused]
     end.
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->

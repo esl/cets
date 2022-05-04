@@ -20,7 +20,7 @@
 -export([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2]).
 -export([dump/1, remote_dump/1, send_dump_to_remote_node/3, table_name/1]).
 -export([other_nodes/1, other_pids/1]).
--export([pause/1, unpause/1, sync/1, ping/1]).
+-export([pause/1, unpause/2, sync/1, ping/1]).
 -export([info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -40,8 +40,7 @@
         other_servers := [pid()],
         opts := map(),
         backlog := [backlog_entry()],
-        paused := false,
-        pause_monitor := undefined | reference()}.
+        pause_monitors := [reference()]}.
 
 %% API functions
 
@@ -82,13 +81,11 @@ send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
 %% Ideally Key should contain inserter node info (for cleaning).
 -spec insert(server(), tuple()) -> ok.
 insert(Server, Rec) when is_tuple(Rec) ->
-    {ok, Monitors} = gen_server:call(Server, {insert, Rec}),
-    wait_for_updated(Monitors).
+    sync_operation(Server, {insert, Rec}).
 
 -spec insert_many(server(), list(tuple())) -> ok.
 insert_many(Server, Records) when is_list(Records) ->
-    {ok, Monitors} = gen_server:call(Server, {insert, Records}),
-    wait_for_updated(Monitors).
+    sync_operation(Server, {insert, Records}).
 
 -spec delete(server(), term()) -> ok.
 delete(Server, Key) ->
@@ -97,16 +94,15 @@ delete(Server, Key) ->
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
 -spec delete_many(server(), [term()]) -> ok.
 delete_many(Server, Keys) ->
-    {ok, WaitInfo} = gen_server:call(Server, {delete, Keys}),
-    wait_for_updated(WaitInfo).
+    sync_operation(Server, {delete, Keys}).
 
 -spec insert_request(server(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
-    gen_server:send_request(Server, {insert, Rec}).
+    async_operation(Server, {insert, Rec}).
 
 -spec insert_many_request(server(), [tuple()]) -> request_id().
 insert_many_request(Server, Records) ->
-    gen_server:send_request(Server, {insert, Records}).
+    async_operation(Server, {insert, Records}).
 
 -spec delete_request(server(), term()) -> request_id().
 delete_request(Tab, Key) ->
@@ -114,16 +110,7 @@ delete_request(Tab, Key) ->
 
 -spec delete_many_request(server(), term()) -> request_id().
 delete_many_request(Server, Keys) ->
-    gen_server:send_request(Server, {delete, Keys}).
-
--spec wait_response(request_id(), non_neg_integer() | timeout) -> term().
-wait_response(RequestId, Timeout) ->
-    case gen_server:wait_response(RequestId, Timeout) of
-        {reply, {ok, WaitInfo}} ->
-            wait_for_updated(WaitInfo);
-        Other ->
-            Other
-    end.
+    async_operation(Server, {delete, Keys}).
 
 other_servers(Server) ->
     gen_server:call(Server, other_servers).
@@ -135,13 +122,13 @@ other_nodes(Server) ->
 other_pids(Server) ->
     other_servers(Server).
 
--spec pause(server()) -> term().
+-spec pause(server()) -> reference().
 pause(Server) ->
     short_call(Server, pause).
 
--spec unpause(server()) -> term().
-unpause(Server) ->
-    short_call(Server, unpause).
+-spec unpause(server(), reference()) -> term().
+unpause(Server, PauseRef) ->
+    short_call(Server, {unpause, PauseRef}).
 
 %% Waits till all pending operations are applied.
 -spec sync(server()) -> term().
@@ -167,14 +154,10 @@ init({Tab, Opts}) ->
     cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
-           paused => false, pause_monitor => undefined}}.
+           pause_monitors => []}}.
 
 -spec handle_call(term(), from(), state()) ->
         {noreply, state()} | {reply, term(), state()}.
-handle_call({insert, Rec}, From, State = #{paused := false}) ->
-    handle_insert(Rec, From, State);
-handle_call({delete, Keys}, From, State = #{paused := false}) ->
-    handle_delete(Keys, From, State);
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
@@ -194,37 +177,30 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     {noreply, State};
 handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
     handle_send_dump_to_remote_node(NewPids, Dump, State);
-handle_call(pause, _From = {FromPid, _}, State) ->
+handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
+    %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
-    {reply, ok, State#{paused := true, pause_monitor := Mon}};
-handle_call(unpause, _From, State) ->
-    handle_unpause(State);
+    {reply, Mon, State#{pause_monitors := [Mon|Mons]}};
+handle_call({unpause, Ref}, _From, State) ->
+    handle_unpause(Ref, State);
 handle_call(get_info, _From, State) ->
-    handle_get_info(State);
-handle_call(Msg, From, State = #{paused := true, backlog := Backlog}) ->
-    %% Backlog is a list of pending operation, when our server is paused.
-    %% The list would be applied, once our server is unpaused.
-    case should_backlog(Msg) of
-        true ->
-            {noreply, State#{backlog := [{Msg, From} | Backlog]}};
-        false ->
-            ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
-            {reply, {error, unexpected_call}, State}
-    end.
+    handle_get_info(State).
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
+handle_cast({op, From, Msg}, State = #{pause_monitors := []}) ->
+    handle_op(From, Msg, State),
+    {noreply, State};
+handle_cast({op, From, Msg}, State = #{pause_monitors := [_|_], backlog := Backlog}) ->
+    %% Backlog is a list of pending operation, when our server is paused.
+    %% The list would be applied, once our server is unpaused.
+    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_insert, Mon, Pid, Rec}, State = #{tab := Tab}) ->
-    ets:insert(Tab, Rec),
-    reply_updated(Pid, Mon),
-    {noreply, State};
-handle_info({remote_delete, Mon, Pid, Keys}, State = #{tab := Tab}) ->
-    ets_delete_keys(Tab, Keys),
-    reply_updated(Pid, Mon),
+handle_info({remote_op, From, Msg}, State) ->
+    handle_remote_op(From, Msg, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
@@ -246,12 +222,18 @@ handle_send_dump_to_remote_node(NewPids, Dump,
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, State#{other_servers := Servers2}}.
 
-handle_down(Mon, PausedByPid, State = #{pause_monitor := Mon}) ->
-    ?LOG_ERROR(#{what => pause_owner_crashed,
-                 state => State, paused_by_pid => PausedByPid}),
-    {reply, ok, State2} = handle_unpause(State),
-    {noreply, State2};
-handle_down(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
+    case lists:member(Mon, Mons) of
+        true ->
+            ?LOG_ERROR(#{what => pause_owner_crashed,
+                         state => State, paused_by_pid => Pid}),
+            {reply, ok, State2} = handle_unpause(Mon, State),
+            {noreply, State2};
+        false ->
+            handle_down2(Mon, Pid, State)
+    end.
+
+handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
     case lists:member(RemotePid, Servers) of
         true ->
             Servers2 = lists:delete(RemotePid, Servers),
@@ -306,33 +288,39 @@ ets_delete_keys(_Tab, []) ->
 has_remote_pid(RemotePid, Servers) ->
     lists:member(RemotePid, Servers).
 
-reply_updated(Pid, Mon) ->
+reply_updated({Mon, Pid}) ->
     %% We really don't wanna block this process
     erlang:send(Pid, {updated, Mon, self()}, [noconnect, nosuspend]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
-handle_insert(Rec, _From = {FromPid, Mon},
-              State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
-    ets:insert(Tab, Rec),
-    %% Insert to other nodes and block till written
-    WaitInfo = replicate(Mon, Servers, remote_insert, Rec, FromPid, MonTab),
-    {reply, {ok, WaitInfo}, State}.
+%% Handle operation from a remote node
+handle_remote_op(From, Msg, State) ->
+    do_op(Msg, State),
+    reply_updated(From).
 
-handle_delete(Keys, _From = {FromPid, Mon},
-              State = #{tab := Tab, mon_tab := MonTab, other_servers := Servers}) ->
-    ets_delete_keys(Tab, Keys),
-    %% Insert to other nodes and block till written
-    WaitInfo = replicate(Mon, Servers, remote_delete, Keys, FromPid, MonTab),
-    {reply, {ok, WaitInfo}, State}.
+%% Apply operation for one local table only
+do_op(Msg, #{tab := Tab}) ->
+    do_table_op(Msg, Tab).
 
-replicate(Mon, Servers, Cmd, Payload, FromPid, MonTab) ->
+do_table_op({insert, Rec}, Tab) ->
+    ets:insert(Tab, Rec);
+do_table_op({delete, Keys}, Tab) ->
+    ets_delete_keys(Tab, Keys).
+
+%% Handle operation locally and replicate it across the cluster
+handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
+    do_op(Msg, State),
+    WaitInfo = replicate(From, Msg, State),
+    Pid ! {cets_reply, Mon, WaitInfo}.
+
+replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
-    Msg = {Cmd, Mon, FromPid, Payload},
-    replicate2(Servers, Msg),
-    ets:insert(MonTab, {Mon, FromPid}),
-    {Mon, Servers, MonTab}.
+    Msg2 = {remote_op, From, Msg},
+    replicate2(Servers, Msg2),
+    ets:insert(MonTab, From),
+    {Servers, MonTab}.
 
 replicate2([RemotePid | Servers], Msg) ->
     send_to_remote(RemotePid, Msg),
@@ -340,32 +328,9 @@ replicate2([RemotePid | Servers], Msg) ->
 replicate2([], _Msg) ->
     ok.
 
-%% Wait for response from the remote nodes that the operation is completed.
-%% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated({Mon, Servers, MonTab}) ->
-    try
-        wait_for_updated2(Mon, Servers)
-    after
-        ets:delete(MonTab, Mon)
-    end.
-
-wait_for_updated2(_Mon, []) ->
-    ok;
-wait_for_updated2(Mon, Servers) ->
-    receive
-        {updated, Mon, Pid} ->
-            Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2);
-        %% What happens if the main server dies?
-        {remote_down, Mon, Pid} ->
-            Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2)
-    end.
-
 apply_backlog([{Msg, From} | Backlog], State) ->
-    {reply, Reply, State2} = handle_call(Msg, From, State),
-    gen_server:reply(From, Reply),
-    apply_backlog(Backlog, State2);
+    handle_op(From, Msg, State),
+    apply_backlog(Backlog, State);
 apply_backlog([], State) ->
     State.
 
@@ -378,14 +343,23 @@ short_call(RemotePid, Msg) when is_pid(RemotePid) ->
 short_call(Name, Msg) when is_atom(Name) ->
     short_call(whereis(Name), Msg).
 
-%% Theoretically we can support mupltiple pauses (but no need for now because
-%% we pause in the global locked function)
-handle_unpause(State = #{paused := false}) ->
+%% We support multiple pauses
+%% Only when all pause requests are unpaused we continue
+handle_unpause(_Ref, State = #{pause_monitors := []}) ->
     {reply, {error, already_unpaused}, State};
-handle_unpause(State = #{backlog := Backlog, pause_monitor := Mon}) ->
+handle_unpause(Mon, State = #{backlog := Backlog, pause_monitors := Mons}) ->
     erlang:demonitor(Mon, [flush]),
-    State2 = State#{paused := false, backlog := [], pause_monitor := undefined},
-    {reply, ok, apply_backlog(lists:reverse(Backlog), State2)}.
+    Mons2 = lists:delete(Mon, Mons),
+    State2 = State#{pause_monitors := Mons2},
+    State3 =
+        case Mons2 of
+            [] ->
+                apply_backlog(lists:reverse(Backlog), State2),
+                State2#{backlog := []};
+            _ ->
+                State2
+        end,
+    {reply, ok, State3}.
 
 handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->
     Info = #{table => Tab,
@@ -406,6 +380,52 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             ok
     end.
 
-should_backlog({insert, _}) -> true;
-should_backlog({delete, _}) -> true;
-should_backlog(_) -> false.
+async_operation(Server, Msg) ->
+    Mon = erlang:monitor(process, Server),
+    gen_server:cast(Server, {op, {Mon, self()}, Msg}),
+    Mon.
+
+sync_operation(Server, Msg) ->
+    Mon = async_operation(Server, Msg),
+    %% We monitor the local server until the response from all servers is collected.
+    wait_response(Mon, infinity).
+
+-spec wait_response(request_id(), non_neg_integer() | infinity) -> term().
+wait_response(Mon, Timeout) ->
+    receive
+        {'DOWN', Mon, process, _Pid, Reason} ->
+            error({cets_down, Reason});
+        {cets_reply, Mon, WaitInfo} ->
+            wait_for_updated(Mon, WaitInfo)
+    after Timeout ->
+            erlang:demonitor(Mon, [flush]),
+            error(timeout)
+    end.
+
+%% Wait for response from the remote nodes that the operation is completed.
+%% remote_down is sent by the local server, if the remote server is down.
+wait_for_updated(Mon, {Servers, MonTab}) ->
+    try
+        wait_for_updated2(Mon, Servers)
+    after
+        erlang:demonitor(Mon, [flush]),
+        ets:delete(MonTab, Mon)
+    end.
+
+wait_for_updated2(_Mon, []) ->
+    ok;
+wait_for_updated2(Mon, Servers) ->
+    receive
+        {updated, Mon, Pid} ->
+            %% A replication confirmation from the remote server is received
+            Servers2 = lists:delete(Pid, Servers),
+            wait_for_updated2(Mon, Servers2);
+        {remote_down, Mon, Pid} ->
+            %% This message is sent by our local server when
+            %% the remote server is down condition is detected
+            Servers2 = lists:delete(Pid, Servers),
+            wait_for_updated2(Mon, Servers2);
+        {'DOWN', Mon, process, _Pid, Reason} ->
+            %% Local server is down, this is a critical error
+            error({cets_down, Reason})
+    end.
