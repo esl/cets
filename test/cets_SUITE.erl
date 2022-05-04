@@ -130,7 +130,7 @@ handle_down_is_called(_Config) ->
 events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     T = t4,
     {ok, Pid} = cets:start(T, #{}),
-    ok = cets:pause(Pid),
+    PauseMon = cets:pause(Pid),
     R1 = cets:insert_request(T, {1}),
     R2 = cets:delete_request(T, 1),
     cets:delete_request(T, 2),
@@ -141,7 +141,7 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     R3 = cets:insert_request(T, [{6}, {7}]),
     R4 = cets:delete_many_request(T, [5, 4]),
     [] = lists:sort(cets:dump(T)),
-    ok = cets:unpause(Pid),
+    ok = cets:unpause(Pid, PauseMon),
     [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
 
