@@ -36,19 +36,30 @@
 -type server_ref() :: pid() | atom() | {local, atom()}
                     | {global, term()} | {via, module(), term()}.
 -type request_id() :: reference().
--type backlog_msg() :: {insert, term()} | {delete, term()}.
+-type op() :: {insert, tuple()} | {delete, term()}
+              | {insert_many, [tuple()]} | {delete_many, [term()]}.
 -type from() :: {pid(), reference()}.
--type backlog_entry() :: {backlog_msg(), from()}.
+-type backlog_entry() :: {op(), from()}.
+-type table_name() :: atom().
+-type pause_monitor() :: reference().
 -type state() :: #{
-        tab := atom(),
+        tab := table_name(),
         mon_tab := atom(),
         other_servers := [pid()],
-        opts := map(),
+        opts := start_opts(),
         backlog := [backlog_entry()],
-        pause_monitors := [reference()]}.
+        pause_monitors := [pause_monitor()]}.
 
 -type short_msg() ::
     pause | ping | remote_dump | sync | table_name | {unpause, reference()}.
+
+-type info() :: #{table := table_name(),
+                  nodes := [node()],
+                  size := non_neg_integer(),
+                  memory := non_neg_integer()}.
+
+-type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
+-type start_opts() :: #{handle_down := handle_down_fun()}.
 
 %% API functions
 
@@ -60,24 +71,29 @@
 %%   to make a new async process if you need to update).
 %%   i.e. any functions that replicate changes are not allowed (i.e. insert/2,
 %%   remove/2).
+-spec start(table_name(), start_opts()) -> {ok, pid()}.
 start(Tab, Opts) when is_atom(Tab) ->
     gen_server:start({local, Tab}, ?MODULE, {Tab, Opts}, []).
 
-stop(Tab) ->
-    gen_server:stop(Tab).
+-spec stop(server_ref()) -> ok.
+stop(Server) ->
+    gen_server:stop(Server).
 
+-spec dump(server_ref()) -> Records :: [tuple()].
 dump(Tab) ->
     ets:tab2list(Tab).
 
--spec remote_dump(server_ref()) -> term().
+-spec remote_dump(server_ref()) -> {ok, Records :: [tuple()]}.
 remote_dump(Server) ->
     short_call(Server, remote_dump).
 
+-spec table_name(server_ref()) -> table_name().
 table_name(Tab) when is_atom(Tab) ->
     Tab;
 table_name(Server) ->
     short_call(Server, table_name).
 
+-spec send_dump(pid(), [pid()], [tuple()]) -> ok.
 send_dump(RemotePid, NewPids, OurDump) ->
     Msg = {send_dump, NewPids, OurDump},
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
@@ -93,16 +109,16 @@ insert(Server, Rec) when is_tuple(Rec) ->
 
 -spec insert_many(server_ref(), list(tuple())) -> ok.
 insert_many(Server, Records) when is_list(Records) ->
-    sync_operation(Server, {insert, Records}).
+    sync_operation(Server, {insert_many, Records}).
 
 -spec delete(server_ref(), term()) -> ok.
 delete(Server, Key) ->
-    delete_many(Server, [Key]).
+    sync_operation(Server, {delete, Key}).
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
 -spec delete_many(server_ref(), [term()]) -> ok.
 delete_many(Server, Keys) ->
-    sync_operation(Server, {delete, Keys}).
+    sync_operation(Server, {delete_many, Keys}).
 
 -spec insert_request(server_ref(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
@@ -110,19 +126,21 @@ insert_request(Server, Rec) ->
 
 -spec insert_many_request(server_ref(), [tuple()]) -> request_id().
 insert_many_request(Server, Records) ->
-    async_operation(Server, {insert, Records}).
+    async_operation(Server, {insert_many, Records}).
 
 -spec delete_request(server_ref(), term()) -> request_id().
 delete_request(Server, Key) ->
-    delete_many_request(Server, [Key]).
+    async_operation(Server, {delete, Key}).
 
 -spec delete_many_request(server_ref(), [term()]) -> request_id().
 delete_many_request(Server, Keys) ->
-    async_operation(Server, {delete, Keys}).
+    async_operation(Server, {delete_many, Keys}).
 
+-spec other_servers(server_ref()) -> [server_ref()].
 other_servers(Server) ->
     gen_server:call(Server, other_servers).
 
+-spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
@@ -130,30 +148,30 @@ other_nodes(Server) ->
 other_pids(Server) ->
     other_servers(Server).
 
--spec pause(server_ref()) -> reference().
+-spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
     short_call(Server, pause).
 
--spec unpause(server_ref(), reference()) -> term().
+-spec unpause(server_ref(), pause_monitor()) -> ok.
 unpause(Server, PauseRef) ->
     short_call(Server, {unpause, PauseRef}).
 
 %% Waits till all pending operations are applied.
--spec sync(server_ref()) -> term().
+-spec sync(server_ref()) -> ok.
 sync(Server) ->
     short_call(Server, sync).
 
--spec ping(server_ref()) -> term().
+-spec ping(server_ref()) -> pong.
 ping(Server) ->
     short_call(Server, ping).
 
--spec info(server_ref()) -> term().
+-spec info(server_ref()) -> info().
 info(Server) ->
     gen_server:call(Server, get_info).
 
 %% gen_server callbacks
 
--spec init(term()) -> {ok, state()}.
+-spec init({table_name(), start_opts()}) -> {ok, state()}.
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
@@ -176,7 +194,7 @@ handle_call(sync, From, State = #{other_servers := Servers}) ->
         end),
     {noreply, State};
 handle_call(ping, _From, State) ->
-    {reply, ping, State};
+    {reply, pong, State};
 handle_call(table_name, _From, State = #{tab := Tab}) ->
     {reply, {ok, Tab}, State};
 handle_call(remote_dump, From, State = #{tab := Tab}) ->
@@ -313,7 +331,11 @@ do_op(Msg, #{tab := Tab}) ->
 
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
-do_table_op({delete, Keys}, Tab) ->
+do_table_op({delete, Key}, Tab) ->
+    ets:delete(Tab, Key);
+do_table_op({insert_many, Recs}, Tab) ->
+    ets:insert(Tab, Recs);
+do_table_op({delete_many, Keys}, Tab) ->
     ets_delete_keys(Tab, Keys).
 
 %% Handle operation locally and replicate it across the cluster
@@ -372,6 +394,7 @@ handle_unpause(Mon, State = #{backlog := Backlog, pause_monitors := Mons}) ->
         end,
     {reply, ok, State3}.
 
+-spec handle_get_info(state()) -> {reply, info(), state()}.
 handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->
     Info = #{table => Tab,
              nodes => lists:usort(pids_to_nodes([self() | Servers])),
@@ -391,6 +414,7 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             ok
     end.
 
+-spec async_operation(server_ref(), op()) -> request_id().
 async_operation(Server, Msg) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
@@ -404,6 +428,7 @@ async_operation(Server, Msg) ->
             Mon
     end.
 
+-spec sync_operation(server_ref(), op()) -> ok.
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
     %% We monitor the local server until the response from all servers is collected.
