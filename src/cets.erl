@@ -50,8 +50,8 @@
         backlog := [backlog_entry()],
         pause_monitors := [pause_monitor()]}.
 
--type short_msg() ::
-    pause | ping | remote_dump | sync | table_name | {unpause, reference()}.
+-type long_msg() :: pause | ping | remote_dump | sync | table_name | get_info
+                  | other_servers | {unpause, reference()}.
 
 -type info() :: #{table := table_name(),
                   nodes := [node()],
@@ -85,21 +85,18 @@ dump(Tab) ->
 
 -spec remote_dump(server_ref()) -> {ok, Records :: [tuple()]}.
 remote_dump(Server) ->
-    short_call(Server, remote_dump).
+    long_call(Server, remote_dump).
 
 -spec table_name(server_ref()) -> table_name().
 table_name(Tab) when is_atom(Tab) ->
     Tab;
 table_name(Server) ->
-    short_call(Server, table_name).
+    long_call(Server, table_name).
 
--spec send_dump(pid(), [pid()], [tuple()]) -> ok.
-send_dump(RemotePid, NewPids, OurDump) ->
-    Msg = {send_dump, NewPids, OurDump},
-    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
-    Info = #{task => send_dump,
-             remote_pid => RemotePid, count => length(OurDump)},
-    cets_long:run_safely(Info, F).
+-spec send_dump(server_ref(), [pid()], [tuple()]) -> ok.
+send_dump(Server, NewPids, OurDump) ->
+    Info = #{msg => send_dump, count => length(OurDump)},
+    long_call(Server, {send_dump, NewPids, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
@@ -138,7 +135,7 @@ delete_many_request(Server, Keys) ->
 
 -spec other_servers(server_ref()) -> [server_ref()].
 other_servers(Server) ->
-    gen_server:call(Server, other_servers).
+    long_call(Server, other_servers).
 
 -spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
@@ -150,24 +147,24 @@ other_pids(Server) ->
 
 -spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
-    short_call(Server, pause).
+    long_call(Server, pause).
 
 -spec unpause(server_ref(), pause_monitor()) -> ok | {error, unknown_pause_monitor}.
 unpause(Server, PauseRef) ->
-    short_call(Server, {unpause, PauseRef}).
+    long_call(Server, {unpause, PauseRef}).
 
 %% Waits till all pending operations are applied.
 -spec sync(server_ref()) -> ok.
 sync(Server) ->
-    short_call(Server, sync).
+    long_call(Server, sync).
 
 -spec ping(server_ref()) -> pong.
 ping(Server) ->
-    short_call(Server, ping).
+    long_call(Server, ping).
 
 -spec info(server_ref()) -> info().
 info(Server) ->
-    gen_server:call(Server, get_info).
+    long_call(Server, get_info).
 
 %% gen_server callbacks
 
@@ -368,18 +365,6 @@ apply_backlog_ops([{Msg, From} | Backlog], State) ->
 apply_backlog_ops([], _State) ->
     ok.
 
--spec short_call(server_ref(), short_msg()) -> term().
-short_call(Server, Msg) ->
-    case where(Server) of
-        Pid when is_pid(Pid) ->
-            Info = #{remote_server => Server, remote_pid => Pid,
-                     remote_node => node(Pid)},
-            F = fun() -> gen_server:call(Pid, Msg, infinity) end,
-            cets_long:run_safely(Info, F);
-        undefined ->
-            {error, pid_not_found}
-    end.
-
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
 handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
@@ -421,6 +406,21 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             cets_long:run_safely(Info, FF);
         _ ->
             ok
+    end.
+
+-spec long_call(server_ref(), long_msg()) -> term().
+long_call(Server, Msg) ->
+    long_call(Server, Msg, #{msg => Msg}).
+
+long_call(Server, Msg, Info) ->
+    case where(Server) of
+        Pid when is_pid(Pid) ->
+            Info2 = Info#{remote_server => Server, remote_pid => Pid,
+                          remote_node => node(Pid)},
+            F = fun() -> gen_server:call(Pid, Msg, infinity) end,
+            cets_long:run_safely(Info2, F);
+        undefined ->
+            {error, pid_not_found}
     end.
 
 -spec async_operation(server_ref(), op()) -> request_id().
