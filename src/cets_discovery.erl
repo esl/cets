@@ -6,6 +6,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-ignore_xref([start/1, start_link/1, add_table/2, info/1, behaviour_info/1]).
+
 -include_lib("kernel/include/logger.hrl").
 
 -type backend_state() :: term().
@@ -114,9 +116,14 @@ schedule_check(State) ->
     State#{timer_ref := TimerRef}.
 
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
-    erlang:cancel_timer(OldRef);
+    _ = erlang:cancel_timer(OldRef),
+    flush_all_checks(),
+    ok;
 cancel_old_timer(_State) ->
     ok.
+
+flush_all_checks() ->
+    receive check -> flush_all_checks() after 0 -> ok end.
 
 do_join(Tab, Node) ->
     LocalPid = whereis(Tab),
@@ -131,7 +138,8 @@ do_join(Tab, Node) ->
 
 report_results(Results, _State = #{results := OldResults}) ->
     Changed = Results -- OldResults,
-    [report_result(Result) || Result <- Changed].
+    lists:foreach(fun report_result/1, Changed),
+    ok.
 
 report_result(Map) ->
     ?LOG_INFO(Map).

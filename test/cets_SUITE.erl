@@ -54,7 +54,8 @@ test_multinode(Config) ->
                X = dump(Node1, Tab),
                X = dump(Node2, Tab),
                X = dump(Node3, Tab),
-               X = dump(Node4, Tab)
+               X = dump(Node4, Tab),
+               ok
            end,
     Same([{a}, {b}, {c}, {d}, {e}, {f}]),
     delete(Node1, Tab, e),

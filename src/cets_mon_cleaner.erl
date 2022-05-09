@@ -12,7 +12,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--type timer_ref() :: reference() | undefined.
+-type timer_ref() :: reference().
 -type state() :: #{
         mon_tab := atom(),
         interval := non_neg_integer(),
@@ -24,8 +24,10 @@ start_link(Name, MonTab) ->
 
 -spec init(atom()) -> {ok, state()}.
 init(MonTab) ->
-    State = #{mon_tab => MonTab, interval => 30000, timer_ref => undefined},
-    {ok, schedule_check(State)}.
+    Interval = 30000,
+    State = #{mon_tab => MonTab, interval => Interval,
+              timer_ref => start_timer(Interval)},
+    {ok, State}.
 
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
@@ -48,15 +50,16 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 -spec schedule_check(state()) -> state().
-schedule_check(State = #{interval := Interval}) ->
-    cancel_old_timer(State),
-    TimerRef = erlang:send_after(Interval, self(), check),
-    State#{timer_ref := TimerRef}.
+schedule_check(State = #{interval := Interval, timer_ref := OldRef}) ->
+    _ = erlang:cancel_timer(OldRef),
+    flush_all_checks(),
+    State#{timer_ref := start_timer(Interval)}.
 
-cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
-    erlang:cancel_timer(OldRef);
-cancel_old_timer(_State) ->
-    ok.
+flush_all_checks() ->
+    receive check -> flush_all_checks() after 0 -> ok end.
+
+start_timer(Interval) ->
+    erlang:send_after(Interval, self(), check).
 
 -spec handle_check(state()) -> state().
 handle_check(State = #{mon_tab := MonTab}) ->

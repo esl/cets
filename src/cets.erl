@@ -17,20 +17,25 @@
 -module(cets).
 -behaviour(gen_server).
 
--export([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2]).
--export([dump/1, remote_dump/1, send_dump_to_remote_node/3, table_name/1]).
--export([other_nodes/1, other_pids/1]).
--export([pause/1, unpause/2, sync/1, ping/1]).
--export([info/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+-export([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2,
+         dump/1, remote_dump/1, send_dump/3, table_name/1,
+         other_nodes/1, other_pids/1,
+         pause/1, unpause/2, sync/1, ping/1, info/1,
+         insert_request/2, insert_many_request/2,
+         delete_request/2, delete_many_request/2, wait_response/2,
+         init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
--export([insert_request/2, insert_many_request/2,
-         delete_request/2, delete_many_request/2, wait_response/2]).
+
+-ignore_xref([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2,
+              pause/1, unpause/2, sync/1, ping/1, info/1, other_nodes/1,
+              insert_request/2, insert_many_request/2,
+              delete_request/2, delete_many_request/2, wait_response/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
--type server() :: atom() | pid().
--type request_id() :: term().
+-type server_ref() :: pid() | atom() | {local, atom()}
+                    | {global, term()} | {via, module(), term()}.
+-type request_id() :: reference().
 -type backlog_msg() :: {insert, term()} | {delete, term()}.
 -type from() :: {pid(), reference()}.
 -type backlog_entry() :: {backlog_msg(), from()}.
@@ -41,6 +46,9 @@
         opts := map(),
         backlog := [backlog_entry()],
         pause_monitors := [reference()]}.
+
+-type short_msg() ::
+    pause | ping | remote_dump | sync | table_name | {unpause, reference()}.
 
 %% API functions
 
@@ -61,7 +69,7 @@ stop(Tab) ->
 dump(Tab) ->
     ets:tab2list(Tab).
 
--spec remote_dump(server()) -> term().
+-spec remote_dump(server_ref()) -> term().
 remote_dump(Server) ->
     short_call(Server, remote_dump).
 
@@ -70,45 +78,45 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     short_call(Server, table_name).
 
-send_dump_to_remote_node(RemotePid, NewPids, OurDump) ->
-    Msg = {send_dump_to_remote_node, NewPids, OurDump},
+send_dump(RemotePid, NewPids, OurDump) ->
+    Msg = {send_dump, NewPids, OurDump},
     F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
-    Info = #{task => send_dump_to_remote_node,
+    Info = #{task => send_dump,
              remote_pid => RemotePid, count => length(OurDump)},
     cets_long:run_safely(Info, F).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
--spec insert(server(), tuple()) -> ok.
+-spec insert(server_ref(), tuple()) -> ok.
 insert(Server, Rec) when is_tuple(Rec) ->
     sync_operation(Server, {insert, Rec}).
 
--spec insert_many(server(), list(tuple())) -> ok.
+-spec insert_many(server_ref(), list(tuple())) -> ok.
 insert_many(Server, Records) when is_list(Records) ->
     sync_operation(Server, {insert, Records}).
 
--spec delete(server(), term()) -> ok.
+-spec delete(server_ref(), term()) -> ok.
 delete(Server, Key) ->
     delete_many(Server, [Key]).
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
--spec delete_many(server(), [term()]) -> ok.
+-spec delete_many(server_ref(), [term()]) -> ok.
 delete_many(Server, Keys) ->
     sync_operation(Server, {delete, Keys}).
 
--spec insert_request(server(), tuple()) -> request_id().
+-spec insert_request(server_ref(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
     async_operation(Server, {insert, Rec}).
 
--spec insert_many_request(server(), [tuple()]) -> request_id().
+-spec insert_many_request(server_ref(), [tuple()]) -> request_id().
 insert_many_request(Server, Records) ->
     async_operation(Server, {insert, Records}).
 
--spec delete_request(server(), term()) -> request_id().
-delete_request(Tab, Key) ->
-    delete_many_request(Tab, [Key]).
+-spec delete_request(server_ref(), term()) -> request_id().
+delete_request(Server, Key) ->
+    delete_many_request(Server, [Key]).
 
--spec delete_many_request(server(), term()) -> request_id().
+-spec delete_many_request(server_ref(), [term()]) -> request_id().
 delete_many_request(Server, Keys) ->
     async_operation(Server, {delete, Keys}).
 
@@ -118,28 +126,28 @@ other_servers(Server) ->
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
--spec other_pids(server()) -> [pid()].
+-spec other_pids(server_ref()) -> [pid()].
 other_pids(Server) ->
     other_servers(Server).
 
--spec pause(server()) -> reference().
+-spec pause(server_ref()) -> reference().
 pause(Server) ->
     short_call(Server, pause).
 
--spec unpause(server(), reference()) -> term().
+-spec unpause(server_ref(), reference()) -> term().
 unpause(Server, PauseRef) ->
     short_call(Server, {unpause, PauseRef}).
 
 %% Waits till all pending operations are applied.
--spec sync(server()) -> term().
+-spec sync(server_ref()) -> term().
 sync(Server) ->
     short_call(Server, sync).
 
--spec ping(server()) -> term().
+-spec ping(server_ref()) -> term().
 ping(Server) ->
     short_call(Server, ping).
 
--spec info(server()) -> term().
+-spec info(server_ref()) -> term().
 info(Server) ->
     gen_server:call(Server, get_info).
 
@@ -149,9 +157,9 @@ info(Server) ->
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
-    ets:new(Tab, [ordered_set, named_table, public]),
-    ets:new(MonTab, [public, named_table]),
-    cets_mon_cleaner:start_link(MonTab, MonTab),
+    _ = ets:new(Tab, [ordered_set, named_table, public]),
+    _ = ets:new(MonTab, [public, named_table]),
+    {ok, _} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{tab => Tab, mon_tab => MonTab,
            other_servers => [], opts => Opts, backlog => [],
            pause_monitors => []}}.
@@ -163,7 +171,7 @@ handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
 handle_call(sync, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-            [ping(Pid) || Pid <- Servers],
+            lists:foreach(fun ping/1, Servers),
             gen_server:reply(From, ok)
         end),
     {noreply, State};
@@ -175,8 +183,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump_to_remote_node, NewPids, Dump}, _From, State) ->
-    handle_send_dump_to_remote_node(NewPids, Dump, State);
+handle_call({send_dump, NewPids, Dump}, _From, State) ->
+    handle_send_dump(NewPids, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -216,8 +224,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump_to_remote_node(NewPids, Dump,
-                                State = #{tab := Tab, other_servers := Servers}) ->
+handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, State#{other_servers := Servers2}}.
@@ -313,7 +320,8 @@ do_table_op({delete, Keys}, Tab) ->
 handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     do_op(Msg, State),
     WaitInfo = replicate(From, Msg, State),
-    Pid ! {cets_reply, Mon, WaitInfo}.
+    Pid ! {cets_reply, Mon, WaitInfo},
+    ok.
 
 replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
@@ -331,17 +339,20 @@ replicate2([], _Msg) ->
 apply_backlog([{Msg, From} | Backlog], State) ->
     handle_op(From, Msg, State),
     apply_backlog(Backlog, State);
-apply_backlog([], State) ->
-    State.
+apply_backlog([], _State) ->
+    ok.
 
--spec short_call(server(), term()) -> term().
-short_call(RemotePid, Msg) when is_pid(RemotePid) ->
-    F = fun() -> gen_server:call(RemotePid, Msg, infinity) end,
-    Info = #{task => Msg,
-             remote_pid => RemotePid, remote_node => node(RemotePid)},
-    cets_long:run_safely(Info, F);
-short_call(Name, Msg) when is_atom(Name) ->
-    short_call(whereis(Name), Msg).
+-spec short_call(server_ref(), short_msg()) -> term().
+short_call(Server, Msg) ->
+    case where(Server) of
+        Pid when is_pid(Pid) ->
+            Info = #{remote_server => Server, remote_pid => Pid,
+                     remote_node => node(Pid)},
+            F = fun() -> gen_server:call(Pid, Msg, infinity) end,
+            cets_long:run_safely(Info, F);
+        undefined ->
+            {error, pid_not_found}
+    end.
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
@@ -381,9 +392,17 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     end.
 
 async_operation(Server, Msg) ->
-    Mon = erlang:monitor(process, Server),
-    gen_server:cast(Server, {op, {Mon, self()}, Msg}),
-    Mon.
+    case where(Server) of
+        Pid when is_pid(Pid) ->
+            Mon = erlang:monitor(process, Pid),
+            gen_server:cast(Server, {op, {Mon, self()}, Msg}),
+            Mon;
+        undefined ->
+            Mon = make_ref(),
+            %% Simulate process down
+            self() ! {'DOWN', Mon, process, undefined, pid_not_found},
+            Mon
+    end.
 
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
@@ -429,3 +448,10 @@ wait_for_updated2(Mon, Servers) ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})
     end.
+
+-spec where(server_ref()) -> pid() | undefined.
+where(Pid) when is_pid(Pid) -> Pid;
+where(Name) when is_atom(Name) -> whereis(Name);
+where({global, Name}) -> global:whereis_name(Name);
+where({local, Name}) -> whereis(Name);
+where({via, Module, Name}) -> Module:whereis_name(Name).

@@ -61,8 +61,10 @@ join2(_Info, LocalPid, RemotePid) ->
         cets:sync(RemotePid),
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
-        [cets:send_dump_to_remote_node(Pid, LocPids, LocalDump) || Pid <- RemPids],
-        [cets:send_dump_to_remote_node(Pid, RemPids, RemoteDump) || Pid <- LocPids],
+        RemF = fun(Pid) -> cets:send_dump(Pid, LocPids, LocalDump) end,
+        LocF = fun(Pid) -> cets:send_dump(Pid, RemPids, RemoteDump) end,
+        lists:foreach(RemF, RemPids),
+        lists:foreach(LocF, LocPids),
         ok
     after
         lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
