@@ -152,7 +152,7 @@ other_pids(Server) ->
 pause(Server) ->
     short_call(Server, pause).
 
--spec unpause(server_ref(), pause_monitor()) -> ok.
+-spec unpause(server_ref(), pause_monitor()) -> ok | {error, unknown_pause_monitor}.
 unpause(Server, PauseRef) ->
     short_call(Server, {unpause, PauseRef}).
 
@@ -358,10 +358,14 @@ replicate2([RemotePid | Servers], Msg) ->
 replicate2([], _Msg) ->
     ok.
 
-apply_backlog([{Msg, From} | Backlog], State) ->
+apply_backlog(State = #{backlog := Backlog}) ->
+    apply_backlog_ops(lists:reverse(Backlog), State),
+    State#{backlog := []}.
+
+apply_backlog_ops([{Msg, From} | Backlog], State) ->
     handle_op(From, Msg, State),
-    apply_backlog(Backlog, State);
-apply_backlog([], _State) ->
+    apply_backlog_ops(Backlog, State);
+apply_backlog_ops([], _State) ->
     ok.
 
 -spec short_call(server_ref(), short_msg()) -> term().
@@ -378,17 +382,22 @@ short_call(Server, Msg) ->
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
-handle_unpause(_Ref, State = #{pause_monitors := []}) ->
-    {reply, {error, already_unpaused}, State};
-handle_unpause(Mon, State = #{backlog := Backlog, pause_monitors := Mons}) ->
+handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
+    case lists:member(Mon, Mons) of
+        true ->
+            handle_unpause2(Mon, Mons, State);
+        false ->
+            {reply, {error, unknown_pause_monitor}, State}
+    end.
+
+handle_unpause2(Mon, Mons, State) ->
     erlang:demonitor(Mon, [flush]),
     Mons2 = lists:delete(Mon, Mons),
     State2 = State#{pause_monitors := Mons2},
     State3 =
         case Mons2 of
             [] ->
-                apply_backlog(lists:reverse(Backlog), State2),
-                State2#{backlog := []};
+                apply_backlog(State2);
             _ ->
                 State2
         end,

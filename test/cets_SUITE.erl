@@ -7,6 +7,8 @@ all() -> [test_multinode, node_list_is_correct,
           test_multinode_auto_discovery, test_locally,
           handle_down_is_called,
           events_are_applied_in_the_correct_order_after_unpause,
+          pause_multiple_times,
+          unpause_twice,
           write_returns_if_remote_server_crashes,
           mon_cleaner_works, sync_using_name_works,
           insert_many_request].
@@ -145,6 +147,30 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     ok = cets:unpause(Pid, PauseMon),
     [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
+
+pause_multiple_times(_Config) ->
+    T = t5,
+    {ok, Pid} = cets:start(T, #{}),
+    PauseMon1 = cets:pause(Pid),
+    PauseMon2 = cets:pause(Pid),
+    Ref1 = cets:insert_request(Pid, {1}),
+    Ref2 = cets:insert_request(Pid, {2}),
+    [] = cets:dump(T), %% No records yet, even after pong
+    ok = cets:unpause(Pid, PauseMon1),
+    pong = cets:ping(Pid),
+    [] = cets:dump(T), %% No records yet, even after pong
+    ok = cets:unpause(Pid, PauseMon2),
+    pong = cets:ping(Pid),
+    cets:wait_response(Ref1, 5000),
+    cets:wait_response(Ref2, 5000),
+    [{1}, {2}] = lists:sort(cets:dump(T)).
+
+unpause_twice(_Config) ->
+    T = t6,
+    {ok, Pid} = cets:start(T, #{}),
+    PauseMon = cets:pause(Pid),
+    ok = cets:unpause(Pid, PauseMon),
+    {error, unknown_pause_monitor} = cets:unpause(Pid, PauseMon).
 
 write_returns_if_remote_server_crashes(_Config) ->
     {ok, Pid1} = cets:start(c1, #{}),
