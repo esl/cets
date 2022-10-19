@@ -1,3 +1,4 @@
+%% @doc Node discovery logic
 %% Joins table together when a new node appears
 -module(cets_discovery).
 -behaviour(gen_server).

@@ -1,3 +1,4 @@
+%% @doc Cluster join logic.
 -module(cets_join).
 -export([join/4]).
 -include_lib("kernel/include/logger.hrl").

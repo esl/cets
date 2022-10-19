@@ -1,4 +1,6 @@
-%% AWS auto-discovery is kinda bad.
+%% @doc File backend for cets_discovery.
+%% 
+%% Barebone AWS EC2 auto-discovery is limited:
 %% - UDP broadcasts do not work
 %% - AWS CLI needs access
 %% - DNS does not allow to list subdomains

@@ -101,7 +101,7 @@ send_dump(Server, NewPids, OurDump) ->
     cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
-%% Ideally Key should contain inserter node info (for cleaning).
+%% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
 -spec insert(server_ref(), tuple()) -> ok.
 insert(Server, Rec) when is_tuple(Rec) ->
     cets_call:sync_operation(Server, {insert, Rec}).
@@ -110,6 +110,8 @@ insert(Server, Rec) when is_tuple(Rec) ->
 insert_many(Server, Records) when is_list(Records) ->
     cets_call:sync_operation(Server, {insert_many, Records}).
 
+%% Removes an object with the key from all nodes in the cluster.
+%% Ideally, nodes should only remove data that they've inserted, not data from other node.
 -spec delete(server_ref(), term()) -> ok.
 delete(Server, Key) ->
     cets_call:sync_operation(Server, {delete, Key}).
@@ -139,14 +141,17 @@ delete_many_request(Server, Keys) ->
 wait_response(Mon, Timeout) ->
     cets_call:wait_response(Mon, Timeout).
 
+%% Get a list of other CETS processes that are handling this table.
 -spec other_servers(server_ref()) -> [server_ref()].
 other_servers(Server) ->
     cets_call:long_call(Server, other_servers).
 
+%% Get a list of other nodes in the cluster that are connected together.
 -spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
+%% Get a list of other CETS processes that are handling this table.
 -spec other_pids(server_ref()) -> [pid()].
 other_pids(Server) ->
     other_servers(Server).
@@ -266,7 +271,6 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := Mon
         true ->
             Servers2 = lists:delete(RemotePid, Servers),
             notify_remote_down(RemotePid, MonTab),
-            %% Down from a proxy
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers := Servers2}};
         false ->
