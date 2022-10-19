@@ -1,2 +1,4 @@
 _build/
 rebar3
+# vim temporary files
+*.sw*

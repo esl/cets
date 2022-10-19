@@ -61,6 +61,8 @@
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type start_opts() :: #{handle_down := handle_down_fun()}.
 
+-export_type([request_id/0, op/0, server_ref/0, long_msg/0]).
+
 %% API functions
 
 %% Table and server has the same name
@@ -85,57 +87,61 @@ dump(Tab) ->
 
 -spec remote_dump(server_ref()) -> {ok, Records :: [tuple()]}.
 remote_dump(Server) ->
-    long_call(Server, remote_dump).
+    cets_call:long_call(Server, remote_dump).
 
 -spec table_name(server_ref()) -> table_name().
 table_name(Tab) when is_atom(Tab) ->
     Tab;
 table_name(Server) ->
-    long_call(Server, table_name).
+    cets_call:long_call(Server, table_name).
 
 -spec send_dump(server_ref(), [pid()], [tuple()]) -> ok.
 send_dump(Server, NewPids, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    long_call(Server, {send_dump, NewPids, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally Key should contain inserter node info (for cleaning).
 -spec insert(server_ref(), tuple()) -> ok.
 insert(Server, Rec) when is_tuple(Rec) ->
-    sync_operation(Server, {insert, Rec}).
+    cets_call:sync_operation(Server, {insert, Rec}).
 
 -spec insert_many(server_ref(), list(tuple())) -> ok.
 insert_many(Server, Records) when is_list(Records) ->
-    sync_operation(Server, {insert_many, Records}).
+    cets_call:sync_operation(Server, {insert_many, Records}).
 
 -spec delete(server_ref(), term()) -> ok.
 delete(Server, Key) ->
-    sync_operation(Server, {delete, Key}).
+    cets_call:sync_operation(Server, {delete, Key}).
 
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
 -spec delete_many(server_ref(), [term()]) -> ok.
 delete_many(Server, Keys) ->
-    sync_operation(Server, {delete_many, Keys}).
+    cets_call:sync_operation(Server, {delete_many, Keys}).
 
 -spec insert_request(server_ref(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
-    async_operation(Server, {insert, Rec}).
+    cets_call:async_operation(Server, {insert, Rec}).
 
 -spec insert_many_request(server_ref(), [tuple()]) -> request_id().
 insert_many_request(Server, Records) ->
-    async_operation(Server, {insert_many, Records}).
+    cets_call:async_operation(Server, {insert_many, Records}).
 
 -spec delete_request(server_ref(), term()) -> request_id().
 delete_request(Server, Key) ->
-    async_operation(Server, {delete, Key}).
+    cets_call:async_operation(Server, {delete, Key}).
 
 -spec delete_many_request(server_ref(), [term()]) -> request_id().
 delete_many_request(Server, Keys) ->
-    async_operation(Server, {delete_many, Keys}).
+    cets_call:async_operation(Server, {delete_many, Keys}).
+
+-spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
+wait_response(Mon, Timeout) ->
+    cets_call:wait_response(Mon, Timeout).
 
 -spec other_servers(server_ref()) -> [server_ref()].
 other_servers(Server) ->
-    long_call(Server, other_servers).
+    cets_call:long_call(Server, other_servers).
 
 -spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
@@ -147,24 +153,24 @@ other_pids(Server) ->
 
 -spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
-    long_call(Server, pause).
+    cets_call:long_call(Server, pause).
 
 -spec unpause(server_ref(), pause_monitor()) -> ok | {error, unknown_pause_monitor}.
 unpause(Server, PauseRef) ->
-    long_call(Server, {unpause, PauseRef}).
+    cets_call:long_call(Server, {unpause, PauseRef}).
 
 %% Waits till all pending operations are applied.
 -spec sync(server_ref()) -> ok.
 sync(Server) ->
-    long_call(Server, sync).
+    cets_call:long_call(Server, sync).
 
 -spec ping(server_ref()) -> pong.
 ping(Server) ->
-    long_call(Server, ping).
+    cets_call:long_call(Server, ping).
 
 -spec info(server_ref()) -> info().
 info(Server) ->
-    long_call(Server, get_info).
+    cets_call:long_call(Server, get_info).
 
 %% gen_server callbacks
 
@@ -407,85 +413,3 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
         _ ->
             ok
     end.
-
--spec long_call(server_ref(), long_msg()) -> term().
-long_call(Server, Msg) ->
-    long_call(Server, Msg, #{msg => Msg}).
-
-long_call(Server, Msg, Info) ->
-    case where(Server) of
-        Pid when is_pid(Pid) ->
-            Info2 = Info#{remote_server => Server, remote_pid => Pid,
-                          remote_node => node(Pid)},
-            F = fun() -> gen_server:call(Pid, Msg, infinity) end,
-            cets_long:run_safely(Info2, F);
-        undefined ->
-            {error, pid_not_found}
-    end.
-
--spec async_operation(server_ref(), op()) -> request_id().
-async_operation(Server, Msg) ->
-    case where(Server) of
-        Pid when is_pid(Pid) ->
-            Mon = erlang:monitor(process, Pid),
-            gen_server:cast(Server, {op, {Mon, self()}, Msg}),
-            Mon;
-        undefined ->
-            Mon = make_ref(),
-            %% Simulate process down
-            self() ! {'DOWN', Mon, process, undefined, pid_not_found},
-            Mon
-    end.
-
--spec sync_operation(server_ref(), op()) -> ok.
-sync_operation(Server, Msg) ->
-    Mon = async_operation(Server, Msg),
-    %% We monitor the local server until the response from all servers is collected.
-    wait_response(Mon, infinity).
-
--spec wait_response(request_id(), non_neg_integer() | infinity) -> term().
-wait_response(Mon, Timeout) ->
-    receive
-        {'DOWN', Mon, process, _Pid, Reason} ->
-            error({cets_down, Reason});
-        {cets_reply, Mon, WaitInfo} ->
-            wait_for_updated(Mon, WaitInfo)
-    after Timeout ->
-            erlang:demonitor(Mon, [flush]),
-            error(timeout)
-    end.
-
-%% Wait for response from the remote nodes that the operation is completed.
-%% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Mon, {Servers, MonTab}) ->
-    try
-        wait_for_updated2(Mon, Servers)
-    after
-        erlang:demonitor(Mon, [flush]),
-        ets:delete(MonTab, Mon)
-    end.
-
-wait_for_updated2(_Mon, []) ->
-    ok;
-wait_for_updated2(Mon, Servers) ->
-    receive
-        {updated, Mon, Pid} ->
-            %% A replication confirmation from the remote server is received
-            Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2);
-        {remote_down, Mon, Pid} ->
-            %% This message is sent by our local server when
-            %% the remote server is down condition is detected
-            Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2);
-        {'DOWN', Mon, process, _Pid, Reason} ->
-            %% Local server is down, this is a critical error
-            error({cets_down, Reason})
-    end.
-
--spec where(server_ref()) -> pid() | undefined.
-where(Pid) when is_pid(Pid) -> Pid;
-where(Name) when is_atom(Name) -> whereis(Name);
-where({global, Name}) -> global:whereis_name(Name);
-where({local, Name}) -> whereis(Name);
-where({via, Module, Name}) -> Module:whereis_name(Name).
