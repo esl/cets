@@ -51,7 +51,8 @@
         pause_monitors := [pause_monitor()]}.
 
 -type long_msg() :: pause | ping | remote_dump | sync | table_name | get_info
-                  | other_servers | {unpause, reference()}.
+                  | other_servers | {unpause, reference()}
+                  | {send_dump, [pid()], [tuple()]}.
 
 -type info() :: #{table := table_name(),
                   nodes := [node()],
