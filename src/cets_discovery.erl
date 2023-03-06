@@ -20,6 +20,8 @@
 -type backend_state() :: term().
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
 
+-export_type([get_nodes_result/0]).
+
 -type from() :: {pid(), reference()}.
 -type state() :: #{
     results := [term()],
@@ -29,12 +31,19 @@
     timer_ref := reference() | undefined
 }.
 
+%% Backend could define its own options
+-type opts() :: #{name := atom(), _ := _}.
+-type start_result() :: {ok, pid()} | {error, term()}.
+-type server() :: pid() | atom().
+
 -callback init(map()) -> backend_state().
 -callback get_nodes(backend_state()) -> {get_nodes_result(), backend_state()}.
 
+-spec start(opts()) -> start_result().
 start(Opts) ->
     start_common(start, Opts).
 
+-spec start_link(opts()) -> start_result().
 start_link(Opts) ->
     start_common(start_link, Opts).
 
@@ -48,12 +57,15 @@ start_common(F, Opts) ->
         end,
     apply(gen_server, F, Args).
 
+-spec add_table(server(), cets:table_name()) -> ok | {error, already_added}.
 add_table(Server, Table) ->
     gen_server:call(Server, {add_table, Table}).
 
+-spec get_tables(server()) -> [cets:table_name()].
 get_tables(Server) ->
     gen_server:call(Server, get_tables).
 
+-spec info(server()) -> [cets:info()].
 info(Server) ->
     {ok, Tables} = get_tables(Server),
     [cets:info(Tab) || Tab <- Tables].

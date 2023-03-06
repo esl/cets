@@ -14,8 +14,8 @@
 -type server_ref() :: cets:server_ref().
 -type long_msg() :: cets:long_msg().
 
-%% Do gen_server:call with better error reporting.
-%% It would print a warning if the call takes too long.
+%% Does gen_server:call with better error reporting.
+%% It would log a warning if the call takes too long.
 -spec long_call(server_ref(), long_msg()) -> term().
 long_call(Server, Msg) ->
     long_call(Server, Msg, #{msg => Msg}).
@@ -80,25 +80,25 @@ wait_response(Mon, Timeout) ->
 %% remote_down is sent by the local server, if the remote server is down.
 wait_for_updated(Mon, {Servers, MonTab}) ->
     try
-        wait_for_updated2(Mon, Servers)
+        do_wait_for_updated(Mon, Servers)
     after
         erlang:demonitor(Mon, [flush]),
         ets:delete(MonTab, Mon)
     end.
 
-wait_for_updated2(_Mon, []) ->
+do_wait_for_updated(_Mon, []) ->
     ok;
-wait_for_updated2(Mon, Servers) ->
+do_wait_for_updated(Mon, Servers) ->
     receive
         {updated, Mon, Pid} ->
             %% A replication confirmation from the remote server is received
             Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2);
+            do_wait_for_updated(Mon, Servers2);
         {remote_down, Mon, Pid} ->
             %% This message is sent by our local server when
             %% the remote server is down condition is detected
             Servers2 = lists:delete(Pid, Servers),
-            wait_for_updated2(Mon, Servers2);
+            do_wait_for_updated(Mon, Servers2);
         {'DOWN', Mon, process, _Pid, Reason} ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})

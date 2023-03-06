@@ -12,9 +12,14 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type opts() :: #{disco_file := file:filename()}.
+-type state() :: opts().
+
+-spec init(opts()) -> state().
 init(Opts) ->
     Opts.
 
+-spec get_nodes(state()) -> {cets_discovery:get_nodes_result(), state()}.
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->

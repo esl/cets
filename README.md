@@ -36,9 +36,9 @@ It exports functions:
 - `delete(Server, Key)` - deletes an object from the table.
 - `delete_many(Server, Keys)` - deletes several objects from the table.
 
-cets_join module contains the merging logic.
+`cets_join` module contains the merging logic.
 
-cets_discovery module handles search of new nodes.
+`cets_discovery` module handles search of new nodes.
 
 It supports behaviours for different backends.
 
@@ -47,9 +47,9 @@ It defines two callbacks:
 - `init/1` - inits the backend.
 - `get_nodes/1` - gets a list of alive erlang nodes.
 
-Once new nodes are found, cets_discovery calls cets_join module to merge two
+Once new nodes are found, `cets_discovery` calls `cets_join` module to merge two
 cluster partitions.
 
-The simplest cets_discovery backend is cets_discovery_file, which just reads
+The simplest `cets_discovery` backend is `cets_discovery_file`, which just reads
 a file with a list of nodes on each line. This file could be populated by an
 external program or by an admin.

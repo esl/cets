@@ -116,13 +116,13 @@
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type start_opts() :: #{handle_down := handle_down_fun()}.
 
--export_type([request_id/0, op/0, server_ref/0, long_msg/0]).
+-export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
 %% API functions
 
 %% Table and server has the same name
 %% Opts:
-%% - handle_down = fun(#{remote_pid => Pid, table => Tab})
+%% - handle_down = fun(#{remote_pid := Pid, table := Tab})
 %%   Called when a remote node goes down. Do not update other nodes data
 %%   from this function (otherwise circular locking could happen - use spawn
 %%   to make a new async process if you need to update).
@@ -136,7 +136,7 @@ start(Tab, Opts) when is_atom(Tab) ->
 stop(Server) ->
     gen_server:stop(Server).
 
--spec dump(server_ref()) -> Records :: [tuple()].
+-spec dump(table_name()) -> Records :: [tuple()].
 dump(Tab) ->
     ets:tab2list(Tab).
 
@@ -425,25 +425,13 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
 replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
-    replicate2(Servers, Msg2),
+    [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
     ets:insert(MonTab, From),
     {Servers, MonTab}.
 
-replicate2([RemotePid | Servers], Msg) ->
-    send_to_remote(RemotePid, Msg),
-    replicate2(Servers, Msg);
-replicate2([], _Msg) ->
-    ok.
-
 apply_backlog(State = #{backlog := Backlog}) ->
-    apply_backlog_ops(lists:reverse(Backlog), State),
+    [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
     State#{backlog := []}.
-
-apply_backlog_ops([{Msg, From} | Backlog], State) ->
-    handle_op(From, Msg, State),
-    apply_backlog_ops(Backlog, State);
-apply_backlog_ops([], _State) ->
-    ok.
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
