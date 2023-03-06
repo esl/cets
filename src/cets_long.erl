@@ -12,9 +12,9 @@ run_spawn(Info, F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-            Res = cets_long:run_safely(Info, F),
-            Pid ! {result, Ref, Res}
-        end),
+        Res = cets_long:run_safely(Info, F),
+        Pid ! {result, Ref, Res}
+    end),
     receive
         {result, Ref, Res} ->
             Res
@@ -32,14 +32,14 @@ run(Info, Fun, Catch) ->
     ?LOG_INFO(Info#{what => long_task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
-            case Catch of
-                true -> just_run_safely(Info#{what => long_task_failed}, Fun);
-                false -> Fun()
-            end
-        after
-            Diff = diff(Start),
-            ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
-            Pid ! stop
+        case Catch of
+            true -> just_run_safely(Info#{what => long_task_failed}, Fun);
+            false -> Fun()
+        end
+    after
+        Diff = diff(Start),
+        ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
+        Pid ! stop
     end.
 
 spawn_mon(Info, Parent, Start) ->
@@ -54,11 +54,12 @@ monitor_loop(Mon, Info, Start) ->
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
             ok;
-        stop -> ok
-        after 5000 ->
-            Diff = diff(Start),
-            ?LOG_INFO(Info#{what => long_task_progress, time_ms => Diff}),
-            monitor_loop(Mon, Info, Start)
+        stop ->
+            ok
+    after 5000 ->
+        Diff = diff(Start),
+        ?LOG_INFO(Info#{what => long_task_progress, time_ms => Diff}),
+        monitor_loop(Mon, Info, Start)
     end.
 
 diff(Start) ->
@@ -67,7 +68,8 @@ diff(Start) ->
 just_run_safely(Info, Fun) ->
     try
         Fun()
-    catch Class:Reason:Stacktrace ->
-              ?LOG_ERROR(Info#{class => Class, reason => Reason, stacktrace => Stacktrace}),
-              {error, {Class, Reason, Stacktrace}}
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(Info#{class => Class, reason => Reason, stacktrace => Stacktrace}),
+            {error, {Class, Reason, Stacktrace}}
     end.

@@ -1,5 +1,5 @@
 %% @doc File backend for cets_discovery.
-%% 
+%%
 %% Barebone AWS EC2 auto-discovery is limited:
 %% - UDP broadcasts do not work
 %% - AWS CLI needs access
@@ -18,8 +18,11 @@ init(Opts) ->
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
-            ?LOG_ERROR(#{what => discovery_failed,
-                         filename => Filename, reason => Reason}),
+            ?LOG_ERROR(#{
+                what => discovery_failed,
+                filename => Filename,
+                reason => Reason
+            }),
             {{error, Reason}, State};
         {ok, Text} ->
             Lines = binary:split(Text, [<<"\r">>, <<"\n">>, <<" ">>], [global]),

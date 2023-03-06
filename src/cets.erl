@@ -17,47 +17,101 @@
 -module(cets).
 -behaviour(gen_server).
 
--export([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2,
-         dump/1, remote_dump/1, send_dump/3, table_name/1,
-         other_nodes/1, other_pids/1,
-         pause/1, unpause/2, sync/1, ping/1, info/1,
-         insert_request/2, insert_many_request/2,
-         delete_request/2, delete_many_request/2, wait_response/2,
-         init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    start/2,
+    stop/1,
+    insert/2,
+    insert_many/2,
+    delete/2,
+    delete_many/2,
+    dump/1,
+    remote_dump/1,
+    send_dump/3,
+    table_name/1,
+    other_nodes/1,
+    other_pids/1,
+    pause/1,
+    unpause/2,
+    sync/1,
+    ping/1,
+    info/1,
+    insert_request/2,
+    insert_many_request/2,
+    delete_request/2,
+    delete_many_request/2,
+    wait_response/2,
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
--ignore_xref([start/2, stop/1, insert/2, insert_many/2, delete/2, delete_many/2,
-              pause/1, unpause/2, sync/1, ping/1, info/1, other_nodes/1,
-              insert_request/2, insert_many_request/2,
-              delete_request/2, delete_many_request/2, wait_response/2]).
+-ignore_xref([
+    start/2,
+    stop/1,
+    insert/2,
+    insert_many/2,
+    delete/2,
+    delete_many/2,
+    pause/1,
+    unpause/2,
+    sync/1,
+    ping/1,
+    info/1,
+    other_nodes/1,
+    insert_request/2,
+    insert_many_request/2,
+    delete_request/2,
+    delete_many_request/2,
+    wait_response/2
+]).
 
 -include_lib("kernel/include/logger.hrl").
 
--type server_ref() :: pid() | atom() | {local, atom()}
-                    | {global, term()} | {via, module(), term()}.
+-type server_ref() ::
+    pid()
+    | atom()
+    | {local, atom()}
+    | {global, term()}
+    | {via, module(), term()}.
 -type request_id() :: reference().
--type op() :: {insert, tuple()} | {delete, term()}
-              | {insert_many, [tuple()]} | {delete_many, [term()]}.
+-type op() ::
+    {insert, tuple()}
+    | {delete, term()}
+    | {insert_many, [tuple()]}
+    | {delete_many, [term()]}.
 -type from() :: {pid(), reference()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
-        tab := table_name(),
-        mon_tab := atom(),
-        other_servers := [pid()],
-        opts := start_opts(),
-        backlog := [backlog_entry()],
-        pause_monitors := [pause_monitor()]}.
+    tab := table_name(),
+    mon_tab := atom(),
+    other_servers := [pid()],
+    opts := start_opts(),
+    backlog := [backlog_entry()],
+    pause_monitors := [pause_monitor()]
+}.
 
--type long_msg() :: pause | ping | remote_dump | sync | table_name | get_info
-                  | other_servers | {unpause, reference()}
-                  | {send_dump, [pid()], [tuple()]}.
+-type long_msg() ::
+    pause
+    | ping
+    | remote_dump
+    | sync
+    | table_name
+    | get_info
+    | other_servers
+    | {unpause, reference()}
+    | {send_dump, [pid()], [tuple()]}.
 
--type info() :: #{table := table_name(),
-                  nodes := [node()],
-                  size := non_neg_integer(),
-                  memory := non_neg_integer()}.
+-type info() :: #{
+    table := table_name(),
+    nodes := [node()],
+    size := non_neg_integer(),
+    memory := non_neg_integer()
+}.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type start_opts() :: #{handle_down := handle_down_fun()}.
@@ -187,20 +241,25 @@ init({Tab, Opts}) ->
     _ = ets:new(Tab, [ordered_set, named_table, public]),
     _ = ets:new(MonTab, [public, named_table]),
     {ok, _} = cets_mon_cleaner:start_link(MonTab, MonTab),
-    {ok, #{tab => Tab, mon_tab => MonTab,
-           other_servers => [], opts => Opts, backlog => [],
-           pause_monitors => []}}.
+    {ok, #{
+        tab => Tab,
+        mon_tab => MonTab,
+        other_servers => [],
+        opts => Opts,
+        backlog => [],
+        pause_monitors => []
+    }}.
 
 -spec handle_call(term(), from(), state()) ->
-        {noreply, state()} | {reply, term(), state()}.
+    {noreply, state()} | {reply, term(), state()}.
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-            lists:foreach(fun ping/1, Servers),
-            gen_server:reply(From, ok)
-        end),
+        lists:foreach(fun ping/1, Servers),
+        gen_server:reply(From, ok)
+    end),
     {noreply, State};
 handle_call(ping, _From, State) ->
     {reply, pong, State};
@@ -215,7 +274,7 @@ handle_call({send_dump, NewPids, Dump}, _From, State) ->
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
-    {reply, Mon, State#{pause_monitors := [Mon|Mons]}};
+    {reply, Mon, State#{pause_monitors := [Mon | Mons]}};
 handle_call({unpause, Ref}, _From, State) ->
     handle_unpause(Ref, State);
 handle_call(get_info, _From, State) ->
@@ -225,7 +284,7 @@ handle_call(get_info, _From, State) ->
 handle_cast({op, From, Msg}, State = #{pause_monitors := []}) ->
     handle_op(From, Msg, State),
     {noreply, State};
-handle_cast({op, From, Msg}, State = #{pause_monitors := [_|_], backlog := Backlog}) ->
+handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
     %% Backlog is a list of pending operation, when our server is paused.
     %% The list would be applied, once our server is unpaused.
     {noreply, State#{backlog := [{Msg, From} | Backlog]}};
@@ -259,8 +318,11 @@ handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers})
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            ?LOG_ERROR(#{what => pause_owner_crashed,
-                         state => State, paused_by_pid => Pid}),
+            ?LOG_ERROR(#{
+                what => pause_owner_crashed,
+                state => State,
+                paused_by_pid => Pid
+            }),
             {reply, ok, State2} = handle_unpause(Mon, State),
             {noreply, State2};
         false ->
@@ -276,8 +338,11 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := Mon
             {noreply, State#{other_servers := Servers2}};
         false ->
             %% This should not happen
-            ?LOG_ERROR(#{what => handle_down_failed,
-                         remote_pid => RemotePid, state => State}),
+            ?LOG_ERROR(#{
+                what => handle_down_failed,
+                remote_pid => RemotePid,
+                state => State
+            }),
             {noreply, State}
     end.
 
@@ -295,15 +360,19 @@ notify_remote_down_loop(_RemotePid, []) ->
 add_servers(Pids, Servers) ->
     lists:sort(add_servers2(Pids, Servers) ++ Servers).
 
-add_servers2([RemotePid | OtherPids], Servers)
-  when is_pid(RemotePid), RemotePid =/= self() ->
+add_servers2([RemotePid | OtherPids], Servers) when
+    is_pid(RemotePid), RemotePid =/= self()
+->
     case has_remote_pid(RemotePid, Servers) of
         false ->
             erlang:monitor(process, RemotePid),
             [RemotePid | add_servers2(OtherPids, Servers)];
         true ->
-            ?LOG_INFO(#{what => already_added,
-                        remote_pid => RemotePid, remote_node => node(RemotePid)}),
+            ?LOG_INFO(#{
+                what => already_added,
+                remote_pid => RemotePid,
+                remote_node => node(RemotePid)
+            }),
             add_servers2(OtherPids, Servers)
     end;
 add_servers2([], _Servers) ->
@@ -401,10 +470,12 @@ handle_unpause2(Mon, Mons, State) ->
 
 -spec handle_get_info(state()) -> {reply, info(), state()}.
 handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->
-    Info = #{table => Tab,
-             nodes => lists:usort(pids_to_nodes([self() | Servers])),
-             size => ets:info(Tab, size),
-             memory => ets:info(Tab, memory)},
+    Info = #{
+        table => Tab,
+        nodes => lists:usort(pids_to_nodes([self() | Servers])),
+        size => ets:info(Tab, size),
+        memory => ets:info(Tab, memory)
+    },
     {reply, Info, State}.
 
 %% Cleanup
@@ -412,8 +483,12 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
             FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
-            Info = #{task => call_user_handle_down, table => Tab,
-                     remote_pid => RemotePid, remote_node => node(RemotePid)},
+            Info = #{
+                task => call_user_handle_down,
+                table => Tab,
+                remote_pid => RemotePid,
+                remote_node => node(RemotePid)
+            },
             cets_long:run_safely(Info, FF);
         _ ->
             ok

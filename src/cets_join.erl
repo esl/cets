@@ -7,8 +7,11 @@
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
 join(LockKey, Info, LocalPid, RemotePid) when is_pid(LocalPid), is_pid(RemotePid) ->
-    Info2 = Info#{local_pid => LocalPid,
-                  remote_pid => RemotePid, remote_node => node(RemotePid)},
+    Info2 = Info#{
+        local_pid => LocalPid,
+        remote_pid => RemotePid,
+        remote_node => node(RemotePid)
+    },
     F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid) end,
     cets_long:run_safely(Info2#{what => join_failed}, F).
 
@@ -18,9 +21,9 @@ join1(LockKey, Info, LocalPid, RemotePid) ->
         true ->
             {error, already_joined};
         false ->
-                Start = erlang:system_time(millisecond),
-                F = fun() -> join_loop(LockKey, Info, LocalPid, RemotePid, Start) end,
-                cets_long:run(Info#{task => join}, F)
+            Start = erlang:system_time(millisecond),
+            F = fun() -> join_loop(LockKey, Info, LocalPid, RemotePid, Start) end,
+            cets_long:run(Info#{task => join}, F)
     end.
 
 join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
@@ -34,7 +37,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
         %% Do joining in a separate process to reduce GC
         cets_long:run_spawn(Info, fun() -> join2(Info, LocalPid, RemotePid) end)
-        end,
+    end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
@@ -73,6 +76,8 @@ join2(_Info, LocalPid, RemotePid) ->
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),
-    {ok, cets:dump(Tab)}; %% Reduce copying
+    %% Reduce copying
+    {ok, cets:dump(Tab)};
 remote_or_local_dump(Pid) ->
-    cets:remote_dump(Pid). %% We actually need to ask the remote process
+    %% We actually need to ask the remote process
+    cets:remote_dump(Pid).

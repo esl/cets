@@ -1,23 +1,29 @@
 -module(cets_SUITE).
 -include_lib("common_test/include/ct.hrl").
- 
+
 -compile([export_all, nowarn_export_all]).
- 
-all() -> [test_multinode, node_list_is_correct,
-          test_multinode_auto_discovery, test_locally,
-          handle_down_is_called,
-          events_are_applied_in_the_correct_order_after_unpause,
-          pause_multiple_times,
-          unpause_twice,
-          write_returns_if_remote_server_crashes,
-          mon_cleaner_works, sync_using_name_works,
-          insert_many_request].
- 
+
+all() ->
+    [
+        test_multinode,
+        node_list_is_correct,
+        test_multinode_auto_discovery,
+        test_locally,
+        handle_down_is_called,
+        events_are_applied_in_the_correct_order_after_unpause,
+        pause_multiple_times,
+        unpause_twice,
+        write_returns_if_remote_server_crashes,
+        mon_cleaner_works,
+        sync_using_name_works,
+        insert_many_request
+    ].
+
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
     Node3 = start_node(ct3),
     Node4 = start_node(ct4),
-    [{nodes, [Node2, Node3, Node4]}|Config].
+    [{nodes, [Node2, Node3, Node4]} | Config].
 
 end_per_suite(Config) ->
     Config.
@@ -27,10 +33,10 @@ init_per_testcase(test_multinode_auto_discovery, Config) ->
     Config;
 init_per_testcase(_, Config) ->
     Config.
- 
+
 end_per_testcase(_, _Config) ->
     ok.
- 
+
 test_multinode(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
@@ -53,12 +59,12 @@ test_multinode(Config) ->
     insert(Node1, Tab, {f}),
     insert(Node4, Tab, {e}),
     Same = fun(X) ->
-               X = dump(Node1, Tab),
-               X = dump(Node2, Tab),
-               X = dump(Node3, Tab),
-               X = dump(Node4, Tab),
-               ok
-           end,
+        X = dump(Node1, Tab),
+        X = dump(Node2, Tab),
+        X = dump(Node3, Tab),
+        X = dump(Node4, Tab),
+        ok
+    end,
     Same([{a}, {b}, {c}, {d}, {e}, {f}]),
     delete(Node1, Tab, e),
     Same([{a}, {b}, {c}, {d}, {f}]),
@@ -67,7 +73,7 @@ test_multinode(Config) ->
     %% Bulk operations are supported
     insert_many(Node4, Tab, [{m}, {a}, {n}, {y}]),
     Same([{a}, {b}, {c}, {d}, {f}, {m}, {n}, {y}]),
-    delete_many(Node4, Tab, [a,n]),
+    delete_many(Node4, Tab, [a, n]),
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
     ok.
 
@@ -102,8 +108,8 @@ test_multinode_auto_discovery(Config) ->
     %% Waits for the first check
     sys:get_state(Disco),
     [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}]
-        = cets_discovery:info(Disco),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}] =
+        cets_discovery:info(Disco),
     ok.
 
 test_locally(_Config) ->
@@ -119,8 +125,8 @@ test_locally(_Config) ->
 handle_down_is_called(_Config) ->
     Parent = self(),
     DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) ->
-                     Parent ! down_called
-             end,
+        Parent ! down_called
+    end,
     {ok, Pid1} = cets:start(d1, #{handle_down => DownFn}),
     {ok, Pid2} = cets:start(d2, #{}),
     ok = cets_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
@@ -155,10 +161,12 @@ pause_multiple_times(_Config) ->
     PauseMon2 = cets:pause(Pid),
     Ref1 = cets:insert_request(Pid, {1}),
     Ref2 = cets:insert_request(Pid, {2}),
-    [] = cets:dump(T), %% No records yet, even after pong
+    %% No records yet, even after pong
+    [] = cets:dump(T),
     ok = cets:unpause(Pid, PauseMon1),
     pong = cets:ping(Pid),
-    [] = cets:dump(T), %% No records yet, even after pong
+    %% No records yet, even after pong
+    [] = cets:dump(T),
     ok = cets:unpause(Pid, PauseMon2),
     pong = cets:ping(Pid),
     cets:wait_response(Ref1, 5000),
@@ -185,7 +193,7 @@ mon_cleaner_works(_Config) ->
     {ok, Pid1} = cets:start(c3, #{}),
     %% Suspend, so to avoid unexpected check
     sys:suspend(c3_mon),
-    %% Two cases to check: an alive process and a dead process 
+    %% Two cases to check: an alive process and a dead process
     R = cets:insert_request(c3, {2}),
     %% Ensure insert_request reaches the server
     cets:ping(Pid1),

@@ -24,8 +24,11 @@ long_call(Server, Msg) ->
 long_call(Server, Msg, Info) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
-            Info2 = Info#{remote_server => Server, remote_pid => Pid,
-                          remote_node => node(Pid)},
+            Info2 = Info#{
+                remote_server => Server,
+                remote_pid => Pid,
+                remote_node => node(Pid)
+            },
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
             cets_long:run_safely(Info2, F);
         undefined ->
@@ -69,8 +72,8 @@ wait_response(Mon, Timeout) ->
         {cets_reply, Mon, WaitInfo} ->
             wait_for_updated(Mon, WaitInfo)
     after Timeout ->
-            erlang:demonitor(Mon, [flush]),
-            error(timeout)
+        erlang:demonitor(Mon, [flush]),
+        error(timeout)
     end.
 
 %% Wait for response from the remote nodes that the operation is completed.

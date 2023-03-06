@@ -7,17 +7,23 @@
 -behaviour(gen_server).
 
 -export([start_link/2]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -include_lib("kernel/include/logger.hrl").
 
 -type timer_ref() :: reference().
 -type state() :: #{
-        mon_tab := atom(),
-        interval := non_neg_integer(),
-        timer_ref := timer_ref()
-       }.
+    mon_tab := atom(),
+    interval := non_neg_integer(),
+    timer_ref := timer_ref()
+}.
 
 start_link(Name, MonTab) ->
     gen_server:start_link({local, Name}, ?MODULE, MonTab, []).
@@ -25,8 +31,11 @@ start_link(Name, MonTab) ->
 -spec init(atom()) -> {ok, state()}.
 init(MonTab) ->
     Interval = 30000,
-    State = #{mon_tab => MonTab, interval => Interval,
-              timer_ref => start_timer(Interval)},
+    State = #{
+        mon_tab => MonTab,
+        interval => Interval,
+        timer_ref => start_timer(Interval)
+    },
     {ok, State}.
 
 handle_call(Msg, From, State) ->
@@ -56,7 +65,10 @@ schedule_check(State = #{interval := Interval, timer_ref := OldRef}) ->
     State#{timer_ref := start_timer(Interval)}.
 
 flush_all_checks() ->
-    receive check -> flush_all_checks() after 0 -> ok end.
+    receive
+        check -> flush_all_checks()
+    after 0 -> ok
+    end.
 
 start_timer(Interval) ->
     erlang:send_after(Interval, self(), check).
