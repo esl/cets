@@ -5,6 +5,15 @@
 
 all() ->
     [
+        inserted_records_could_be_read_back,
+        insert_many_with_one_record,
+        insert_many_with_two_records,
+        delete_works,
+        delete_many_works,
+        join_works,
+        inserted_records_could_be_read_back_from_replicated_table,
+        join_works_with_existing_data,
+        join_works_with_existing_data_with_conflicts,
         test_multinode,
         node_list_is_correct,
         test_multinode_auto_discovery,
@@ -36,6 +45,67 @@ init_per_testcase(_, Config) ->
 
 end_per_testcase(_, _Config) ->
     ok.
+
+inserted_records_could_be_read_back(_Config) ->
+    cets:start(ins1, #{}),
+    cets:insert(ins1, {alice, 32}),
+    [{alice, 32}] = ets:lookup(ins1, alice).
+
+insert_many_with_one_record(_Config) ->
+    cets:start(ins1m, #{}),
+    cets:insert_many(ins1m, [{alice, 32}]),
+    [{alice, 32}] = ets:lookup(ins1m, alice).
+
+insert_many_with_two_records(_Config) ->
+    cets:start(ins2m, #{}),
+    cets:insert_many(ins2m, [{alice, 32}, {bob, 55}]),
+    [{alice, 32}, {bob, 55}] = ets:tab2list(ins2m).
+
+delete_works(_Config) ->
+    cets:start(del1, #{}),
+    cets:insert(del1, {alice, 32}),
+    cets:delete(del1, alice),
+    [] = ets:lookup(del1, alice).
+
+delete_many_works(_Config) ->
+    cets:start(del1, #{}),
+    cets:insert(del1, {alice, 32}),
+    cets:delete_many(del1, [alice]),
+    [] = ets:lookup(del1, alice).
+
+join_works(_Config) ->
+    {ok, Pid1} = cets:start(join1tab, #{}),
+    {ok, Pid2} = cets:start(join2tab, #{}),
+    ok = cets_join:join(join_lock1, #{}, Pid1, Pid2).
+
+inserted_records_could_be_read_back_from_replicated_table(_Config) ->
+    {ok, Pid1} = cets:start(ins1tab, #{}),
+    {ok, Pid2} = cets:start(ins2tab, #{}),
+    ok = cets_join:join(join_lock1_ins, #{}, Pid1, Pid2),
+    cets:insert(ins1tab, {alice, 32}),
+    [{alice, 32}] = ets:lookup(ins2tab, alice).
+
+join_works_with_existing_data(_Config) ->
+    {ok, Pid1} = cets:start(ex1tab, #{}),
+    {ok, Pid2} = cets:start(ex2tab, #{}),
+    cets:insert(ex1tab, {alice, 32}),
+    %% Join will copy and merge existing tables
+    ok = cets_join:join(join_lock1_ex, #{}, Pid1, Pid2),
+    [{alice, 32}] = ets:lookup(ex2tab, alice).
+
+%% This testcase tests an edgecase: inserting with the same key from two nodes.
+%% Usually, inserting with the same key from two different nodes is not possible
+%% (because the node-name is a part of the key).
+join_works_with_existing_data_with_conflicts(_Config) ->
+    {ok, Pid1} = cets:start(con1tab, #{}),
+    {ok, Pid2} = cets:start(con2tab, #{}),
+    cets:insert(con1tab, {alice, 32}),
+    cets:insert(con2tab, {alice, 33}),
+    %% Join will copy and merge existing tables
+    ok = cets_join:join(join_lock1_con, #{}, Pid1, Pid2),
+    %% We insert data from other table into our table when merging, so the values get swapped
+    [{alice, 33}] = ets:lookup(con1tab, alice),
+    [{alice, 32}] = ets:lookup(con2tab, alice).
 
 test_multinode(Config) ->
     Node1 = node(),
