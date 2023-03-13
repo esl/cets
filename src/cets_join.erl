@@ -13,7 +13,7 @@ join(LockKey, Info, LocalPid, RemotePid) when is_pid(LocalPid), is_pid(RemotePid
         remote_node => node(RemotePid)
     },
     F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid) end,
-    cets_long:run_safely(Info2#{what => join_failed}, F).
+    cets_long:run_safely(Info2#{long_task_name => join}, F).
 
 join1(LockKey, Info, LocalPid, RemotePid) ->
     OtherPids = cets:other_pids(LocalPid),
@@ -22,8 +22,7 @@ join1(LockKey, Info, LocalPid, RemotePid) ->
             {error, already_joined};
         false ->
             Start = erlang:system_time(millisecond),
-            F = fun() -> join_loop(LockKey, Info, LocalPid, RemotePid, Start) end,
-            cets_long:run(Info#{task => join}, F)
+            join_loop(LockKey, Info, LocalPid, RemotePid, Start)
     end.
 
 join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
