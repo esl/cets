@@ -60,6 +60,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec schedule_check(state()) -> state().
 schedule_check(State = #{interval := Interval, timer_ref := OldRef}) ->
+    %% Match result to prevent the Dialyzer warning
     _ = erlang:cancel_timer(OldRef),
     flush_all_checks(),
     State#{timer_ref := start_timer(Interval)}.

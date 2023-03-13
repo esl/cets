@@ -139,6 +139,7 @@ schedule_check(State) ->
     State#{timer_ref := TimerRef}.
 
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
+    %% Match result to prevent from Dialyzer warning
     _ = erlang:cancel_timer(OldRef),
     flush_all_checks(),
     ok;

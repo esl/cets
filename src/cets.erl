@@ -238,6 +238,7 @@ info(Server) ->
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
+    %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [ordered_set, named_table, public]),
     _ = ets:new(MonTab, [public, named_table]),
     {ok, _} = cets_mon_cleaner:start_link(MonTab, MonTab),
