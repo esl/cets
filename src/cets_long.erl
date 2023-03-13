@@ -4,10 +4,19 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+%% Extra logging information
+-type log_info() :: map().
+-type task_result() :: term().
+-type task_fun() :: fun(() -> task_result()).
+-type reason() :: {Class :: atom(), Reason :: term(), Stacktrace :: list()}.
+-export_type([log_info/0]).
+
 %% Spawn a new process to do some memory-intensive task
 %% This allows to reduce GC on the parent process
 %% Wait for function to finish
 %% Handles errors
+%% Returns result from the function or crashes
+-spec run_spawn(log_info(), task_fun()) -> task_result().
 run_spawn(Info, F) ->
     Pid = self(),
     Ref = make_ref(),
@@ -20,12 +29,15 @@ run_spawn(Info, F) ->
             Res
     end.
 
+-spec run_safely(log_info(), task_fun()) -> task_result() | {error, reason()}.
 run_safely(Info, Fun) ->
     run(Info, Fun, true).
 
+-spec run(log_info(), task_fun()) -> task_result().
 run(Info, Fun) ->
     run(Info, Fun, false).
 
+-spec run(log_info(), task_fun(), boolean()) -> task_result() | {error, reason()}.
 run(Info, Fun, Catch) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),

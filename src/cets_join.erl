@@ -3,9 +3,12 @@
 -export([join/4]).
 -include_lib("kernel/include/logger.hrl").
 
+-type lock_key() :: term().
+
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
+-spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) when is_pid(LocalPid), is_pid(RemotePid) ->
     Info2 = Info#{
         local_pid => LocalPid,
