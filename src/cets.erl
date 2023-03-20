@@ -89,6 +89,7 @@
 -type state() :: #{
     tab := table_name(),
     mon_tab := atom(),
+    mon_pid := pid(),
     other_servers := [pid()],
     opts := start_opts(),
     backlog := [backlog_entry()],
@@ -110,7 +111,8 @@
     table := table_name(),
     nodes := [node()],
     size := non_neg_integer(),
-    memory := non_neg_integer()
+    memory := non_neg_integer(),
+    mon_pid := pid()
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
@@ -241,10 +243,11 @@ init({Tab, Opts}) ->
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [ordered_set, named_table, public]),
     _ = ets:new(MonTab, [public, named_table]),
-    {ok, _} = cets_mon_cleaner:start_link(MonTab, MonTab),
+    {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
         mon_tab => MonTab,
+        mon_pid => MonPid,
         other_servers => [],
         opts => Opts,
         backlog => [],
@@ -303,8 +306,8 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
-    ok.
+terminate(_Reason, _State = #{mon_pid := MonPid}) ->
+    ok = gen_server:stop(MonPid).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -459,12 +462,13 @@ handle_unpause2(Mon, Mons, State) ->
     {reply, ok, State3}.
 
 -spec handle_get_info(state()) -> {reply, info(), state()}.
-handle_get_info(State = #{tab := Tab, other_servers := Servers}) ->
+handle_get_info(State = #{tab := Tab, other_servers := Servers, mon_pid := MonPid}) ->
     Info = #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
-        memory => ets:info(Tab, memory)
+        memory => ets:info(Tab, memory),
+        mon_pid => MonPid
     },
     {reply, Info, State}.
 

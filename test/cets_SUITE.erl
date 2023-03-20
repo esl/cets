@@ -25,6 +25,7 @@ all() ->
         unpause_twice,
         write_returns_if_remote_server_crashes,
         mon_cleaner_works,
+        mon_cleaner_stops_correctly,
         sync_using_name_works,
         insert_many_request
     ].
@@ -299,6 +300,16 @@ mon_cleaner_works(_Config) ->
     %% The monitor is finally removed once wait_response returns
     ok = cets:wait_response(R, 5000),
     [] = ets:tab2list(c3_mon).
+
+mon_cleaner_stops_correctly(_Config) ->
+    {ok, Pid} = cets:start(cleaner_stops, #{}),
+    #{mon_pid := MonPid} = cets:info(Pid),
+    MonMon = monitor(process, MonPid),
+    cets:stop(Pid),
+    receive
+        {'DOWN', MonMon, process, MonPid, normal} -> ok
+    after 5000 -> ct:fail(timeout)
+    end.
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),
