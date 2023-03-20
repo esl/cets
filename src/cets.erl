@@ -359,24 +359,25 @@ notify_remote_down_loop(_RemotePid, []) ->
 
 %% Merge two lists of pids, create the missing monitors.
 add_servers(Pids, Servers) ->
-    lists:sort(add_servers2(Pids, Servers) ++ Servers).
+    lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
 
-add_servers2([RemotePid | OtherPids], Servers) when
-    is_pid(RemotePid), RemotePid =/= self()
-->
+add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
+    ?LOG_INFO(#{what => join_to_the_same_pid_ignored}),
+    add_servers2(SelfPid, OtherPids, Servers);
+add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
     case has_remote_pid(RemotePid, Servers) of
         false ->
             erlang:monitor(process, RemotePid),
-            [RemotePid | add_servers2(OtherPids, Servers)];
+            [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
         true ->
             ?LOG_INFO(#{
                 what => already_added,
                 remote_pid => RemotePid,
                 remote_node => node(RemotePid)
             }),
-            add_servers2(OtherPids, Servers)
+            add_servers2(SelfPid, OtherPids, Servers)
     end;
-add_servers2([], _Servers) ->
+add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 pids_to_nodes(Pids) ->

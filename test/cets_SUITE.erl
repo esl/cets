@@ -14,6 +14,7 @@ all() ->
         inserted_records_could_be_read_back_from_replicated_table,
         join_works_with_existing_data,
         join_works_with_existing_data_with_conflicts,
+        join_with_the_same_pid,
         test_multinode,
         node_list_is_correct,
         test_multinode_auto_discovery,
@@ -106,6 +107,16 @@ join_works_with_existing_data_with_conflicts(_Config) ->
     %% We insert data from other table into our table when merging, so the values get swapped
     [{alice, 33}] = ets:lookup(con1tab, alice),
     [{alice, 32}] = ets:lookup(con2tab, alice).
+
+join_with_the_same_pid(_Config) ->
+    {ok, Pid} = cets:start(joinsame, #{}),
+    %% Just insert something into a table to check later the size
+    cets:insert(joinsame, {1, 1}),
+    link(Pid),
+    ok = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
+    Nodes = [node()],
+    %% The process is still running and no data loss (i.e. size is not zero)
+    #{nodes := Nodes, size := 1} = cets:info(Pid).
 
 test_multinode(Config) ->
     Node1 = node(),

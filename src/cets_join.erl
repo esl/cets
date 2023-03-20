@@ -53,6 +53,9 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
     end.
 
 join2(_Info, LocalPid, RemotePid) ->
+    %% Joining is a symmetrical operation here - both servers exchange information between each other.
+    %% We still use LocalPid/RemotePid in names
+    %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
     LocalOtherPids = cets:other_pids(LocalPid),
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
