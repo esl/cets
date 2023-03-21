@@ -1,6 +1,6 @@
 %% Helper to log long running operations.
 -module(cets_long).
--export([run_spawn/2, run/2, run_safely/2]).
+-export([run_spawn/2, run_safely/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -31,23 +31,21 @@ run_spawn(Info, F) ->
 
 -spec run_safely(log_info(), task_fun()) -> task_result() | {error, reason()}.
 run_safely(Info, Fun) ->
-    run(Info, Fun, true).
-
--spec run(log_info(), task_fun()) -> task_result().
-run(Info, Fun) ->
-    run(Info, Fun, false).
-
--spec run(log_info(), task_fun(), boolean()) -> task_result() | {error, reason()}.
-run(Info, Fun, Catch) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
     ?LOG_INFO(Info#{what => long_task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
-        case Catch of
-            true -> just_run_safely(Info#{what => long_task_failed}, Fun);
-            false -> Fun()
-        end
+        Fun()
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(Info#{
+                what => long_task_failed,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, {Class, Reason, Stacktrace}}
     after
         Diff = diff(Start),
         ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
@@ -76,12 +74,3 @@ monitor_loop(Mon, Info, Start) ->
 
 diff(Start) ->
     erlang:system_time(millisecond) - Start.
-
-just_run_safely(Info, Fun) ->
-    try
-        Fun()
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(Info#{class => Class, reason => Reason, stacktrace => Stacktrace}),
-            {error, {Class, Reason, Stacktrace}}
-    end.
