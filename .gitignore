@@ -1,0 +1,3 @@
+_build/
+# vim temporary files
+*.sw*
