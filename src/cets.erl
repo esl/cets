@@ -116,7 +116,7 @@
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
--type start_opts() :: #{handle_down := handle_down_fun()}.
+-type start_opts() :: #{handle_down => handle_down_fun()}.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
