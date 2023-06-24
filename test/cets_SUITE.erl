@@ -27,7 +27,13 @@ all() ->
         mon_cleaner_works,
         mon_cleaner_stops_correctly,
         sync_using_name_works,
-        insert_many_request
+        insert_many_request,
+        insert_into_bag,
+        delete_from_bag,
+        delete_many_from_bag,
+        delete_request_from_bag,
+        delete_request_many_from_bag,
+        insert_into_bag_is_replicated
     ].
 
 init_per_suite(Config) ->
@@ -320,6 +326,51 @@ insert_many_request(_Config) ->
     R = cets:insert_many_request(Pid, [{a}, {b}]),
     ok = cets:wait_response(R, 5000),
     [{a}, {b}] = ets:tab2list(c5).
+
+insert_into_bag(_Config) ->
+    T = b1,
+    {ok, _Pid} = cets:start(T, #{type => bag}),
+    cets:insert(T, {1, 1}),
+    cets:insert(T, {1, 1}),
+    cets:insert(T, {1, 2}),
+    [{1, 1}, {1, 2}] = lists:sort(cets:dump(T)).
+
+delete_from_bag(_Config) ->
+    T = b2,
+    {ok, _Pid} = cets:start(T, #{type => bag}),
+    cets:insert_many(T, [{1, 1}, {1, 2}]),
+    cets:delete_object(T, {1, 2}),
+    [{1, 1}] = cets:dump(T).
+
+delete_many_from_bag(_Config) ->
+    T = b3,
+    {ok, _Pid} = cets:start(T, #{type => bag}),
+    cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}, {1, 5}, {2, 3}]),
+    cets:delete_object_many(T, [{1, 2}, {1, 5}, {1, 4}]),
+    [{1, 1}, {1, 3}, {2, 3}] = lists:sort(cets:dump(T)).
+
+delete_request_from_bag(_Config) ->
+    T = b4,
+    {ok, _Pid} = cets:start(T, #{type => bag}),
+    cets:insert_many(T, [{1, 1}, {1, 2}]),
+    R = cets:delete_object_request(T, {1, 2}),
+    ok = cets:wait_response(R, 5000),
+    [{1, 1}] = cets:dump(T).
+
+delete_request_many_from_bag(_Config) ->
+    T = b5,
+    {ok, _Pid} = cets:start(T, #{type => bag}),
+    cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
+    R = cets:delete_object_many_request(T, [{1, 1}, {1, 3}]),
+    ok = cets:wait_response(R, 5000),
+    [{1, 2}] = cets:dump(T).
+
+insert_into_bag_is_replicated(_Config) ->
+    {ok, Pid1} = cets:start(b6a, #{type => bag}),
+    {ok, Pid2} = cets:start(T2 = b6b, #{type => bag}),
+    ok = cets_join:join(join_lock_b6, #{}, Pid1, Pid2),
+    cets:insert(Pid1, {1, 1}),
+    [{1, 1}] = cets:dump(T2).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
