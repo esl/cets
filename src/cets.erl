@@ -126,7 +126,7 @@
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
--type start_opts() :: #{handle_down => handle_down_fun(), type => ordered_set | bag}.
+-type start_opts() :: #{handle_down => handle_down_fun(), type => ordered_set | bag, keypos => non_neg_integer()}.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
@@ -267,8 +267,9 @@ init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     Type = maps:get(type, Opts, ordered_set),
+    KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
-    _ = ets:new(Tab, [Type, named_table, public]),
+    _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     _ = ets:new(MonTab, [public, named_table]),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{

@@ -33,7 +33,8 @@ all() ->
         delete_many_from_bag,
         delete_request_from_bag,
         delete_request_many_from_bag,
-        insert_into_bag_is_replicated
+        insert_into_bag_is_replicated,
+        insert_into_keypos_table
     ].
 
 init_per_suite(Config) ->
@@ -371,6 +372,14 @@ insert_into_bag_is_replicated(_Config) ->
     ok = cets_join:join(join_lock_b6, #{}, Pid1, Pid2),
     cets:insert(Pid1, {1, 1}),
     [{1, 1}] = cets:dump(T2).
+
+insert_into_keypos_table(_Config) ->
+    T = kp1,
+    {ok, _Pid} = cets:start(T, #{keypos => 2}),
+    cets:insert(T, {rec, 1}),
+    cets:insert(T, {rec, 2}),
+    [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
+    [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
