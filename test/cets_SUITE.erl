@@ -347,7 +347,7 @@ delete_many_from_bag(_Config) ->
     T = b3,
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}, {1, 5}, {2, 3}]),
-    cets:delete_object_many(T, [{1, 2}, {1, 5}, {1, 4}]),
+    cets:delete_objects(T, [{1, 2}, {1, 5}, {1, 4}]),
     [{1, 1}, {1, 3}, {2, 3}] = lists:sort(cets:dump(T)).
 
 delete_request_from_bag(_Config) ->
@@ -362,7 +362,7 @@ delete_request_many_from_bag(_Config) ->
     T = b5,
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
-    R = cets:delete_object_many_request(T, [{1, 1}, {1, 3}]),
+    R = cets:delete_objects_request(T, [{1, 1}, {1, 3}]),
     ok = cets:wait_response(R, 5000),
     [{1, 2}] = cets:dump(T).
 

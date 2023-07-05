@@ -25,7 +25,7 @@
     delete/2,
     delete_many/2,
     delete_object/2,
-    delete_object_many/2,
+    delete_objects/2,
     dump/1,
     remote_dump/1,
     send_dump/3,
@@ -42,7 +42,7 @@
     delete_request/2,
     delete_many_request/2,
     delete_object_request/2,
-    delete_object_many_request/2,
+    delete_objects_request/2,
     wait_response/2,
     init/1,
     handle_call/3,
@@ -60,7 +60,7 @@
     delete/2,
     delete_many/2,
     delete_object/2,
-    delete_object_many/2,
+    delete_objects/2,
     pause/1,
     unpause/2,
     sync/1,
@@ -72,7 +72,7 @@
     delete_request/2,
     delete_many_request/2,
     delete_object_request/2,
-    delete_object_many_request/2,
+    delete_objects_request/2,
     wait_response/2
 ]).
 
@@ -91,7 +91,7 @@
     | {delete_object, term()}
     | {insert_many, [tuple()]}
     | {delete_many, [term()]}
-    | {delete_object_many, [term()]}.
+    | {delete_objects, [term()]}.
 -type from() :: {pid(), reference()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
@@ -194,9 +194,9 @@ delete_object(Server, Object) ->
 delete_many(Server, Keys) ->
     cets_call:sync_operation(Server, {delete_many, Keys}).
 
--spec delete_object_many(server_ref(), [tuple()]) -> ok.
-delete_object_many(Server, Objects) ->
-    cets_call:sync_operation(Server, {delete_object_many, Objects}).
+-spec delete_objects(server_ref(), [tuple()]) -> ok.
+delete_objects(Server, Objects) ->
+    cets_call:sync_operation(Server, {delete_objects, Objects}).
 
 -spec insert_request(server_ref(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
@@ -218,9 +218,9 @@ delete_object_request(Server, Object) ->
 delete_many_request(Server, Keys) ->
     cets_call:async_operation(Server, {delete_many, Keys}).
 
--spec delete_object_many_request(server_ref(), [tuple()]) -> request_id().
-delete_object_many_request(Server, Objects) ->
-    cets_call:async_operation(Server, {delete_object_many, Objects}).
+-spec delete_objects_request(server_ref(), [tuple()]) -> request_id().
+delete_objects_request(Server, Objects) ->
+    cets_call:async_operation(Server, {delete_objects, Objects}).
 
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
 wait_response(Mon, Timeout) ->
@@ -457,7 +457,7 @@ do_table_op({insert_many, Recs}, Tab) ->
     ets:insert(Tab, Recs);
 do_table_op({delete_many, Keys}, Tab) ->
     ets_delete_keys(Tab, Keys);
-do_table_op({delete_object_many, Objects}, Tab) ->
+do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
