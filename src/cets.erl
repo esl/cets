@@ -24,6 +24,8 @@
     insert_many/2,
     delete/2,
     delete_many/2,
+    delete_object/2,
+    delete_objects/2,
     dump/1,
     remote_dump/1,
     send_dump/3,
@@ -39,6 +41,8 @@
     insert_many_request/2,
     delete_request/2,
     delete_many_request/2,
+    delete_object_request/2,
+    delete_objects_request/2,
     wait_response/2,
     init/1,
     handle_call/3,
@@ -55,6 +59,8 @@
     insert_many/2,
     delete/2,
     delete_many/2,
+    delete_object/2,
+    delete_objects/2,
     pause/1,
     unpause/2,
     sync/1,
@@ -65,6 +71,8 @@
     insert_many_request/2,
     delete_request/2,
     delete_many_request/2,
+    delete_object_request/2,
+    delete_objects_request/2,
     wait_response/2
 ]).
 
@@ -80,8 +88,10 @@
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
+    | {delete_object, term()}
     | {insert_many, [tuple()]}
-    | {delete_many, [term()]}.
+    | {delete_many, [term()]}
+    | {delete_objects, [term()]}.
 -type from() :: {pid(), reference()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
@@ -116,7 +126,9 @@
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
--type start_opts() :: #{handle_down => handle_down_fun()}.
+-type start_opts() :: #{
+    handle_down => handle_down_fun(), type => ordered_set | bag, keypos => non_neg_integer()
+}.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
@@ -173,10 +185,18 @@ insert_many(Server, Records) when is_list(Records) ->
 delete(Server, Key) ->
     cets_call:sync_operation(Server, {delete, Key}).
 
+-spec delete_object(server_ref(), tuple()) -> ok.
+delete_object(Server, Object) ->
+    cets_call:sync_operation(Server, {delete_object, Object}).
+
 %% A separate function for multidelete (because key COULD be a list, so no confusion)
 -spec delete_many(server_ref(), [term()]) -> ok.
 delete_many(Server, Keys) ->
     cets_call:sync_operation(Server, {delete_many, Keys}).
+
+-spec delete_objects(server_ref(), [tuple()]) -> ok.
+delete_objects(Server, Objects) ->
+    cets_call:sync_operation(Server, {delete_objects, Objects}).
 
 -spec insert_request(server_ref(), tuple()) -> request_id().
 insert_request(Server, Rec) ->
@@ -190,9 +210,17 @@ insert_many_request(Server, Records) ->
 delete_request(Server, Key) ->
     cets_call:async_operation(Server, {delete, Key}).
 
+-spec delete_object_request(server_ref(), tuple()) -> request_id().
+delete_object_request(Server, Object) ->
+    cets_call:async_operation(Server, {delete_object, Object}).
+
 -spec delete_many_request(server_ref(), [term()]) -> request_id().
 delete_many_request(Server, Keys) ->
     cets_call:async_operation(Server, {delete_many, Keys}).
+
+-spec delete_objects_request(server_ref(), [tuple()]) -> request_id().
+delete_objects_request(Server, Objects) ->
+    cets_call:async_operation(Server, {delete_objects, Objects}).
 
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
 wait_response(Mon, Timeout) ->
@@ -240,8 +268,10 @@ info(Server) ->
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
+    Type = maps:get(type, Opts, ordered_set),
+    KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
-    _ = ets:new(Tab, [ordered_set, named_table, public]),
+    _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     _ = ets:new(MonTab, [public, named_table]),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
@@ -392,6 +422,12 @@ ets_delete_keys(Tab, [Key | Keys]) ->
 ets_delete_keys(_Tab, []) ->
     ok.
 
+ets_delete_objects(Tab, [Object | Objects]) ->
+    ets:delete_object(Tab, Object),
+    ets_delete_objects(Tab, Objects);
+ets_delete_objects(_Tab, []) ->
+    ok.
+
 has_remote_pid(RemotePid, Servers) ->
     lists:member(RemotePid, Servers).
 
@@ -415,10 +451,14 @@ do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
     ets:delete(Tab, Key);
+do_table_op({delete_object, Object}, Tab) ->
+    ets:delete_object(Tab, Object);
 do_table_op({insert_many, Recs}, Tab) ->
     ets:insert(Tab, Recs);
 do_table_op({delete_many, Keys}, Tab) ->
-    ets_delete_keys(Tab, Keys).
+    ets_delete_keys(Tab, Keys);
+do_table_op({delete_objects, Objects}, Tab) ->
+    ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
 handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
