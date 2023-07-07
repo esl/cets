@@ -154,7 +154,12 @@
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
 -spec start(table_name(), start_opts()) -> {ok, pid()}.
 start(Tab, Opts) when is_atom(Tab) ->
-    gen_server:start({local, Tab}, ?MODULE, {Tab, Opts}, []).
+    case check_opts(Opts) of
+        [] ->
+            gen_server:start({local, Tab}, ?MODULE, {Tab, Opts}, []);
+        Errors ->
+            {error, Errors}
+    end.
 
 -spec stop(server_ref()) -> ok.
 stop(Server) ->
@@ -539,3 +544,13 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
         _ ->
             ok
     end.
+
+-type start_error() :: bag_with_conflict_handler.
+-spec check_opts(start_opts()) -> [start_error()].
+check_opts(Opts) ->
+    check_bag_with_conflict_handler(Opts).
+
+check_bag_with_conflict_handler(#{handle_conflict := _, type := bag}) ->
+    [bag_with_conflict_handler];
+check_bag_with_conflict_handler(_) ->
+    [].

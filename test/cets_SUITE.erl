@@ -16,6 +16,7 @@ all() ->
         join_works_with_existing_data_with_conflicts,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
+        bag_with_conflict_handler_not_allowed,
         join_with_the_same_pid,
         test_multinode,
         node_list_is_correct,
@@ -149,6 +150,10 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_mo
 
 resolve_highest({K, A}, {K, B}) ->
     {K, max(A, B)}.
+
+bag_with_conflict_handler_not_allowed(_Config) ->
+    {error, [bag_with_conflict_handler]} =
+        cets:start(ex1tab, #{handle_conflict => fun resolve_highest/2, type => bag}).
 
 join_with_the_same_pid(_Config) ->
     {ok, Pid} = cets:start(joinsame, #{}),

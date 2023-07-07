@@ -93,7 +93,7 @@ maybe_apply_resolver(LocalDump, RemoteDump, Opts = #{handle_conflict := F}) ->
     Type = maps:get(type, Opts, ordered_set),
     Pos = maps:get(keypos, Opts, 1),
     apply_resolver(Type, LocalDump, RemoteDump, F, Pos);
-maybe_apply_resolver(LocalDump, RemoteDump, Opts) ->
+maybe_apply_resolver(LocalDump, RemoteDump, _Opts) ->
     {LocalDump, RemoteDump}.
 
 %% Bags do not have conflicts, so do not define a resolver for them.
@@ -120,5 +120,5 @@ apply_resolver_for_sorted([L|LocalDump] = LocalDumpFull,
             %% Record exist only in the remote dump
             apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R|RemoteAcc])
     end;
-apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, LocalAcc, RemoteAcc) ->
+apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
