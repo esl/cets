@@ -16,6 +16,7 @@ all() ->
         join_works_with_existing_data_with_conflicts,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
+        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
         join_with_the_same_pid,
         test_multinode,
@@ -37,7 +38,8 @@ all() ->
         delete_request_from_bag,
         delete_request_many_from_bag,
         insert_into_bag_is_replicated,
-        insert_into_keypos_table
+        insert_into_keypos_table,
+        info_contains_opts
     ].
 
 init_per_suite(Config) ->
@@ -147,6 +149,28 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_mo
     Dump = cets:dump(T1),
     Dump = cets:dump(T2),
     Dump = cets:dump(T3).
+
+-record(user, {name, age, updated}).
+
+%% Test with records (which require keypos = 2 option)
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2(_Config) ->
+    Opts = #{handle_conflict => fun resolve_user_conflict/2, keypos => 2},
+    {ok, Pid1} = cets:start(T1 = keypos2_tab1, Opts),
+    {ok, Pid2} = cets:start(T2 = keypos2_tab2, Opts),
+    cets:insert(T1, #user{name = alice, age = 30, updated = erlang:system_time()}),
+    cets:insert(T2, #user{name = alice, age = 25, updated = erlang:system_time()}),
+    %% Join will copy and merge existing tables
+    ok = cets_join:join(keypos2_lock, #{}, Pid1, Pid2),
+    %% Last inserted record is in the table
+    [#user{age = 25}] = ets:lookup(T1, alice),
+    [#user{age = 25}] = ets:lookup(T2, alice).
+
+%% Keep record with highest timestamp
+resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2})
+    when TS1 > TS2 ->
+    U1;
+resolve_user_conflict(_U1, U2) ->
+    U2.
 
 resolve_highest({K, A}, {K, B}) ->
     {K, max(A, B)}.
@@ -419,6 +443,10 @@ insert_into_keypos_table(_Config) ->
     cets:insert(T, {rec, 2}),
     [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
     [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
+
+info_contains_opts(_Config) ->
+    {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
+    #{opts := #{type := bag}} = cets:info(Pid).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
