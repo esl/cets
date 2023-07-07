@@ -122,12 +122,15 @@
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    mon_pid := pid()
+    mon_pid := pid(),
+    opts := start_opts()
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
+-type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
 -type start_opts() :: #{
-    handle_down => handle_down_fun(), type => ordered_set | bag, keypos => non_neg_integer()
+    handle_down => handle_down_fun(), type => ordered_set | bag, keypos => non_neg_integer(),
+    handle_conflict => handle_conflict_fun()
 }.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
@@ -142,6 +145,13 @@
 %%   to make a new async process if you need to update).
 %%   i.e. any functions that replicate changes are not allowed (i.e. insert/2,
 %%   remove/2).
+%% - handle_conflict = fun(Record1, Record2) -> NewRecord
+%%   Called when two records have the same key when clustering.
+%%   NewRecord would be the record CETS would keep in the table under the key.
+%%   Does not work for bags.
+%%   We recomment to define that function if keys could have conflicts.
+%%   This function would be called once for each conflicting key.
+%%   We recommend to keep that function pure (or at least no blocking calls from it).
 -spec start(table_name(), start_opts()) -> {ok, pid()}.
 start(Tab, Opts) when is_atom(Tab) ->
     gen_server:start({local, Tab}, ?MODULE, {Tab, Opts}, []).
@@ -502,13 +512,15 @@ handle_unpause2(Mon, Mons, State) ->
     {reply, ok, State3}.
 
 -spec handle_get_info(state()) -> {reply, info(), state()}.
-handle_get_info(State = #{tab := Tab, other_servers := Servers, mon_pid := MonPid}) ->
+handle_get_info(State = #{tab := Tab, other_servers := Servers,
+                          mon_pid := MonPid, opts := Opts}) ->
     Info = #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        mon_pid => MonPid
+        mon_pid => MonPid,
+        opts => Opts
     },
     {reply, Info, State}.
 

@@ -14,6 +14,8 @@ all() ->
         inserted_records_could_be_read_back_from_replicated_table,
         join_works_with_existing_data,
         join_works_with_existing_data_with_conflicts,
+        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
+        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_with_the_same_pid,
         test_multinode,
         node_list_is_correct,
@@ -115,6 +117,38 @@ join_works_with_existing_data_with_conflicts(_Config) ->
     %% We insert data from other table into our table when merging, so the values get swapped
     [{alice, 33}] = ets:lookup(con1tab, alice),
     [{alice, 32}] = ets:lookup(con2tab, alice).
+
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler(_Config) ->
+    Opts = #{handle_conflict => fun resolve_highest/2},
+    {ok, Pid1} = cets:start(fn_con1tab, Opts),
+    {ok, Pid2} = cets:start(fn_con2tab, Opts),
+    cets:insert(fn_con1tab, {alice, 32}),
+    cets:insert(fn_con2tab, {alice, 33}),
+    %% Join will copy and merge existing tables
+    ok = cets_join:join(join_lock2_con, #{}, Pid1, Pid2),
+    %% Key with the highest Number remains
+    [{alice, 33}] = ets:lookup(fn_con1tab, alice),
+    [{alice, 33}] = ets:lookup(fn_con2tab, alice).
+
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys(_Config) ->
+    %% Deeper testing of cets_join:apply_resolver function
+    Opts = #{handle_conflict => fun resolve_highest/2},
+    {ok, Pid1} = cets:start(T1 = fn2_con1tab, Opts),
+    {ok, Pid2} = cets:start(T2 = fn2_con2tab, Opts),
+    {ok, Pid3} = cets:start(T3 = fn2_con3tab, Opts),
+    cets:insert_many(T1, [{alice, 32}, {bob, 10}, {michal, 40}]),
+    cets:insert_many(T2, [{alice, 33}, {kate, 3}, {michal, 2}]),
+    %% Join will copy and merge existing tables
+    ok = cets_join:join(join_lock3_con, #{}, Pid1, Pid2),
+    ok = cets_join:join(join_lock3_con, #{}, Pid1, Pid3),
+    %% Key with the highest Number remains
+    Dump = [{alice, 33}, {bob, 10}, {kate, 3}, {michal, 40}],
+    Dump = cets:dump(T1),
+    Dump = cets:dump(T2),
+    Dump = cets:dump(T3).
+
+resolve_highest({K, A}, {K, B}) ->
+    {K, max(A, B)}.
 
 join_with_the_same_pid(_Config) ->
     {ok, Pid} = cets:start(joinsame, #{}),

@@ -56,6 +56,7 @@ join2(_Info, LocalPid, RemotePid) ->
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
+    #{opts := Opts} = cets:info(LocalPid),
     LocalOtherPids = cets:other_pids(LocalPid),
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
@@ -70,8 +71,9 @@ join2(_Info, LocalPid, RemotePid) ->
         cets:sync(RemotePid),
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
-        RemF = fun(Pid) -> cets:send_dump(Pid, LocPids, LocalDump) end,
-        LocF = fun(Pid) -> cets:send_dump(Pid, RemPids, RemoteDump) end,
+        {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
+        RemF = fun(Pid) -> cets:send_dump(Pid, LocPids, LocalDump2) end,
+        LocF = fun(Pid) -> cets:send_dump(Pid, RemPids, RemoteDump2) end,
         lists:foreach(RemF, RemPids),
         lists:foreach(LocF, LocPids),
         ok
@@ -86,3 +88,37 @@ remote_or_local_dump(Pid) when node(Pid) =:= node() ->
 remote_or_local_dump(Pid) ->
     %% We actually need to ask the remote process
     cets:remote_dump(Pid).
+
+maybe_apply_resolver(LocalDump, RemoteDump, Opts = #{handle_conflict := F}) ->
+    Type = maps:get(type, Opts, ordered_set),
+    Pos = maps:get(keypos, Opts, 1),
+    apply_resolver(Type, LocalDump, RemoteDump, F, Pos);
+maybe_apply_resolver(LocalDump, RemoteDump, Opts) ->
+    {LocalDump, RemoteDump}.
+
+%% Bags do not have conflicts, so do not define a resolver for them.
+apply_resolver(ordered_set, LocalDump, RemoteDump, F, Pos) ->
+    %% Both dumps are sorted by the key (the lowest key first)
+    apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [], []).
+
+apply_resolver_for_sorted([X|LocalDump], [X|RemoteDump], F, Pos, LocalAcc, RemoteAcc) ->
+    %% Presents in both dumps, skip it at all (we don't need to insert it, it is already inserted)
+    apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, LocalAcc, RemoteAcc);
+apply_resolver_for_sorted([L|LocalDump] = LocalDumpFull,
+                          [R|RemoteDump] = RemoteDumpFull,
+                          F, Pos, LocalAcc, RemoteAcc) ->
+    LKey = element(Pos, L),
+    RKey = element(Pos, R),
+    if
+        LKey =:= RKey ->
+            New = F(L, R),
+            apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [New|LocalAcc], [New|RemoteAcc]);
+        LKey < RKey ->
+            %% Record exist only in the local dump
+            apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L|LocalAcc], RemoteAcc);
+        true ->
+            %% Record exist only in the remote dump
+            apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R|RemoteAcc])
+    end;
+apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, LocalAcc, RemoteAcc) ->
+    {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.

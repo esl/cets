@@ -23,6 +23,13 @@ should be inside an ETS key for this to work (or a pid).
 When some node is down, we remove all records that are owned by this node.
 When a node reappears, the records are added back.
 
+You can also use totally random keys. In this case all keys should be unique.
+We also support tables with type=bag. In such case all records would remain in the table.
+
+You can provide the `handle_conflict` function, which would be called if two records have
+the same key when clustering (just be aware, this function would not protect you against
+overwrites by the same node).
+
 # API
 
 The main module is cets.
