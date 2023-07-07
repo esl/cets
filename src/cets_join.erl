@@ -101,24 +101,31 @@ apply_resolver(ordered_set, LocalDump, RemoteDump, F, Pos) ->
     %% Both dumps are sorted by the key (the lowest key first)
     apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [], []).
 
-apply_resolver_for_sorted([X|LocalDump], [X|RemoteDump], F, Pos, LocalAcc, RemoteAcc) ->
+apply_resolver_for_sorted([X | LocalDump], [X | RemoteDump], F, Pos, LocalAcc, RemoteAcc) ->
     %% Presents in both dumps, skip it at all (we don't need to insert it, it is already inserted)
     apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, LocalAcc, RemoteAcc);
-apply_resolver_for_sorted([L|LocalDump] = LocalDumpFull,
-                          [R|RemoteDump] = RemoteDumpFull,
-                          F, Pos, LocalAcc, RemoteAcc) ->
+apply_resolver_for_sorted(
+    [L | LocalDump] = LocalDumpFull,
+    [R | RemoteDump] = RemoteDumpFull,
+    F,
+    Pos,
+    LocalAcc,
+    RemoteAcc
+) ->
     LKey = element(Pos, L),
     RKey = element(Pos, R),
     if
         LKey =:= RKey ->
             New = F(L, R),
-            apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [New|LocalAcc], [New|RemoteAcc]);
+            apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [New | LocalAcc], [
+                New | RemoteAcc
+            ]);
         LKey < RKey ->
             %% Record exist only in the local dump
-            apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L|LocalAcc], RemoteAcc);
+            apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L | LocalAcc], RemoteAcc);
         true ->
             %% Record exist only in the remote dump
-            apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R|RemoteAcc])
+            apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R | RemoteAcc])
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.

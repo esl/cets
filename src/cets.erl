@@ -129,7 +129,9 @@
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
 -type start_opts() :: #{
-    handle_down => handle_down_fun(), type => ordered_set | bag, keypos => non_neg_integer(),
+    type => ordered_set | bag,
+    keypos => non_neg_integer(),
+    handle_down => handle_down_fun(),
     handle_conflict => handle_conflict_fun()
 }.
 
@@ -517,8 +519,14 @@ handle_unpause2(Mon, Mons, State) ->
     {reply, ok, State3}.
 
 -spec handle_get_info(state()) -> {reply, info(), state()}.
-handle_get_info(State = #{tab := Tab, other_servers := Servers,
-                          mon_pid := MonPid, opts := Opts}) ->
+handle_get_info(
+    State = #{
+        tab := Tab,
+        other_servers := Servers,
+        mon_pid := MonPid,
+        opts := Opts
+    }
+) ->
     Info = #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),

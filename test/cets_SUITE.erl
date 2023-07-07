@@ -166,8 +166,9 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_ke
     [#user{age = 25}] = ets:lookup(T2, alice).
 
 %% Keep record with highest timestamp
-resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2})
-    when TS1 > TS2 ->
+resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2}) when
+    TS1 > TS2
+->
     U1;
 resolve_user_conflict(_U1, U2) ->
     U2.
