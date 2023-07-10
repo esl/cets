@@ -30,6 +30,10 @@ You can provide the `handle_conflict` function, which would be called if two rec
 the same key when clustering (just be aware, this function would not protect you against
 overwrites by the same node).
 
+Without `handle_conflict`, conflicting records would overwrite each other when joining.
+When joining nodes we insert all data from one node to another and vice versa without any extra check.
+Check `join_works_with_existing_data_with_conflicts` test case as an example.
+
 # API
 
 The main module is cets.

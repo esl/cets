@@ -121,10 +121,10 @@ apply_resolver_for_sorted(
                 New | RemoteAcc
             ]);
         LKey < RKey ->
-            %% Record exist only in the local dump
+            %% Record exists only in the local dump
             apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L | LocalAcc], RemoteAcc);
         true ->
-            %% Record exist only in the remote dump
+            %% Record exists only in the remote dump
             apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R | RemoteAcc])
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->

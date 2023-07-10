@@ -151,7 +151,7 @@
 %%   Called when two records have the same key when clustering.
 %%   NewRecord would be the record CETS would keep in the table under the key.
 %%   Does not work for bags.
-%%   We recomment to define that function if keys could have conflicts.
+%%   We recommend to define that function if keys could have conflicts.
 %%   This function would be called once for each conflicting key.
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
 -spec start(table_name(), start_opts()) -> {ok, pid()}.
@@ -555,10 +555,7 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
 
 -type start_error() :: bag_with_conflict_handler.
 -spec check_opts(start_opts()) -> [start_error()].
-check_opts(Opts) ->
-    check_bag_with_conflict_handler(Opts).
-
-check_bag_with_conflict_handler(#{handle_conflict := _, type := bag}) ->
+check_opts(#{handle_conflict := _, type := bag}) ->
     [bag_with_conflict_handler];
-check_bag_with_conflict_handler(_) ->
+check_opts(_) ->
     [].
