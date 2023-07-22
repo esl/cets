@@ -18,9 +18,11 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
-        inserted_new_works,
-        inserted_new_works_when_leader_is_back,
-        inserted_new_is_retried_when_leader_is_back,
+        insert_new_works,
+        insert_new_works_when_leader_is_back,
+        insert_new_is_retried_when_leader_is_back,
+        insert_new_fails_if_the_leader_dies,
+        insert_new_fails_if_the_local_server_is_dead,
         join_with_the_same_pid,
         test_multinode,
         test_multinode_remote_insert,
@@ -103,7 +105,7 @@ inserted_records_could_be_read_back_from_replicated_table(_Config) ->
     cets:insert(ins1tab, {alice, 32}),
     [{alice, 32}] = ets:lookup(ins2tab, alice).
 
-inserted_new_works(_Config) ->
+insert_new_works(_Config) ->
     {ok, Pid1} = cets:start(newins1tab, #{}),
     {ok, Pid2} = cets:start(newins2tab, #{}),
     ok = cets_join:join(join_lock1_insnew, #{}, Pid1, Pid2),
@@ -113,7 +115,7 @@ inserted_new_works(_Config) ->
     false = cets:insert_new(Pid1, {alice, 33}),
     false = cets:insert_new(Pid2, {alice, 33}).
 
-inserted_new_works_when_leader_is_back(_Config) ->
+insert_new_works_when_leader_is_back(_Config) ->
     {ok, Pid1} = cets:start(newins1tab_back, #{}),
     {ok, Pid2} = cets:start(newins2tab_back, #{}),
     ok = cets_join:join(join_lock1_insnew_back, #{}, Pid1, Pid2),
@@ -125,7 +127,7 @@ inserted_new_works_when_leader_is_back(_Config) ->
     true = cets:insert_new(Pid1, {alice, 32}).
 
 %% Checks that the handle_wrong_leader is called
-inserted_new_is_retried_when_leader_is_back(_Config) ->
+insert_new_is_retried_when_leader_is_back(_Config) ->
     Me = self(),
     F = fun(X) -> Me ! {wrong_leader_detected, X} end,
     {ok, Pid1} = cets:start(newins1tab_back2, #{}),
@@ -142,6 +144,26 @@ inserted_new_is_retried_when_leader_is_back(_Config) ->
         after 5000 ->
             ct:fail(wrong_leader_not_detected)
     end.
+
+%% We could retry automatically, but in this case return value from insert_new
+%% could be incorrect.
+%% If you wanna make insert_new more robust:
+%% - handle cets_down exception
+%% - call insert_new one more time
+%% - read the data back using ets:lookup to ensure it is your record written
+insert_new_fails_if_the_leader_dies(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab_back3, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back3, #{}),
+    ok = cets_join:join(join_lock1_insnew_back3, #{}, Pid1, Pid2),
+    cets:pause(Pid2),
+    spawn(fun() -> timer:sleep(100), exit(Pid2, kill) end),
+    try cets:insert_new(Pid1, {alice, 32}) catch error:{cets_down, killed} -> ok end.
+
+insert_new_fails_if_the_local_server_is_dead(_Config) ->
+    %% Get a pid for a stopped process
+    {Pid, Mon} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN', Mon, process, Pid, _Reason} -> ok end,
+    try cets:insert_new(Pid, {alice, 32}) catch exit:{noproc, {gen_server, call, _}} -> ok end.
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),

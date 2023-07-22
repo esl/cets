@@ -276,7 +276,7 @@ other_servers(Server) ->
 
 -spec get_leader(server_ref()) -> pid().
 get_leader(Server) ->
-    cets_call:long_call(Server, get_leader).
+    gen_server:call(Server, get_leader).
 
 %% Get a list of other nodes in the cluster that are connected together.
 -spec other_nodes(server_ref()) -> [node()].
