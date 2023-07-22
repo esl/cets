@@ -18,6 +18,9 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
+        inserted_new_works,
+        inserted_new_works_when_leader_is_back,
+        inserted_new_is_retried_when_leader_is_back,
         join_with_the_same_pid,
         test_multinode,
         test_multinode_remote_insert,
@@ -99,6 +102,46 @@ inserted_records_could_be_read_back_from_replicated_table(_Config) ->
     ok = cets_join:join(join_lock1_ins, #{}, Pid1, Pid2),
     cets:insert(ins1tab, {alice, 32}),
     [{alice, 32}] = ets:lookup(ins2tab, alice).
+
+inserted_new_works(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab, #{}),
+    {ok, Pid2} = cets:start(newins2tab, #{}),
+    ok = cets_join:join(join_lock1_insnew, #{}, Pid1, Pid2),
+    true = cets:insert_new(Pid1, {alice, 32}),
+    %% Duplicate found
+    false = cets:insert_new(Pid1, {alice, 32}),
+    false = cets:insert_new(Pid1, {alice, 33}),
+    false = cets:insert_new(Pid2, {alice, 33}).
+
+inserted_new_works_when_leader_is_back(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab_back, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back, #{}),
+    ok = cets_join:join(join_lock1_insnew_back, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    %% Highest Pid is the leader:
+    Pid2 = Leader,
+    cets:set_leader(Leader, false),
+    spawn(fun() -> timer:sleep(100), cets:set_leader(Leader, true) end),
+    true = cets:insert_new(Pid1, {alice, 32}).
+
+%% Checks that the handle_wrong_leader is called
+inserted_new_is_retried_when_leader_is_back(_Config) ->
+    Me = self(),
+    F = fun(X) -> Me ! {wrong_leader_detected, X} end,
+    {ok, Pid1} = cets:start(newins1tab_back2, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back2, #{handle_wrong_leader => F}),
+    ok = cets_join:join(join_lock1_insnew_back2, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    cets:set_leader(Leader, false),
+    spawn(fun() -> timer:sleep(100), cets:set_leader(Leader, true) end),
+    true = cets:insert_new(Pid1, {alice, 32}),
+    %% Check that we actually use retry logic
+    receive
+        {wrong_leader_detected, Info} ->
+            ct:pal("wrong_leader_detected ~p", [Info])
+        after 5000 ->
+            ct:fail(wrong_leader_not_detected)
+    end.
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),

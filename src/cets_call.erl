@@ -8,6 +8,9 @@
 -export([async_operation/2]).
 -export([sync_operation/2]).
 -export([wait_response/2]).
+-export([send_leader_op/2]).
+
+-include_lib("kernel/include/logger.hrl").
 
 -type request_id() :: cets:request_id().
 -type op() :: cets:op().
@@ -57,20 +60,23 @@ async_operation(Server, Msg) ->
             Mon
     end.
 
--spec sync_operation(server_ref(), op()) -> ok.
+-spec sync_operation(server_ref(), op()) -> ok | Result :: term().
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
     %% We monitor the local server until the response from all servers is collected.
     wait_response(Mon, infinity).
 
 %% This function must be called to receive the result of the multinode operation.
--spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
+-spec wait_response(request_id(), non_neg_integer() | infinity) -> ok | Result :: term().
 wait_response(Mon, Timeout) ->
     receive
         {'DOWN', Mon, process, _Pid, Reason} ->
             error({cets_down, Reason});
         {cets_reply, Mon, WaitInfo} ->
-            wait_for_updated(Mon, WaitInfo)
+            wait_for_updated(Mon, WaitInfo);
+        {cets_reply, Mon, WaitInfo, Result} ->
+            wait_for_updated(Mon, WaitInfo),
+            Result
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
         error(timeout)
@@ -84,7 +90,10 @@ wait_for_updated(Mon, {Servers, MonTab}) ->
     after
         erlang:demonitor(Mon, [flush]),
         delete_from_mon_tab(MonTab, Mon)
-    end.
+    end;
+wait_for_updated(Mon, false) ->
+    erlang:demonitor(Mon, [flush]), %% not replicated
+    ok.
 
 %% Edgecase: special treatment if Server is on the remote node
 delete_from_mon_tab({remote, Node, MonTab}, Mon) ->
@@ -116,3 +125,22 @@ where(Name) when is_atom(Name) -> whereis(Name);
 where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
+
+%% Sends all requests to a single node in the cluster
+-spec send_leader_op(server_ref(), op()) -> term().
+send_leader_op(Server, Op) ->
+    Leader = cets:get_leader(Server),
+    Res = cets_call:sync_operation(Leader, {leader_op, Op}),
+    case Res of
+        {error, wrong_leader} ->
+            ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),
+            timer:sleep(10),
+            %% We are free to retry
+            %% While it is infinite retries, the leader election logic is simple.
+            %% The only issue could be if there are bugs in the leader election logic
+            %% (i.e. our server thinks there is one leader in the cluster,
+            %% while that leader has another leader selected - i.e. an impossible case)
+            send_leader_op(Server, Op); %% Retry
+        _ ->
+            Res
+    end.
