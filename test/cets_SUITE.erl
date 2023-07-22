@@ -20,6 +20,7 @@ all() ->
         bag_with_conflict_handler_not_allowed,
         join_with_the_same_pid,
         test_multinode,
+        test_multinode_remote_insert,
         node_list_is_correct,
         test_multinode_auto_discovery,
         test_locally,
@@ -229,6 +230,17 @@ test_multinode(Config) ->
     delete_many(Node4, Tab, [a, n]),
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
     ok.
+
+test_multinode_remote_insert(Config) ->
+    Tab = rem_tab,
+    [Node2, Node3 | _] = proplists:get_value(nodes, Config),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    ok = join(Node2, Tab, Pid2, Pid3),
+    true = node() =/= node(Pid2), %% Ensure it is a remote node
+    %% Insert without calling rpc module
+    cets:insert(Pid2, {a}),
+    [{a}] = dump(Node3, Tab).
 
 node_list_is_correct(Config) ->
     Node1 = node(),

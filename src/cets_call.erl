@@ -83,8 +83,14 @@ wait_for_updated(Mon, {Servers, MonTab}) ->
         do_wait_for_updated(Mon, Servers)
     after
         erlang:demonitor(Mon, [flush]),
-        ets:delete(MonTab, Mon)
+        delete_from_mon_tab(MonTab, Mon)
     end.
+
+%% Edgecase: special treatment if Server is on the remote node
+delete_from_mon_tab({remote, Node, MonTab}, Mon) ->
+    rpc:async_call(Node, ets, delete, [MonTab, Mon]);
+delete_from_mon_tab(MonTab, Mon) ->
+    ets:delete(MonTab, Mon).
 
 do_wait_for_updated(_Mon, []) ->
     ok;

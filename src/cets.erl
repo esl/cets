@@ -480,16 +480,20 @@ do_table_op({delete_objects, Objects}, Tab) ->
 %% Handle operation locally and replicate it across the cluster
 handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     do_op(Msg, State),
-    WaitInfo = replicate(From, Msg, State),
+    WaitInfo = replicate(Pid, From, Msg, State),
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
+replicate(Pid, From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
     ets:insert(MonTab, From),
-    {Servers, MonTab}.
+    MonTabInfo = case node(Pid) =:= node() of
+            true -> MonTab;
+            false -> {remote, node(), MonTab}
+        end,
+    {Servers, MonTabInfo}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
