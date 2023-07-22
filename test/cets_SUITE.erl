@@ -20,7 +20,10 @@ all() ->
         bag_with_conflict_handler_not_allowed,
         insert_new_works,
         insert_new_works_when_leader_is_back,
-        insert_new_is_retried_when_leader_is_back,
+        insert_new_when_new_leader_has_joined,
+        insert_new_when_new_leader_has_joined_duplicate,
+        insert_new_when_inconsistent,
+        insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
         insert_new_fails_if_the_local_server_is_dead,
         join_with_the_same_pid,
@@ -126,8 +129,64 @@ insert_new_works_when_leader_is_back(_Config) ->
     spawn(fun() -> timer:sleep(100), cets:set_leader(Leader, true) end),
     true = cets:insert_new(Pid1, {alice, 32}).
 
+insert_new_when_new_leader_has_joined(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_tab4a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_tab4b, #{}),
+    {ok, Pid3} = cets:start(T3 = insert_new_tab4c, #{}),
+    %% Join first network segment
+    ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid2),
+    %% Pause insert into the first segment
+    Leader = cets:get_leader(Pid1),
+    PauseMon = cets:pause(Leader),
+    spawn(fun() ->
+        timer:sleep(100),
+        ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
+        cets:unpause(Leader, PauseMon)
+        end),
+    %% Inserted by Pid3
+    true = cets:insert_new(Pid1, {alice, 32}),
+    Res = [{alice, 32}],
+    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+
 %% Checks that the handle_wrong_leader is called
-insert_new_is_retried_when_leader_is_back(_Config) ->
+insert_new_when_new_leader_has_joined_duplicate(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_tab5a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_tab5b, #{}),
+    {ok, Pid3} = cets:start(T3 = insert_new_tab5c, #{}),
+    %% Join first network segment
+    ok = cets_join:join(join_lock1_insnew_back4, #{}, Pid1, Pid2),
+    %% Put record into the second network segment
+    true = cets:insert_new(Pid3, {alice, 33}),
+    %% Pause insert into the first segment
+    Leader = cets:get_leader(Pid1),
+    PauseMon = cets:pause(Leader),
+    spawn(fun() ->
+        timer:sleep(100),
+        ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
+        cets:unpause(Leader, PauseMon)
+        end),
+    %% Checked and ignored by Pid3
+    false = cets:insert_new(Pid1, {alice, 32}),
+    Res = [{alice, 33}],
+    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+
+%% Rare case when tables contain different data
+%% (the developer should try to avoid the manual removal of data if possible)
+insert_new_when_inconsistent(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_lock6a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_lock6b, #{}),
+    ok = cets_join:join(insert_new_lock6, #{}, Pid1, Pid2),
+    true = cets:insert_new(Pid1, {alice, 33}),
+    true = cets:insert_new(Pid2, {bob, 40}),
+    %% Introduce inconsistency
+    ets:delete(T1, alice),
+    ets:delete(T2, bob),
+    false = cets:insert_new(Pid1, {alice, 55}),
+    true = cets:insert_new(Pid2, {bob, 66}),
+    [{bob, 40}] = cets:dump(T1),
+    [{alice, 33}, {bob, 66}] = cets:dump(T2).
+
+insert_new_is_retried_when_leader_is_reelected(_Config) ->
     Me = self(),
     F = fun(X) -> Me ! {wrong_leader_detected, X} end,
     {ok, Pid1} = cets:start(newins1tab_back2, #{}),
