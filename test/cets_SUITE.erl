@@ -28,8 +28,6 @@ all() ->
         pause_multiple_times,
         unpause_twice,
         write_returns_if_remote_server_crashes,
-        mon_cleaner_works,
-        mon_cleaner_stops_correctly,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -341,46 +339,6 @@ write_returns_if_remote_server_crashes(_Config) ->
     R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
-
-mon_cleaner_works(_Config) ->
-    {ok, Pid1} = cets:start(c3, #{}),
-    %% Suspend, so to avoid unexpected check
-    sys:suspend(c3_mon),
-    %% Two cases to check: an alive process and a dead process
-    R = cets:insert_request(c3, {2}),
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There is one monitor
-    [_] = ets:tab2list(c3_mon),
-    {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    after 5000 -> ct:fail(timeout)
-    end,
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There are two monitors
-    [_, _] = ets:tab2list(c3_mon),
-    %% Force check
-    sys:resume(c3_mon),
-    c3_mon ! check,
-    %% Ensure, that check is finished
-    sys:get_state(c3_mon),
-    %% A monitor for a dead process is removed
-    [_] = ets:tab2list(c3_mon),
-    %% The monitor is finally removed once wait_response returns
-    ok = cets:wait_response(R, 5000),
-    [] = ets:tab2list(c3_mon).
-
-mon_cleaner_stops_correctly(_Config) ->
-    {ok, Pid} = cets:start(cleaner_stops, #{}),
-    #{mon_pid := MonPid} = cets:info(Pid),
-    MonMon = monitor(process, MonPid),
-    cets:stop(Pid),
-    receive
-        {'DOWN', MonMon, process, MonPid, normal} -> ok
-    after 5000 -> ct:fail(timeout)
-    end.
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),

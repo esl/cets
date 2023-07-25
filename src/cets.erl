@@ -84,7 +84,7 @@
     | {local, atom()}
     | {global, term()}
     | {via, module(), term()}.
--type request_id() :: reference().
+-type request_id() :: {pid(), reference()} | false.
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
@@ -98,8 +98,6 @@
 -type pause_monitor() :: reference().
 -type state() :: #{
     tab := table_name(),
-    mon_tab := atom(),
-    mon_pid := pid(),
     other_servers := [pid()],
     opts := start_opts(),
     backlog := [backlog_entry()],
@@ -122,7 +120,6 @@
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    mon_pid := pid(),
     opts := start_opts()
 }.
 
@@ -284,17 +281,12 @@ info(Server) ->
 -spec init({table_name(), start_opts()}) -> {ok, state()}.
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
-    MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     Type = maps:get(type, Opts, ordered_set),
     KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
-    _ = ets:new(MonTab, [public, named_table]),
-    {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
-        mon_tab => MonTab,
-        mon_pid => MonPid,
         other_servers => [],
         opts => Opts,
         backlog => [],
@@ -353,8 +345,8 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
-terminate(_Reason, _State = #{mon_pid := MonPid}) ->
-    ok = gen_server:stop(MonPid).
+terminate(_Reason, _State) ->
+    ok.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -380,11 +372,11 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+handle_down2(_Mon, RemotePid, State = #{other_servers := Servers}) ->
     case lists:member(RemotePid, Servers) of
         true ->
             Servers2 = lists:delete(RemotePid, Servers),
-            notify_remote_down(RemotePid, MonTab),
+            notify_remote_down(RemotePid),
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers := Servers2}};
         false ->
@@ -397,14 +389,12 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := Mon
             {noreply, State}
     end.
 
-notify_remote_down(RemotePid, MonTab) ->
-    List = ets:tab2list(MonTab),
-    notify_remote_down_loop(RemotePid, List).
-
-notify_remote_down_loop(RemotePid, [{Mon, Pid} | List]) ->
-    Pid ! {remote_down, Mon, RemotePid},
-    notify_remote_down_loop(RemotePid, List);
-notify_remote_down_loop(_RemotePid, []) ->
+notify_remote_down(RemotePid) ->
+    %% Sadly, we have access to Pids only, without monitor refs.
+    {monitored_by, Pids} = erlang:process_info(self(), monitored_by),
+    %% We don't have monitor reference info
+    Server = self(),
+    [Pid ! {cets_remote_down, Server, RemotePid} || Pid <- Pids],
     ok.
 
 %% Merge two lists of pids, create the missing monitors.
@@ -484,12 +474,11 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
+replicate(From, Msg, #{other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
-    ets:insert(MonTab, From),
-    {Servers, MonTab}.
+    Servers.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -523,7 +512,6 @@ handle_get_info(
     State = #{
         tab := Tab,
         other_servers := Servers,
-        mon_pid := MonPid,
         opts := Opts
     }
 ) ->
@@ -532,7 +520,6 @@ handle_get_info(
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        mon_pid => MonPid,
         opts => Opts
     },
     {reply, Info, State}.
