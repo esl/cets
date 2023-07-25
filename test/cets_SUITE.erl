@@ -28,6 +28,8 @@ all() ->
         pause_multiple_times,
         unpause_twice,
         write_returns_if_remote_server_crashes,
+        write_returns_if_remote_server_crashes_for_two_async_writes,
+        write_returns_if_remote_server_rejoins,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -339,6 +341,53 @@ write_returns_if_remote_server_crashes(_Config) ->
     R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
+
+write_returns_if_remote_server_crashes_for_two_async_writes(_Config) ->
+    %% Here we verify that two monitors from a single process still
+    %% cause two cets_node_down messages
+    {ok, Pid1} = cets:start(cc1, #{}),
+    {ok, Pid2} = cets:start(cc2, #{}),
+    ok = cets_join:join(lock1, #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R1 = cets:insert_request(Pid1, {1}),
+    R2 = cets:insert_request(Pid1, {2}),
+    exit(Pid2, oops),
+    ok = cets:wait_response(R1, 5000),
+    ok = cets:wait_response(R2, 5000).
+
+write_returns_if_remote_server_rejoins(_Config) ->
+    %% We check that netsplit recovery does not cause
+    %% infinite locks
+    {ok, Pid1} = cets:start(re_cc1, #{}),
+    {ok, Pid2} = cets:start(re_cc2, #{}),
+    ok = cets_join:join(lock1, #{}, Pid1, Pid2),
+    {Pid1, MonRef} = R1 = cets:insert_request(Pid1, {1}),
+
+    %% This message would be lost with a real netsplit:
+    receive {updated, MonRef, Pid2} -> ok after 5000 -> error(timeout) end,
+
+    %% Make processes unsee each other
+    Pid1 ! {'DOWN', make_ref(), process, Pid2, fake},
+    Pid2 ! {'DOWN', make_ref(), process, Pid1, fake},
+
+    %% Wait till DOWNs are received
+    timer:sleep(100),
+
+    %% Now we should have cets_remote_down in our box
+    [_] = [M || {cets_remote_down, _, _, _} = M <- element(2, erlang:process_info(self(), messages))],
+
+    %% Bring cluster back together
+    #{ver := 1} = cets:info(Pid1),
+    ok = cets_join:join(lock1, #{}, Pid1, Pid2),
+    #{ver := 2} = cets:info(Pid1),
+
+    sys:suspend(Pid2),
+    R2 = cets:insert_request(Pid1, {2}),
+
+    %% Check that we don't match on the newer cets_node_down
+    {'EXIT', {timeout, _}} = catch cets:wait_response(R2, 100),
+    ok = cets:wait_response(R1, 5000),
+    ok.
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),

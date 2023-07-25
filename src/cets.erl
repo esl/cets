@@ -14,6 +14,9 @@
 %% - Add writer pid() or writer node() as a key. And do a proper cleanups using handle_down.
 %%   (the data could still get overwritten though if a node joins back way too quick
 %%    and cleaning is done outside of handle_down)
+%%
+%% You could receive an unexpected cets_remote_down message if you call any of API functions
+%% (you should ignore it).
 -module(cets).
 -behaviour(gen_server).
 
@@ -97,6 +100,8 @@
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
+    %% Incremented each time we add a new server into other_servers
+    ver := non_neg_integer(),
     tab := table_name(),
     other_servers := [pid()],
     opts := start_opts(),
@@ -120,7 +125,8 @@
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    opts := start_opts()
+    opts := start_opts(),
+    ver := non_neg_integer()
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
@@ -237,8 +243,8 @@ delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
-wait_response(Mon, Timeout) ->
-    cets_call:wait_response(Mon, Timeout).
+wait_response(Request, Timeout) ->
+    cets_call:wait_response(Request, Timeout).
 
 %% Get a list of other CETS processes that are handling this table.
 -spec other_servers(server_ref()) -> [server_ref()].
@@ -287,6 +293,7 @@ init({Tab, Opts}) ->
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     {ok, #{
         tab => Tab,
+        ver => 0,
         other_servers => [],
         opts => Opts,
         backlog => [],
@@ -341,6 +348,9 @@ handle_info({remote_op, From, Msg}, State) ->
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
+%% Ignore unexpected cets_remote_down
+handle_info({cets_remote_down, _ServerPid, _RemotePid, _Ver}, State) ->
+    {noreply, State};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -353,10 +363,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers, ver := Ver}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, State#{other_servers := Servers2}}.
+    {reply, ok, State#{other_servers := Servers2, ver := Ver + 1}}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -372,11 +382,11 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers}) ->
+handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, ver := Ver}) ->
     case lists:member(RemotePid, Servers) of
         true ->
             Servers2 = lists:delete(RemotePid, Servers),
-            notify_remote_down(RemotePid),
+            notify_remote_down(RemotePid, Ver),
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers := Servers2}};
         false ->
@@ -389,12 +399,14 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers}) ->
             {noreply, State}
     end.
 
-notify_remote_down(RemotePid) ->
+notify_remote_down(RemotePid, Ver) ->
     %% Sadly, we have access to Pids only, without monitor refs.
     {monitored_by, Pids} = erlang:process_info(self(), monitored_by),
     %% We don't have monitor reference info
     Server = self(),
-    [Pid ! {cets_remote_down, Server, RemotePid} || Pid <- Pids],
+    lists:foreach(fun(Pid) ->
+            Pid ! {cets_remote_down, Server, RemotePid, Ver}
+        end, Pids),
     ok.
 
 %% Merge two lists of pids, create the missing monitors.
@@ -474,11 +486,11 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{other_servers := Servers}) ->
+replicate(From, Msg, #{other_servers := Servers, ver := Ver}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
-    Servers.
+    {Ver, Servers}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -512,7 +524,8 @@ handle_get_info(
     State = #{
         tab := Tab,
         other_servers := Servers,
-        opts := Opts
+        opts := Opts,
+        ver := Ver
     }
 ) ->
     Info = #{
@@ -520,7 +533,8 @@ handle_get_info(
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        opts => Opts
+        opts => Opts,
+        ver => Ver
     },
     {reply, Info, State}.
 

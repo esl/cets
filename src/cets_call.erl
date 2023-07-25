@@ -61,15 +61,19 @@ sync_operation(Server, Msg) ->
     wait_response(Mon, infinity).
 
 %% This function must be called to receive the result of the multinode operation.
+%% This function could be called once for each unique request_id().
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
-wait_response(false, Timeout) ->
-    error({cets_down, pid_not_found});
+wait_response(false, _Timeout) ->
+    %% Dialyzer is too "smart" and would not allow us to make an error
+    %% here (even if we want to).
+    %% Use apply to say dialyzer that false is a valid argument in this function.
+    erlang:apply(erlang, error, [{cets_down, pid_not_found}]);
 wait_response({Pid, Mon}, Timeout) ->
     receive
         {'DOWN', Mon, process, _Pid, Reason} ->
             error({cets_down, Reason});
         {cets_reply, Mon, WaitInfo} ->
-            wait_for_updated(Pid, Mon, WaitInfo)
+            wait_for_updated(Pid, Mon, WaitInfo, Timeout)
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
         error(timeout)
@@ -77,29 +81,31 @@ wait_response({Pid, Mon}, Timeout) ->
 
 %% Wait for response from the remote nodes that the operation is completed.
 %% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Pid, Mon, Servers) ->
+wait_for_updated(Pid, Mon, {Ver, Servers}, Timeout) ->
     try
-        do_wait_for_updated(Pid, Mon, Servers)
+        do_wait_for_updated(Pid, Mon, Ver, Servers, Timeout)
     after
         erlang:demonitor(Mon, [flush])
     end.
 
-do_wait_for_updated(_ServerPid, _Mon, []) ->
+do_wait_for_updated(_ServerPid, _Mon, _Ver, [], _Timeout) ->
     ok;
-do_wait_for_updated(ServerPid, Mon, Servers) ->
+do_wait_for_updated(ServerPid, Mon, Ver, Servers, Timeout) ->
     receive
         {updated, Mon, RemotePid} ->
             %% A replication confirmation from the remote server is received
             Servers2 = lists:delete(RemotePid, Servers),
-            do_wait_for_updated(ServerPid, Mon, Servers2);
-        {cets_remote_down, ServerPid, RemotePid} ->
+            do_wait_for_updated(ServerPid, Mon, Ver, Servers2, Timeout);
+        {cets_remote_down, ServerPid, RemotePid, Ver} ->
             %% This message is sent by our local server when
             %% the remote server is down condition is detected
             Servers2 = lists:delete(RemotePid, Servers),
-            do_wait_for_updated(ServerPid, Mon, Servers2);
+            do_wait_for_updated(ServerPid, Mon, Ver, Servers2, Timeout);
         {'DOWN', Mon, process, _Pid, Reason} ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})
+    after Timeout ->
+        error(timeout)
     end.
 
 -spec where(server_ref()) -> pid() | undefined.
