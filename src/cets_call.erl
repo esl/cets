@@ -81,26 +81,24 @@ wait_response({Pid, Mon}, Timeout) ->
 
 %% Wait for response from the remote nodes that the operation is completed.
 %% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Pid, Mon, {Ver, Servers}, Timeout) ->
+wait_for_updated(Pid, Mon, Servers, Timeout) ->
     try
-        do_wait_for_updated(Pid, Mon, Ver, Servers, Timeout)
+        do_wait_for_updated(Pid, Mon, Servers, Timeout)
     after
         erlang:demonitor(Mon, [flush])
     end.
 
-do_wait_for_updated(_ServerPid, _Mon, _Ver, [], _Timeout) ->
+do_wait_for_updated(_ServerPid, _Mon, [], _Timeout) ->
     ok;
-do_wait_for_updated(ServerPid, Mon, Ver, Servers, Timeout) ->
+do_wait_for_updated(ServerPid, Mon, [{RemotePid, RemoteMon}|Servers], Timeout) ->
     receive
         {cets_updated, Mon, RemotePid} ->
             %% A replication confirmation from the remote server is received
-            Servers2 = lists:delete(RemotePid, Servers),
-            do_wait_for_updated(ServerPid, Mon, Ver, Servers2, Timeout);
-        {cets_remote_down, ServerPid, RemotePid, Ver} ->
+            do_wait_for_updated(ServerPid, Mon, Servers, Timeout);
+        {cets_remote_down, RemoteMon, ServerPid, RemotePid} ->
             %% This message is sent by our local server when
             %% the remote server is down condition is detected
-            Servers2 = lists:delete(RemotePid, Servers),
-            do_wait_for_updated(ServerPid, Mon, Ver, Servers2, Timeout);
+            do_wait_for_updated(ServerPid, Mon, Servers, Timeout);
         {'DOWN', Mon, process, _Pid, Reason} ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})

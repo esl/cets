@@ -100,10 +100,8 @@
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
-    %% Incremented each time we add a new server into other_servers
-    ver := non_neg_integer(),
     tab := table_name(),
-    other_servers := [pid()],
+    other_servers := [{pid(), reference()}],
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()]
@@ -126,7 +124,7 @@
     size := non_neg_integer(),
     memory := non_neg_integer(),
     opts := start_opts(),
-    ver := non_neg_integer()
+    other_servers_with_monitors := [{pid(), reference()}]
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
@@ -293,7 +291,6 @@ init({Tab, Opts}) ->
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     {ok, #{
         tab => Tab,
-        ver => 0,
         other_servers => [],
         opts => Opts,
         backlog => [],
@@ -303,11 +300,13 @@ init({Tab, Opts}) ->
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
-    {reply, Servers, State};
+    Pids = [Pid || {Pid, _} <- Servers],
+    {reply, Pids, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
+    Pids = [Pid || {Pid, _} <- Servers],
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-        lists:foreach(fun ping/1, Servers),
+        lists:foreach(fun ping/1, Pids),
         gen_server:reply(From, ok)
     end),
     {noreply, State};
@@ -349,7 +348,7 @@ handle_info({remote_op, From, Msg}, State) ->
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
 %% Ignore unexpected cets_remote_down
-handle_info({cets_remote_down, _ServerPid, _RemotePid, _Ver}, State) ->
+handle_info({cets_remote_down, _Mon, _ServerPid, _RemotePid}, State) ->
     {noreply, State};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
@@ -363,10 +362,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers, ver := Ver}) ->
+handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, State#{other_servers := Servers2, ver := Ver + 1}}.
+    {reply, ok, State#{other_servers := Servers2}}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -382,11 +381,12 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, ver := Ver}) ->
-    case lists:member(RemotePid, Servers) of
+handle_down2(Mon, RemotePid, State = #{other_servers := Servers}) ->
+    Pair = {RemotePid, Mon},
+    case lists:member(Pair, Servers) of
         true ->
-            Servers2 = lists:delete(RemotePid, Servers),
-            notify_remote_down(RemotePid, Ver),
+            Servers2 = lists:delete(Pair, Servers),
+            notify_remote_down(Mon, RemotePid),
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers := Servers2}};
         false ->
@@ -399,13 +399,13 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, ver := Ver}) -
             {noreply, State}
     end.
 
-notify_remote_down(RemotePid, Ver) ->
+notify_remote_down(Mon, RemotePid) ->
     %% Sadly, we have access to Pids only, without monitor refs.
     {monitored_by, Pids} = erlang:process_info(self(), monitored_by),
     %% We don't have monitor reference info
     Server = self(),
     lists:foreach(fun(Pid) ->
-            Pid ! {cets_remote_down, Server, RemotePid, Ver}
+            Pid ! {cets_remote_down, Mon, Server, RemotePid}
         end, Pids),
     ok.
 
@@ -419,8 +419,8 @@ add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
 add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
     case has_remote_pid(RemotePid, Servers) of
         false ->
-            erlang:monitor(process, RemotePid),
-            [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
+            Mon = erlang:monitor(process, RemotePid),
+            [{RemotePid, Mon} | add_servers2(SelfPid, OtherPids, Servers)];
         true ->
             ?LOG_INFO(#{
                 what => already_added,
@@ -448,7 +448,7 @@ ets_delete_objects(_Tab, []) ->
     ok.
 
 has_remote_pid(RemotePid, Servers) ->
-    lists:member(RemotePid, Servers).
+    lists:keymember(RemotePid, 1, Servers).
 
 reply_updated({Mon, Pid}) ->
     %% We really don't wanna block this process
@@ -486,11 +486,11 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{other_servers := Servers, ver := Ver}) ->
+replicate(From, Msg, #{other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
-    [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
-    {Ver, Servers}.
+    [send_to_remote(RemotePid, Msg2) || {RemotePid, _Mon} <- Servers],
+    Servers.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -524,17 +524,17 @@ handle_get_info(
     State = #{
         tab := Tab,
         other_servers := Servers,
-        opts := Opts,
-        ver := Ver
+        opts := Opts
     }
 ) ->
+    Pids = [Pid || {Pid, _} <- Servers],
     Info = #{
         table => Tab,
-        nodes => lists:usort(pids_to_nodes([self() | Servers])),
+        nodes => lists:usort(pids_to_nodes([self() | Pids])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         opts => Opts,
-        ver => Ver
+        other_servers_with_monitors => Servers
     },
     {reply, Info, State}.
 
