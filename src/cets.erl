@@ -284,6 +284,11 @@ info(Server) ->
 
 -spec init({table_name(), start_opts()}) -> {ok, state()}.
 init({Tab, Opts}) ->
+    %% While this process could produce a lot of messages,
+    %% blocking it would not help on the real system
+    %% (probably any blocking of this process would make CPU/memory usage higher)
+    %% It is supported starting from OTP 25.3
+    catch process_flag(async_dist, true),
     process_flag(message_queue_data, off_heap),
     Type = maps:get(type, Opts, ordered_set),
     KeyPos = maps:get(keypos, Opts, 1),
@@ -454,8 +459,7 @@ has_remote_pid(RemotePid, Servers) ->
     lists:keymember(RemotePid, 1, Servers).
 
 reply_updated({Mon, Pid}) ->
-    %% We really don't wanna block this process
-    erlang:send(Pid, {cets_updated, Mon, self()}, [noconnect, nosuspend]).
+    Pid ! {cets_updated, Mon, self()}.
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
