@@ -300,10 +300,10 @@ init({Tab, Opts}) ->
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
-    Pids = [Pid || {Pid, _} <- Servers],
+    Pids = servers_to_pids(Servers),
     {reply, Pids, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
-    Pids = [Pid || {Pid, _} <- Servers],
+    Pids = servers_to_pids(Servers),
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
         lists:foreach(fun ping/1, Pids),
@@ -530,7 +530,7 @@ handle_get_info(
         opts := Opts
     }
 ) ->
-    Pids = [Pid || {Pid, _} <- Servers],
+    Pids = servers_to_pids(Servers),
     Info = #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Pids])),
@@ -563,3 +563,6 @@ check_opts(#{handle_conflict := _, type := bag}) ->
     [bag_with_conflict_handler];
 check_opts(_) ->
     [].
+
+servers_to_pids(Servers) ->
+    [Pid || {Pid, _Mon} <- Servers].
