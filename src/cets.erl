@@ -275,6 +275,9 @@ other_servers(Server) ->
     cets_call:long_call(Server, other_servers).
 
 -spec get_leader(server_ref()) -> pid().
+get_leader(Tab) when is_atom(Tab) ->
+    %% Optimization: replace call with ETS lookup
+    cets_metadata:get(Tab, leader);
 get_leader(Server) ->
     gen_server:call(Server, get_leader).
 
@@ -327,6 +330,8 @@ init({Tab, Opts}) ->
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     _ = ets:new(MonTab, [public, named_table]),
+    cets_metadata:init(Tab),
+    cets_metadata:set(Tab, leader, self()),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
@@ -474,13 +479,14 @@ add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 %% Sets other_servers field, chooses the leader
-set_other_servers(Servers, State) ->
+set_other_servers(Servers, State = #{tab := Tab}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang
     %% (so all nodes would choose the same leader).
     %% The leader node would not receive that much extra load.
     Leader = lists:max([self() | Servers]),
     IsLeader = Leader =:= self(),
+    cets_metadata:set(Tab, leader, self()),
     State#{leader := Leader, is_leader := IsLeader, other_servers := Servers}.
 
 pids_to_nodes(Pids) ->
