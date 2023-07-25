@@ -364,7 +364,10 @@ write_returns_if_remote_server_rejoins(_Config) ->
     {Pid1, MonRef} = R1 = cets:insert_request(Pid1, {1}),
 
     %% This message would be lost with a real netsplit:
-    receive {cets_updated, MonRef, Pid2} -> ok after 5000 -> error(timeout) end,
+    receive
+        {cets_updated, MonRef, Pid2} -> ok
+    after 5000 -> error(timeout)
+    end,
 
     #{other_servers_with_monitors := [{Pid2, Mon2}]} = cets:info(Pid1),
     #{other_servers_with_monitors := [{Pid1, Mon1}]} = cets:info(Pid2),
@@ -377,7 +380,8 @@ write_returns_if_remote_server_rejoins(_Config) ->
     timer:sleep(100),
 
     %% Now we should have cets_remote_down in our box
-    [_] = [M || {cets_remote_down, _, _, _} = M <- element(2, erlang:process_info(self(), messages))],
+    {messages, Messages} = erlang:process_info(self(), messages),
+    [_] = [M || {cets_remote_down, _, _, _} = M <- Messages],
 
     %% Bring cluster back together
     ok = cets_join:join(lock1, #{}, Pid1, Pid2),

@@ -404,9 +404,12 @@ notify_remote_down(Mon, RemotePid) ->
     {monitored_by, Pids} = erlang:process_info(self(), monitored_by),
     %% We don't have monitor reference info
     Server = self(),
-    lists:foreach(fun(Pid) ->
+    lists:foreach(
+        fun(Pid) ->
             Pid ! {cets_remote_down, Mon, Server, RemotePid}
-        end, Pids),
+        end,
+        Pids
+    ),
     ok.
 
 %% Merge two lists of pids, create the missing monitors.

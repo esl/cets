@@ -90,7 +90,7 @@ wait_for_updated(Pid, Mon, Servers, Timeout) ->
 
 do_wait_for_updated(_ServerPid, _Mon, [], _Timeout) ->
     ok;
-do_wait_for_updated(ServerPid, Mon, [{RemotePid, RemoteMon}|Servers], Timeout) ->
+do_wait_for_updated(ServerPid, Mon, [{RemotePid, RemoteMon} | Servers], Timeout) ->
     receive
         {cets_updated, Mon, RemotePid} ->
             %% A replication confirmation from the remote server is received
