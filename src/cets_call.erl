@@ -48,7 +48,7 @@ async_operation(Server, Msg) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
             Mon = erlang:monitor(process, Pid),
-            gen_server:cast(Server, {op, {Mon, self()}, Msg}),
+            Pid ! {op, {Mon, self()}, Msg},
             {Pid, Mon};
         undefined ->
             false

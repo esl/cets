@@ -331,18 +331,18 @@ handle_call(get_info, _From, State) ->
     handle_get_info(State).
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
-handle_cast({op, From, Msg}, State = #{pause_monitors := []}) ->
-    handle_op(From, Msg, State),
-    {noreply, State};
-handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
-    %% Backlog is a list of pending operation, when our server is paused.
-    %% The list would be applied, once our server is unpaused.
-    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
+handle_info({op, From, Msg}, State = #{pause_monitors := []}) ->
+    handle_op(From, Msg, State),
+    {noreply, State};
+handle_info({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
+    %% Backlog is a list of pending operation, when our server is paused.
+    %% The list would be applied, once our server is unpaused.
+    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
 handle_info({remote_op, From, Msg}, State) ->
     handle_remote_op(From, Msg, State),
     {noreply, State};
