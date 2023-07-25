@@ -362,33 +362,22 @@ write_returns_if_remote_server_rejoins(_Config) ->
     {ok, Pid2} = cets:start(re_cc2, #{}),
     ok = cets_join:join(lock1, #{}, Pid1, Pid2),
     {Pid1, MonRef} = R1 = cets:insert_request(Pid1, {1}),
-
     %% This message would be lost with a real netsplit:
     receive
         {cets_updated, MonRef, Pid2} -> ok
     after 5000 -> error(timeout)
     end,
-
-    #{other_servers_with_monitors := [{Pid2, Mon2}]} = cets:info(Pid1),
-    #{other_servers_with_monitors := [{Pid1, Mon1}]} = cets:info(Pid2),
-
-    %% Make processes unsee each other
-    Pid1 ! {'DOWN', Mon2, process, Pid2, fake},
-    Pid2 ! {'DOWN', Mon1, process, Pid1, fake},
-
+    fake_netsplit(Pid1, Pid2),
     %% Wait till DOWNs are received
     timer:sleep(100),
-
     %% Now we should have cets_remote_down in our box
     {messages, Messages} = erlang:process_info(self(), messages),
     [_] = [M || {cets_remote_down, _, _, _} = M <- Messages],
-
     %% Bring cluster back together
     ok = cets_join:join(lock1, #{}, Pid1, Pid2),
-
+    %% Block Pid2 from replying
     sys:suspend(Pid2),
     R2 = cets:insert_request(Pid1, {2}),
-
     %% Check that we don't match on the newer cets_node_down
     {'EXIT', {timeout, _}} = catch cets:wait_response(R2, 100),
     ok = cets:wait_response(R1, 5000),
@@ -497,3 +486,11 @@ start_node(Sname) ->
     {ok, Node} = ct_slave:start(Sname, [{monitor_master, true}]),
     rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
+
+fake_netsplit(Pid1, Pid2) ->
+    #{other_servers_with_monitors := [{Pid2, Mon2}]} = cets:info(Pid1),
+    #{other_servers_with_monitors := [{Pid1, Mon1}]} = cets:info(Pid2),
+    %% Make processes unsee each other
+    Pid1 ! {'DOWN', Mon2, process, Pid2, fake},
+    Pid2 ! {'DOWN', Mon1, process, Pid1, fake},
+    ok.
