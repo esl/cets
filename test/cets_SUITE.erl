@@ -369,7 +369,7 @@ write_returns_if_remote_server_rejoins(_Config) ->
     end,
     fake_netsplit(Pid1, Pid2),
     %% Wait till DOWNs are received
-    timer:sleep(100),
+    clean_ping(Pid1),
     %% Now we should have cets_remote_down in our box
     {messages, Messages} = erlang:process_info(self(), messages),
     [_] = [M || {cets_remote_down, _, _, _} = M <- Messages],
@@ -494,3 +494,14 @@ fake_netsplit(Pid1, Pid2) ->
     Pid1 ! {'DOWN', Mon2, process, Pid2, fake},
     Pid2 ! {'DOWN', Mon1, process, Pid1, fake},
     ok.
+
+clean_ping(Server) ->
+    %% Avoids cets_remote_down message sent to us
+    %% (it would be sent into the new process)
+    {Pid, Mon} = spawn_monitor(fun() -> cets:ping(Server) end),
+    receive
+        {'DOWN', Mon, process, Pid, Reason} ->
+            normal = Reason
+    after 5000 ->
+        error(timeout)
+    end.
