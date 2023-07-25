@@ -364,7 +364,7 @@ write_returns_if_remote_server_rejoins(_Config) ->
     {Pid1, MonRef} = R1 = cets:insert_request(Pid1, {1}),
 
     %% This message would be lost with a real netsplit:
-    receive {updated, MonRef, Pid2} -> ok after 5000 -> error(timeout) end,
+    receive {cets_updated, MonRef, Pid2} -> ok after 5000 -> error(timeout) end,
 
     %% Make processes unsee each other
     Pid1 ! {'DOWN', make_ref(), process, Pid2, fake},

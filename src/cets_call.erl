@@ -92,7 +92,7 @@ do_wait_for_updated(_ServerPid, _Mon, _Ver, [], _Timeout) ->
     ok;
 do_wait_for_updated(ServerPid, Mon, Ver, Servers, Timeout) ->
     receive
-        {updated, Mon, RemotePid} ->
+        {cets_updated, Mon, RemotePid} ->
             %% A replication confirmation from the remote server is received
             Servers2 = lists:delete(RemotePid, Servers),
             do_wait_for_updated(ServerPid, Mon, Ver, Servers2, Timeout);

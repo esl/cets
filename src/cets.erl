@@ -452,7 +452,7 @@ has_remote_pid(RemotePid, Servers) ->
 
 reply_updated({Mon, Pid}) ->
     %% We really don't wanna block this process
-    erlang:send(Pid, {updated, Mon, self()}, [noconnect, nosuspend]).
+    erlang:send(Pid, {cets_updated, Mon, self()}, [noconnect, nosuspend]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
