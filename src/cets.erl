@@ -459,7 +459,8 @@ has_remote_pid(RemotePid, Servers) ->
     lists:keymember(RemotePid, 1, Servers).
 
 reply_updated({Mon, Pid}) ->
-    Pid ! {cets_updated, Mon, self()}.
+    Pid ! {cets_updated, Mon, self()},
+    ok.
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
