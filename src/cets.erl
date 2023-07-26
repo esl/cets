@@ -459,8 +459,14 @@ has_remote_pid(RemotePid, Servers) ->
     lists:keymember(RemotePid, 1, Servers).
 
 reply_updated({Mon, Pid}) ->
-    Pid ! {cets_updated, Mon, self()},
-    ok.
+    M = {cets_updated, Mon, self()},
+    %% We should have nodes connected at this point.
+    %% Unless we have a netsplit.
+    %% So, if we have a netsplit - connecting back should done in a different place.
+    %% If we have a netsplit - the receiver will receive cets_remote_down event from their server.
+    %% We don't want to use nosuspend - it makes messages unreliable.
+    %% And with async_dist=true we would not be blocked anyway.
+    erlang:send(Pid, M, [noconnect]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
