@@ -405,10 +405,10 @@ handle_down2(Mon, RemotePid, State = #{other_servers := Servers}) ->
     end.
 
 notify_remote_down(Mon, RemotePid) ->
-    %% Sadly, we have access to Pids only, without monitor refs.
-    {monitored_by, Pids} = erlang:process_info(self(), monitored_by),
     %% We don't have monitor reference info
     Server = self(),
+    %% Sadly, we have access to Pids only, without monitor refs.
+    {monitored_by, Pids} = erlang:process_info(Server, monitored_by),
     lists:foreach(
         fun(Pid) ->
             Pid ! {cets_remote_down, Mon, Server, RemotePid}
