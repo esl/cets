@@ -368,17 +368,15 @@ write_returns_if_remote_server_rejoins(_Config) ->
     after 5000 -> error(timeout)
     end,
     fake_netsplit(Pid1, Pid2),
-    %% Wait till DOWNs are received
-    clean_ping(Pid1),
-    %% Now we should have cets_remote_down in our box
-    {messages, Messages} = erlang:process_info(self(), messages),
-    [_] = [M || {cets_remote_down, _, _, _} = M <- Messages],
+    assert_has_number_of_cets_remote_down_messages(1),
     %% Bring cluster back together
     ok = cets_join:join(lock1, #{}, Pid1, Pid2),
     %% Block Pid2 from replying
     sys:suspend(Pid2),
     R2 = cets:insert_request(Pid1, {2}),
-    %% Check that we don't match on the newer cets_node_down
+    %% Check that we don't match on the newer cets_node_down.
+    %% i.e. wait_response for R2 does not receive cets_node_down
+    %% addressed to R1.
     {'EXIT', {timeout, _}} = catch cets:wait_response(R2, 100),
     ok = cets:wait_response(R1, 5000),
     ok.
@@ -493,6 +491,8 @@ fake_netsplit(Pid1, Pid2) ->
     %% Make processes unsee each other
     Pid1 ! {'DOWN', Mon2, process, Pid2, fake},
     Pid2 ! {'DOWN', Mon1, process, Pid1, fake},
+    %% Wait till DOWNs are received
+    clean_ping(Pid1),
     ok.
 
 clean_ping(Server) ->
@@ -505,3 +505,8 @@ clean_ping(Server) ->
     after 5000 ->
         error(timeout)
     end.
+
+assert_has_number_of_cets_remote_down_messages(Count) ->
+    %% Now we should have cets_remote_down in our box
+    {messages, Messages} = erlang:process_info(self(), messages),
+    Count = length([M || {cets_remote_down, _, _, _} = M <- Messages]).
