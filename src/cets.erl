@@ -353,8 +353,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, From, Msg}, State) ->
-    handle_remote_op(From, Msg, State),
+handle_info({remote_op, Alias, Msg}, State) ->
+    handle_remote_op(Alias, Msg, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
@@ -410,7 +410,7 @@ notify_remote_down(RemotePid, MonTab) ->
     List = ets:tab2list(MonTab),
     notify_remote_down_loop(RemotePid, List).
 
-notify_remote_down_loop(RemotePid, [{Mon, Pid} | List]) ->
+notify_remote_down_loop(RemotePid, [{Mon, _Pid} | List]) ->
     Mon ! {cets_remote_down, Mon, RemotePid},
     notify_remote_down_loop(RemotePid, List);
 notify_remote_down_loop(_RemotePid, []) ->
@@ -457,17 +457,17 @@ ets_delete_objects(_Tab, []) ->
 has_remote_pid(RemotePid, Servers) ->
     lists:member(RemotePid, Servers).
 
-reply_updated({Mon, Pid}) ->
+reply_updated(Alias) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(Mon, {cets_updated, Mon, self()}, [noconnect]).
+    erlang:send(Alias, {cets_updated, Alias, self()}, [noconnect]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect]).
 
 %% Handle operation from a remote node
-handle_remote_op(From, Msg, State) ->
+handle_remote_op(Alias, Msg, State) ->
     do_op(Msg, State),
-    reply_updated(From).
+    reply_updated(Alias).
 
 %% Apply operation for one local table only
 do_op(Msg, #{tab := Tab}) ->
@@ -493,9 +493,9 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
+replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
-    Msg2 = {remote_op, From, Msg},
+    Msg2 = {remote_op, Alias, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
     ets:insert(MonTab, From),
     {Servers, MonTab}.
