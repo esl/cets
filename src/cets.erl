@@ -98,12 +98,14 @@
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
--type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference(), Num :: server_num()}.
+-type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference()}.
+-type server_nums() :: map().
 -type state() :: #{
     tab := table_name(),
     mon_tab := atom(),
     mon_pid := pid(),
     server_num := server_num(),
+    server_nums := server_nums(),
     other_servers := [server_tuple()],
     just_pids := [pid()],
     just_dests := [reference()],
@@ -122,7 +124,7 @@
     | other_pids
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
-    | {send_dump, Num :: server_num(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
+    | {send_dump, Nums :: server_nums(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -188,10 +190,10 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), server_num(), [server_tuple()], [tuple()]) -> ok.
-send_dump(Server, Num, NewServers, OurDump) ->
+-spec send_dump(server_ref(), server_nums(), [server_tuple()], [tuple()]) -> ok.
+send_dump(Server, Nums, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, Num, NewServers, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, Nums, NewServers, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -311,6 +313,7 @@ init({Tab, Opts}) ->
         mon_tab => MonTab,
         mon_pid => MonPid,
         server_num => 1,
+        server_nums => #{self() => 1},
         other_servers => [],
         just_pids => [],
         just_dests => [],
@@ -342,8 +345,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump, Num, NewServers, Dump}, _From, State) ->
-    handle_send_dump(Num, NewServers, Dump, State);
+handle_call({send_dump, Nums, NewServers, Dump}, _From, State) ->
+    handle_send_dump(Nums, NewServers, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -383,9 +386,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(Num, NewServers, Dump, State = #{tab := Tab}) ->
+handle_send_dump(Nums, NewServers, Dump, State = #{tab := Tab}) ->
     ets:insert(Tab, Dump),
-    {reply, ok, add_servers(NewServers, State#{server_num := Num})}.
+    State2 = State#{server_nums := Nums, server_num := maps:get(self(), Nums)},
+    {reply, ok, add_servers(NewServers, State2)}.
 
 add_servers(NewServers, State = #{other_servers := Servers}) ->
     Servers2 = lists:sort(NewServers ++ Servers),
@@ -417,7 +421,8 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
 handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Servers}) ->
     case lists:keymember(Mon, 2, Servers) of
         true ->
-            notify_remote_down(RemotePid, MonTab),
+            Num = server_pid_to_server_num(RemotePid, State),
+            notify_remote_down(Num, MonTab),
             call_user_handle_down(RemotePid, State),
             {noreply, remove_server(Mon, State)};
         false ->
@@ -430,14 +435,9 @@ handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Serve
             {noreply, State}
     end.
 
-notify_remote_down(RemotePid, MonTab) ->
+notify_remote_down(Num, MonTab) ->
     List = ets:tab2list(MonTab),
-    notify_remote_down_loop(RemotePid, List).
-
-notify_remote_down_loop(RemotePid, [{Mon, _Pid} | List]) ->
-    Mon ! {cets_remote_down, Mon, RemotePid},
-    notify_remote_down_loop(RemotePid, List);
-notify_remote_down_loop(_RemotePid, []) ->
+    [erlang:send(Mon, {cets_remote_down, Mon, Num}) || {Mon, _Pid} <- List],
     ok.
 
 pids_to_nodes(Pids) ->
@@ -455,9 +455,9 @@ ets_delete_objects(Tab, [Object | Objects]) ->
 ets_delete_objects(_Tab, []) ->
     ok.
 
-reply_updated(Alias) ->
+reply_updated(Alias, #{server_num := Num}) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(Alias, {cets_updated, Alias, self()}, [noconnect]).
+    erlang:send(Alias, {cets_updated, Alias, Num}, [noconnect]).
 
 send_to_remote(RemoteAlias, Msg) ->
     erlang:send(RemoteAlias, Msg, [noconnect]).
@@ -465,7 +465,7 @@ send_to_remote(RemoteAlias, Msg) ->
 %% Handle operation from a remote node
 handle_remote_op(Alias, Msg, State) ->
     do_op(Msg, State),
-    reply_updated(Alias).
+    reply_updated(Alias, State).
 
 %% Apply operation for one local table only
 do_op(Msg, #{tab := Tab}) ->
@@ -491,12 +491,13 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_pids := Pids, just_dests := Dests}) ->
+replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_dests := Dests, server_num := Num, server_nums := Nums}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, Alias, Msg},
     [send_to_remote(Dest, Msg2) || Dest <- Dests],
     ets:insert(MonTab, From),
-    {Pids, MonTab}.
+    Nums2 = lists:delete(Num, maps:values(Nums)),
+    {Nums2, MonTab}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -569,8 +570,11 @@ check_opts(_) ->
 
 -spec servers_to_pids(server_tuple()) -> [pid()].
 servers_to_pids(Servers) ->
-    [Pid || {Pid, _Mon, _Dest, _Num} <- Servers].
+    [Pid || {Pid, _Mon, _Dest} <- Servers].
 
 -spec servers_to_dests(server_tuple()) -> [reference()].
 servers_to_dests(Servers) ->
-    [Dest || {_Pid, _Mon, Dest, _Num} <- Servers].
+    [Dest || {_Pid, _Mon, Dest} <- Servers].
+
+server_pid_to_server_num(Pid, #{server_nums := Nums}) ->
+    maps:get(Pid, Nums).
