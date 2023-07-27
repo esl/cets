@@ -380,10 +380,20 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(NewServers, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+handle_send_dump(NewServers, Dump, State = #{tab := Tab}) ->
     ets:insert(Tab, Dump),
-    Servers2 = add_servers(NewServers, Servers),
-    {reply, ok, State#{other_servers := Servers2}}.
+    {reply, ok, add_servers(NewServers, State)}.
+
+add_servers(NewServers, State = #{other_servers := Servers}) ->
+    Servers2 = lists:sort(NewServers ++ Servers),
+    set_servers(Servers2, State).
+
+remove_server(Mon, State = #{other_servers := Servers}) ->
+    Servers2 = lists:keydelete(Mon, 2, Servers),
+    set_servers(Servers2, State).
+
+set_servers(Servers, State) ->
+    State#{other_servers := Servers}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -399,13 +409,12 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Servers}) ->
     case lists:keymember(Mon, 2, Servers) of
         true ->
-            Servers2 = lists:keydelete(Mon, 2, Servers),
             notify_remote_down(RemotePid, MonTab),
             call_user_handle_down(RemotePid, State),
-            {noreply, State#{other_servers := Servers2}};
+            {noreply, remove_server(Mon, State)};
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -425,9 +434,6 @@ notify_remote_down_loop(RemotePid, [{Mon, _Pid} | List]) ->
     notify_remote_down_loop(RemotePid, List);
 notify_remote_down_loop(_RemotePid, []) ->
     ok.
-
-add_servers(NewServers, Servers) ->
-    lists:sort(NewServers ++ Servers).
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
