@@ -449,11 +449,11 @@ has_remote_pid(RemotePid, Servers) ->
     lists:member(RemotePid, Servers).
 
 reply_updated({Mon, Pid}) ->
-    %% We really don't wanna block this process
-    erlang:send(Pid, {updated, Mon, self()}, [noconnect, nosuspend]).
+    %% nosuspend makes message sending unreliable
+    erlang:send(Pid, {updated, Mon, self()}, [noconnect]).
 
 send_to_remote(RemotePid, Msg) ->
-    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
+    erlang:send(RemotePid, Msg, [noconnect]).
 
 %% Handle operation from a remote node
 handle_remote_op(From, Msg, State) ->
