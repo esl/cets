@@ -411,7 +411,7 @@ notify_remote_down(RemotePid, MonTab) ->
     notify_remote_down_loop(RemotePid, List).
 
 notify_remote_down_loop(RemotePid, [{Mon, Pid} | List]) ->
-    Pid ! {remote_down, Mon, RemotePid},
+    Mon ! {cets_remote_down, Mon, RemotePid},
     notify_remote_down_loop(RemotePid, List);
 notify_remote_down_loop(_RemotePid, []) ->
     ok.

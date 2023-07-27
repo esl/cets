@@ -94,7 +94,7 @@ do_wait_for_updated(Mon, Servers, Timeout) ->
             %% A replication confirmation from the remote server is received
             Servers2 = lists:delete(Pid, Servers),
             do_wait_for_updated(Mon, Servers2, Timeout);
-        {remote_down, Mon, Pid} ->
+        {cets_remote_down, Mon, Pid} ->
             %% This message is sent by our local server when
             %% the remote server is down condition is detected
             Servers2 = lists:delete(Pid, Servers),

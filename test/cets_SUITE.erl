@@ -40,7 +40,8 @@ all() ->
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
         info_contains_opts,
-        updated_is_not_received_after_timeout
+        updated_is_not_received_after_timeout,
+        remote_down_is_not_received_after_timeout
     ].
 
 init_per_suite(Config) ->
@@ -465,6 +466,18 @@ updated_is_not_received_after_timeout(Config) ->
     cets:ping(Pid2),
     ensure_no_updated_message().
 
+remote_down_is_not_received_after_timeout(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R = cets:insert_request(Pid1, {1}),
+    wait_response_fails_with_timeout(R),
+    Ref = erlang:monitor(process, Pid2),
+    exit(Pid2, kill),
+    receive_down_for_monitor(Ref),
+    ensure_no_down_message().
+
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
 
@@ -518,4 +531,17 @@ ensure_no_updated_message() ->
         {cets_updated, _, _} ->
             error(unexpected_updated)
         after 0 -> ok
+    end.
+
+ensure_no_down_message() ->
+    receive
+        {cets_remote_down, _, _} ->
+            error(unexpected_remote_down)
+        after 0 -> ok
+    end.
+
+receive_down_for_monitor(Mon) ->
+    receive
+        {'DOWN', Mon, process, _Pid, _Reason} -> ok
+    after 5000 -> ct:fail(timeout)
     end.
