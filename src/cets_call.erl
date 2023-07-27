@@ -87,18 +87,18 @@ wait_for_updated(Mon, {Servers, MonTab}, Timeout) ->
         ets:delete(MonTab, Mon)
     end.
 
-do_wait_for_updated(_Mon, [], _Timeout) ->
+do_wait_for_updated(_Mon, 0, _Timeout) ->
     ok;
 do_wait_for_updated(Mon, Servers, Timeout) ->
     receive
         {cets_updated, Mon, Num} ->
             %% A replication confirmation from the remote server is received
-            Servers2 = lists:delete(Num, Servers),
+            Servers2 = unset_flag(Num, Servers),
             do_wait_for_updated(Mon, Servers2, Timeout);
         {cets_remote_down, Mon, Num} ->
             %% This message is sent by our local server when
             %% the remote server is down condition is detected
-            Servers2 = lists:delete(Num, Servers),
+            Servers2 = unset_flag(Num, Servers),
             do_wait_for_updated(Mon, Servers2, Timeout);
         {'DOWN', Mon, process, _Pid, Reason} ->
             %% Local server is down, this is a critical error
@@ -107,6 +107,9 @@ do_wait_for_updated(Mon, Servers, Timeout) ->
 %       error(timeout)
         error({timeout, Servers})
     end.
+
+unset_flag(Pos, Bits) ->
+   Bits band (bnot (1 bsl Pos)).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;

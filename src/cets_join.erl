@@ -67,7 +67,7 @@ join2(_Info, LocalPid, RemotePid) ->
     RemPids = [RemotePid | RemoteOtherPids],
     Aliases = make_aliases(LocPids, RemPids) ++ make_aliases(RemPids, LocPids),
     AllPids = LocPids ++ RemPids,
-    Nums = maps:from_list(lists:zip(AllPids, lists:seq(1, length(AllPids)))),
+    Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns

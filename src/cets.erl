@@ -107,6 +107,7 @@
     server_num := server_num(),
     server_nums := server_nums(),
     other_servers := [server_tuple()],
+    remote_bits := non_neg_integer(),
     just_pids := [pid()],
     just_dests := [reference()],
     opts := start_opts(),
@@ -312,8 +313,9 @@ init({Tab, Opts}) ->
         tab => Tab,
         mon_tab => MonTab,
         mon_pid => MonPid,
-        server_num => 1,
-        server_nums => #{self() => 1},
+        server_num => 0,
+        server_nums => #{self() => 0},
+        remote_bits => 0,
         other_servers => [],
         just_pids => [],
         just_dests => [],
@@ -402,7 +404,16 @@ remove_server(Mon, State = #{other_servers := Servers}) ->
 set_servers(Servers, State) ->
     Pids = servers_to_pids(Servers),
     Dests = servers_to_dests(Servers),
-    State#{other_servers := Servers, just_pids := Pids, just_dests := Dests}.
+    Bits = make_remote_bits(Pids, State),
+    State#{other_servers := Servers, just_pids := Pids, just_dests := Dests, remote_bits := Bits}.
+
+%% Make a bitmask with bits set to 1 for still alive remote servers
+make_remote_bits(Pids, #{server_nums := Nums}) ->
+    RemoteNums = [Num || {Pid, Num} <- maps:to_list(Nums), lists:member(Pid, Pids)],
+    lists:foldl(fun set_flag/2, 0, RemoteNums).
+
+set_flag(Pos, Bits) ->
+   Bits bor (1 bsl Pos).
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -491,13 +502,12 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_dests := Dests, server_num := Num, server_nums := Nums}) ->
+replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_dests := Dests, remote_bits := Bits}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, Alias, Msg},
     [send_to_remote(Dest, Msg2) || Dest <- Dests],
     ets:insert(MonTab, From),
-    Nums2 = lists:delete(Num, maps:values(Nums)),
-    {Nums2, MonTab}.
+    {Bits, MonTab}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
