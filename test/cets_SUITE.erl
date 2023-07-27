@@ -39,7 +39,8 @@ all() ->
         delete_request_many_from_bag,
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
-        info_contains_opts
+        info_contains_opts,
+        updated_is_not_received_after_timeout
     ].
 
 init_per_suite(Config) ->
@@ -51,11 +52,14 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(test_multinode_auto_discovery, Config) ->
+init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
     ct:make_priv_dir(),
-    Config;
-init_per_testcase(_, Config) ->
-    Config.
+    init_per_testcase_generic(Name, Config);
+init_per_testcase(Name, Config) ->
+    init_per_testcase_generic(Name, Config).
+
+init_per_testcase_generic(Name, Config) ->
+    [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -449,6 +453,18 @@ info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
 
+updated_is_not_received_after_timeout(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R = cets:insert_request(Pid1, {1}),
+    wait_response_fails_with_timeout(R),
+    sys:resume(Pid2),
+    %% Ensure that cets_updated message reaches us and filtered out
+    cets:ping(Pid2),
+    ensure_no_updated_message().
+
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
 
@@ -485,3 +501,21 @@ start_node(Sname) ->
     {ok, Node} = ct_slave:start(Sname, [{monitor_master, true}]),
     rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
+
+make_name(Config, Num) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num)).
+
+wait_response_fails_with_timeout(R) ->
+    try
+        cets:wait_response(R, 0),
+        error(expected_timeout)
+        catch error:timeout -> ok
+    end.
+
+ensure_no_updated_message() ->
+    receive
+        {cets_updated, _, _} ->
+            error(unexpected_updated)
+        after 0 -> ok
+    end.

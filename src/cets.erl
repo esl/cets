@@ -459,7 +459,7 @@ has_remote_pid(RemotePid, Servers) ->
 
 reply_updated({Mon, Pid}) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(Pid, {updated, Mon, self()}, [noconnect]).
+    erlang:send(Mon, {cets_updated, Mon, self()}, [noconnect]).
 
 send_to_remote(RemotePid, Msg) ->
     erlang:send(RemotePid, Msg, [noconnect]).
