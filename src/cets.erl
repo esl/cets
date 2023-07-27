@@ -32,6 +32,7 @@
     table_name/1,
     other_nodes/1,
     other_pids/1,
+    make_alias_for/2,
     pause/1,
     unpause/2,
     sync/1,
@@ -100,7 +101,7 @@
     tab := table_name(),
     mon_tab := atom(),
     mon_pid := pid(),
-    other_servers := [pid()],
+    other_servers := [{pid(), Monitor :: reference(), Dest :: reference()}],
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()]
@@ -114,6 +115,7 @@
     | table_name
     | get_info
     | other_servers
+    | {make_alias_for, [pid()]}
     | {unpause, reference()}
     | {send_dump, [pid()], [tuple()]}.
 
@@ -248,6 +250,10 @@ wait_response(Mon, Timeout) ->
 other_servers(Server) ->
     cets_call:long_call(Server, other_servers).
 
+-spec make_alias_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
+make_alias_for(Server, RemotePids) ->
+    cets_call:long_call(Server, {make_alias_for, RemotePids}).
+
 %% Get a list of other nodes in the cluster that are connected together.
 -spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
@@ -313,11 +319,15 @@ init({Tab, Opts}) ->
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
-    {reply, Servers, State};
+    {reply, servers_to_pids(Servers), State};
+handle_call({make_alias_for, Pids}, _From, State) ->
+    %% Create channels used to deliver remote_op messages
+    Aliases = [{Pid, erlang:monitor(process, Pid, [{alias, demonitor}])} || Pid <- Pids],
+    {reply, Aliases, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-        lists:foreach(fun ping/1, Servers),
+        lists:foreach(fun ping/1, servers_to_pids(Servers)),
         gen_server:reply(From, ok)
     end),
     {noreply, State};
@@ -370,9 +380,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+handle_send_dump(NewServers, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
-    Servers2 = add_servers(NewPids, Servers),
+    Servers2 = add_servers(NewServers, Servers),
     {reply, ok, State#{other_servers := Servers2}}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
@@ -389,10 +399,10 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
-    case lists:member(RemotePid, Servers) of
+handle_down2(Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+    case lists:keymember(Mon, 2, Servers) of
         true ->
-            Servers2 = lists:delete(RemotePid, Servers),
+            Servers2 = lists:keydelete(Mon, 2, Servers),
             notify_remote_down(RemotePid, MonTab),
             call_user_handle_down(RemotePid, State),
             {noreply, State#{other_servers := Servers2}};
@@ -416,28 +426,8 @@ notify_remote_down_loop(RemotePid, [{Mon, _Pid} | List]) ->
 notify_remote_down_loop(_RemotePid, []) ->
     ok.
 
-%% Merge two lists of pids, create the missing monitors.
-add_servers(Pids, Servers) ->
-    lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
-
-add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
-    ?LOG_INFO(#{what => join_to_the_same_pid_ignored}),
-    add_servers2(SelfPid, OtherPids, Servers);
-add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
-    case has_remote_pid(RemotePid, Servers) of
-        false ->
-            erlang:monitor(process, RemotePid),
-            [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
-        true ->
-            ?LOG_INFO(#{
-                what => already_added,
-                remote_pid => RemotePid,
-                remote_node => node(RemotePid)
-            }),
-            add_servers2(SelfPid, OtherPids, Servers)
-    end;
-add_servers2(_SelfPid, [], _Servers) ->
-    [].
+add_servers(NewServers, Servers) ->
+    lists:sort(NewServers ++ Servers).
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -454,15 +444,12 @@ ets_delete_objects(Tab, [Object | Objects]) ->
 ets_delete_objects(_Tab, []) ->
     ok.
 
-has_remote_pid(RemotePid, Servers) ->
-    lists:member(RemotePid, Servers).
-
 reply_updated(Alias) ->
     %% nosuspend makes message sending unreliable
     erlang:send(Alias, {cets_updated, Alias, self()}, [noconnect]).
 
-send_to_remote(RemotePid, Msg) ->
-    erlang:send(RemotePid, Msg, [noconnect]).
+send_to_remote(RemoteAlias, Msg) ->
+    erlang:send(RemoteAlias, Msg, [noconnect]).
 
 %% Handle operation from a remote node
 handle_remote_op(Alias, Msg, State) ->
@@ -496,9 +483,9 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
 replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, Alias, Msg},
-    [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
+    [send_to_remote(RemoteAlias, Msg2) || {_RemotePid, _Mon, RemoteAlias} <- Servers],
     ets:insert(MonTab, From),
-    {Servers, MonTab}.
+    {servers_to_pids(Servers), MonTab}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -538,7 +525,7 @@ handle_get_info(
 ) ->
     Info = #{
         table => Tab,
-        nodes => lists:usort(pids_to_nodes([self() | Servers])),
+        nodes => lists:usort(pids_to_nodes([self() | servers_to_pids(Servers)])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         mon_pid => MonPid,
@@ -568,3 +555,6 @@ check_opts(#{handle_conflict := _, type := bag}) ->
     [bag_with_conflict_handler];
 check_opts(_) ->
     [].
+
+servers_to_pids(Servers) ->
+    [Pid || {Pid, _Mon, _Dest} <- Servers].

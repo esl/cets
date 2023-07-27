@@ -11,6 +11,7 @@ all() ->
         delete_works,
         delete_many_works,
         join_works,
+        other_pids_call_work_after_join,
         inserted_records_could_be_read_back_from_replicated_table,
         join_works_with_existing_data,
         join_works_with_existing_data_with_conflicts,
@@ -96,6 +97,13 @@ join_works(_Config) ->
     {ok, Pid1} = cets:start(join1tab, #{}),
     {ok, Pid2} = cets:start(join2tab, #{}),
     ok = cets_join:join(join_lock1, #{}, Pid1, Pid2).
+
+other_pids_call_work_after_join(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    [Pid2] = cets:other_pids(Pid1),
+    [Pid1] = cets:other_pids(Pid2).
 
 inserted_records_could_be_read_back_from_replicated_table(_Config) ->
     {ok, Pid1} = cets:start(ins1tab, #{}),
@@ -190,7 +198,7 @@ join_with_the_same_pid(_Config) ->
     %% Just insert something into a table to check later the size
     cets:insert(joinsame, {1, 1}),
     link(Pid),
-    ok = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
+    {error, same_pid} = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
@@ -523,21 +531,22 @@ wait_response_fails_with_timeout(R) ->
     try
         cets:wait_response(R, 0),
         error(expected_timeout)
-        catch error:timeout -> ok
+    catch
+        error:timeout -> ok
     end.
 
 ensure_no_updated_message() ->
     receive
         {cets_updated, _, _} ->
             error(unexpected_updated)
-        after 0 -> ok
+    after 0 -> ok
     end.
 
 ensure_no_down_message() ->
     receive
         {cets_remote_down, _, _} ->
             error(unexpected_remote_down)
-        after 0 -> ok
+    after 0 -> ok
     end.
 
 receive_down_for_monitor(Mon) ->

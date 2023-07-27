@@ -9,7 +9,11 @@
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
 -spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
-join(LockKey, Info, LocalPid, RemotePid) when is_pid(LocalPid), is_pid(RemotePid) ->
+join(_LockKey, _Info, Pid, Pid) ->
+    {error, same_pid};
+join(LockKey, Info, LocalPid, RemotePid) when
+    is_pid(LocalPid), is_pid(RemotePid), LocalPid =/= RemotePid
+->
     Info2 = Info#{
         local_pid => LocalPid,
         remote_pid => RemotePid,
@@ -61,6 +65,7 @@ join2(_Info, LocalPid, RemotePid) ->
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
     RemPids = [RemotePid | RemoteOtherPids],
+    Aliases = make_aliases(LocPids, RemPids) ++ make_aliases(RemPids, LocPids),
     AllPids = LocPids ++ RemPids,
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
@@ -72,14 +77,40 @@ join2(_Info, LocalPid, RemotePid) ->
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
-        RemF = fun(Pid) -> cets:send_dump(Pid, LocPids, LocalDump2) end,
-        LocF = fun(Pid) -> cets:send_dump(Pid, RemPids, RemoteDump2) end,
+        RemF = fun(Pid) -> cets:send_dump(Pid, aliases_for(Pid, Aliases), LocalDump2) end,
+        LocF = fun(Pid) -> cets:send_dump(Pid, aliases_for(Pid, Aliases), RemoteDump2) end,
         lists:foreach(RemF, RemPids),
         lists:foreach(LocF, LocPids),
         ok
     after
         lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
     end.
+
+make_aliases(Pids, Pids2) ->
+    %% Pid monitors Pid2
+    [
+        {Pid, Pid2, Alias}
+     || Pid <- Pids,
+        {Pid2, Alias} <- cets:make_alias_for(Pid, Pids2)
+    ].
+
+aliases_for(Pid, Aliases) ->
+    %% Pid monitors these:
+    PidMons = [{Pid2, Alias} || {Pid1, Pid2, Alias} <- Aliases, Pid =:= Pid1],
+    %% Pid we monitor
+    %% Monitor to detect that we the remote server is down
+    %% Alias to send messages from Pid to Pid2
+    Res = [{Pid2, Alias, find_destination(Pid, Pid2, Aliases)} || {Pid2, Alias} <- PidMons],
+    assert_aliases_are_different(Res),
+    Res.
+
+assert_aliases_are_different(Res) ->
+    [] = [X || {_, A, A} = X <- Res],
+    ok.
+
+find_destination(Pid1, Pid2, Aliases) when Pid1 =/= Pid2 ->
+    [Dest] = [Alias || {A, B, Alias} <- Aliases, A =:= Pid2, B =:= Pid1],
+    Dest.
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),
