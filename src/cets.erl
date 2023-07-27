@@ -297,7 +297,7 @@ init({Tab, Opts}) ->
     Type = maps:get(type, Opts, ordered_set),
     KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
-    _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
+    _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}, {read_concurrency, true}]),
     _ = ets:new(MonTab, [public, named_table, {write_concurrency, true}]),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
