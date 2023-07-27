@@ -67,6 +67,7 @@ join2(_Info, LocalPid, RemotePid) ->
     RemPids = [RemotePid | RemoteOtherPids],
     Aliases = make_aliases(LocPids, RemPids) ++ make_aliases(RemPids, LocPids),
     AllPids = LocPids ++ RemPids,
+    Nums = maps:from_list(lists:zip(AllPids, lists:seq(1, length(AllPids)))),
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
@@ -77,8 +78,16 @@ join2(_Info, LocalPid, RemotePid) ->
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
-        RemF = fun(Pid) -> cets:send_dump(Pid, aliases_for(Pid, Aliases), LocalDump2) end,
-        LocF = fun(Pid) -> cets:send_dump(Pid, aliases_for(Pid, Aliases), RemoteDump2) end,
+        RemF = fun(Pid) ->
+                Num = maps:get(Pid, Nums),
+                NewServers = aliases_for(Pid, Aliases, Nums),
+                cets:send_dump(Pid, Num, NewServers, LocalDump2)
+            end,
+        LocF = fun(Pid) ->
+                Num = maps:get(Pid, Nums),
+                NewServers = aliases_for(Pid, Aliases, Nums),
+                cets:send_dump(Pid, Num, NewServers, RemoteDump2)
+            end,
         lists:foreach(RemF, RemPids),
         lists:foreach(LocF, LocPids),
         ok
@@ -94,18 +103,19 @@ make_aliases(Pids, Pids2) ->
         {Pid2, Alias} <- cets:make_alias_for(Pid, Pids2)
     ].
 
-aliases_for(Pid, Aliases) ->
+aliases_for(Pid, Aliases, Nums) ->
     %% Pid monitors these:
     PidMons = [{Pid2, Alias} || {Pid1, Pid2, Alias} <- Aliases, Pid =:= Pid1],
     %% Pid we monitor
     %% Monitor to detect that we the remote server is down
     %% Alias to send messages from Pid to Pid2
-    Res = [{Pid2, Alias, find_destination(Pid, Pid2, Aliases)} || {Pid2, Alias} <- PidMons],
+    Res = [{Pid2, Alias, find_destination(Pid, Pid2, Aliases), maps:get(Pid2, Nums)}
+           || {Pid2, Alias} <- PidMons],
     assert_aliases_are_different(Res),
     Res.
 
 assert_aliases_are_different(Res) ->
-    [] = [X || {_, A, A} = X <- Res],
+    [] = [X || {_, A, A, _} = X <- Res],
     ok.
 
 find_destination(Pid1, Pid2, Aliases) when Pid1 =/= Pid2 ->

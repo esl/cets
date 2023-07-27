@@ -28,7 +28,7 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
-    send_dump/3,
+    send_dump/4,
     table_name/1,
     other_nodes/1,
     other_pids/1,
@@ -85,6 +85,7 @@
     | {local, atom()}
     | {global, term()}
     | {via, module(), term()}.
+-type server_num() :: pos_integer().
 -type request_id() :: reference().
 -type op() ::
     {insert, tuple()}
@@ -97,11 +98,15 @@
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
+-type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference(), Num :: server_num()}.
 -type state() :: #{
     tab := table_name(),
     mon_tab := atom(),
     mon_pid := pid(),
-    other_servers := [{pid(), Monitor :: reference(), Dest :: reference()}],
+    server_num := server_num(),
+    other_servers := [server_tuple()],
+    just_pids := [pid()],
+    just_dests := [reference()],
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()]
@@ -117,7 +122,7 @@
     | other_servers
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
-    | {send_dump, [pid()], [tuple()]}.
+    | {send_dump, Num :: server_num(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -183,10 +188,10 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [pid()], [tuple()]) -> ok.
-send_dump(Server, NewPids, OurDump) ->
+-spec send_dump(server_ref(), server_num(), [server_tuple()], [tuple()]) -> ok.
+send_dump(Server, Num, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, Num, NewServers, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -245,11 +250,6 @@ delete_objects_request(Server, Objects) ->
 wait_response(Mon, Timeout) ->
     cets_call:wait_response(Mon, Timeout).
 
-%% Get a list of other CETS processes that are handling this table.
--spec other_servers(server_ref()) -> [server_ref()].
-other_servers(Server) ->
-    cets_call:long_call(Server, other_servers).
-
 -spec make_alias_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
 make_alias_for(Server, RemotePids) ->
     cets_call:long_call(Server, {make_alias_for, RemotePids}).
@@ -262,7 +262,7 @@ other_nodes(Server) ->
 %% Get a list of other CETS processes that are handling this table.
 -spec other_pids(server_ref()) -> [pid()].
 other_pids(Server) ->
-    other_servers(Server).
+    cets_call:long_call(Server, other_pids).
 
 -spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
@@ -310,7 +310,10 @@ init({Tab, Opts}) ->
         tab => Tab,
         mon_tab => MonTab,
         mon_pid => MonPid,
+        server_num => 1,
         other_servers => [],
+        just_pids => [],
+        just_dests => [],
         opts => Opts,
         backlog => [],
         pause_monitors => []
@@ -318,16 +321,16 @@ init({Tab, Opts}) ->
 
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
-handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
-    {reply, servers_to_pids(Servers), State};
+handle_call(other_pids, _From, State = #{just_pids := Pids}) ->
+    {reply, Pids, State};
 handle_call({make_alias_for, Pids}, _From, State) ->
     %% Create channels used to deliver remote_op messages
     Aliases = [{Pid, erlang:monitor(process, Pid, [{alias, demonitor}])} || Pid <- Pids],
     {reply, Aliases, State};
-handle_call(sync, From, State = #{other_servers := Servers}) ->
+handle_call(sync, From, State = #{just_pids := Pids}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-        lists:foreach(fun ping/1, servers_to_pids(Servers)),
+        lists:foreach(fun ping/1, Pids),
         gen_server:reply(From, ok)
     end),
     {noreply, State};
@@ -339,8 +342,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump, NewPids, Dump}, _From, State) ->
-    handle_send_dump(NewPids, Dump, State);
+handle_call({send_dump, Num, NewServers, Dump}, _From, State) ->
+    handle_send_dump(Num, NewServers, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -380,9 +383,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(NewServers, Dump, State = #{tab := Tab}) ->
+handle_send_dump(Num, NewServers, Dump, State = #{tab := Tab}) ->
     ets:insert(Tab, Dump),
-    {reply, ok, add_servers(NewServers, State)}.
+    {reply, ok, add_servers(NewServers, State#{server_num := Num})}.
 
 add_servers(NewServers, State = #{other_servers := Servers}) ->
     Servers2 = lists:sort(NewServers ++ Servers),
@@ -393,7 +396,9 @@ remove_server(Mon, State = #{other_servers := Servers}) ->
     set_servers(Servers2, State).
 
 set_servers(Servers, State) ->
-    State#{other_servers := Servers}.
+    Pids = servers_to_pids(Servers),
+    Dests = servers_to_dests(Servers),
+    State#{other_servers := Servers, just_pids := Pids, just_dests := Dests}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -486,12 +491,12 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
+replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_pids := Pids, just_dests := Dests}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, Alias, Msg},
-    [send_to_remote(RemoteAlias, Msg2) || {_RemotePid, _Mon, RemoteAlias} <- Servers],
+    [send_to_remote(Dest, Msg2) || Dest <- Dests],
     ets:insert(MonTab, From),
-    {servers_to_pids(Servers), MonTab}.
+    {Pids, MonTab}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -524,14 +529,14 @@ handle_unpause2(Mon, Mons, State) ->
 handle_get_info(
     State = #{
         tab := Tab,
-        other_servers := Servers,
+        just_pids := Pids,
         mon_pid := MonPid,
         opts := Opts
     }
 ) ->
     Info = #{
         table => Tab,
-        nodes => lists:usort(pids_to_nodes([self() | servers_to_pids(Servers)])),
+        nodes => lists:usort(pids_to_nodes([self() | Pids])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         mon_pid => MonPid,
@@ -562,5 +567,10 @@ check_opts(#{handle_conflict := _, type := bag}) ->
 check_opts(_) ->
     [].
 
+-spec servers_to_pids(server_tuple()) -> [pid()].
 servers_to_pids(Servers) ->
-    [Pid || {Pid, _Mon, _Dest} <- Servers].
+    [Pid || {Pid, _Mon, _Dest, _Num} <- Servers].
+
+-spec servers_to_dests(server_tuple()) -> [reference()].
+servers_to_dests(Servers) ->
+    [Dest || {_Pid, _Mon, Dest, _Num} <- Servers].
