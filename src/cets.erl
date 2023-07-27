@@ -283,6 +283,15 @@ info(Server) ->
 
 -spec init({table_name(), start_opts()}) -> {ok, state()}.
 init({Tab, Opts}) ->
+    %% While this process could produce a lot of messages,
+    %% blocking it would not help on the real system
+    %% (probably any blocking of this process would make CPU/memory usage higher)
+    %% Blocking this process could reduce a bit of pressure on the overloaded dist
+    %% connection, but we would have to send the data there anyway.
+    %% Instead of being blocked we could process remote_op messages and reduce our
+    %% message queue.
+    %% It is supported starting from OTP 25.3.
+    catch process_flag(async_dist, true),
     process_flag(message_queue_data, off_heap),
     MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     Type = maps:get(type, Opts, ordered_set),
