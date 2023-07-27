@@ -47,7 +47,7 @@ long_call(Server, Msg, Info) ->
 async_operation(Server, Msg) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
-            Mon = erlang:monitor(process, Pid),
+            Mon = erlang:monitor(process, Pid, [{alias, demonitor}]),
             gen_server:cast(Server, {op, {Mon, self()}, Msg}),
             Mon;
         undefined ->
