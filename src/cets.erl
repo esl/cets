@@ -119,7 +119,7 @@
     | sync
     | table_name
     | get_info
-    | other_servers
+    | other_pids
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
     | {send_dump, Num :: server_num(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
