@@ -29,6 +29,7 @@
     dump/1,
     remote_dump/1,
     send_dump/4,
+    schedule_check_servers_after_down/2,
     table_name/1,
     other_nodes/1,
     other_pids/1,
@@ -112,7 +113,8 @@
     just_dests := [reference()],
     opts := start_opts(),
     backlog := [backlog_entry()],
-    pause_monitors := [pause_monitor()]
+    pause_monitors := [pause_monitor()],
+    verify_pidmon := {pid(), reference()} | false
 }.
 
 -type long_msg() ::
@@ -195,6 +197,10 @@ table_name(Server) ->
 send_dump(Server, Nums, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, Nums, NewServers, OurDump}, Info).
+
+-spec schedule_check_servers_after_down(pid(), pid()) -> ok.
+schedule_check_servers_after_down(Server, Who) ->
+    gen_server:cast(Server, {schedule_check_servers_after_down, Who}).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -321,7 +327,8 @@ init({Tab, Opts}) ->
         just_dests => [],
         opts => Opts,
         backlog => [],
-        pause_monitors => []
+        pause_monitors => [],
+        verify_pidmon => false
     }}.
 
 -spec handle_call(term(), from(), state()) ->
@@ -366,6 +373,15 @@ handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Bac
     %% Backlog is a list of pending operation, when our server is paused.
     %% The list would be applied, once our server is unpaused.
     {noreply, State#{backlog := [{Msg, From} | Backlog]}};
+handle_cast({schedule_check_servers_after_down, Pid}, State) ->
+    %% Called by the join coordinator process
+    %% Once that process exits, we need to check which aliases we could still use
+    %% to talk to the remote servers
+    Mon = erlang:monitor(process, Pid),
+    {noreply, State#{verify_pidmon := {Pid, Mon}}};
+handle_cast({check_server, Source, Mon, Dest}, State) ->
+    handle_check_server(Source, Mon, Dest, State),
+    {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
@@ -391,11 +407,7 @@ code_change(_OldVsn, State, _Extra) ->
 handle_send_dump(Nums, NewServers, Dump, State = #{tab := Tab}) ->
     ets:insert(Tab, Dump),
     State2 = State#{server_nums := Nums, server_num := maps:get(self(), Nums)},
-    {reply, ok, add_servers(NewServers, State2)}.
-
-add_servers(NewServers, State = #{other_servers := Servers}) ->
-    Servers2 = lists:sort(NewServers ++ Servers),
-    set_servers(Servers2, State).
+    {reply, ok, set_servers(NewServers, State2)}.
 
 remove_server(Mon, State = #{other_servers := Servers}) ->
     Servers2 = lists:keydelete(Mon, 2, Servers),
@@ -413,8 +425,11 @@ make_remote_bits(Pids, #{server_nums := Nums}) ->
     lists:foldl(fun set_flag/2, 0, RemoteNums).
 
 set_flag(Pos, Bits) ->
-   Bits bor (1 bsl Pos).
+    Bits bor (1 bsl Pos).
 
+handle_down(Mon, Pid, State = #{verify_pidmon := {Pid, Mon}}) ->
+    check_servers(State),
+    {noreply, State#{verify_pidmon := false}};
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
@@ -448,8 +463,12 @@ handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Serve
 
 notify_remote_down(Num, MonTab) ->
     List = ets:tab2list(MonTab),
-    [erlang:send(Mon, {cets_remote_down, Mon, Num}) || {Mon, _Pid} <- List],
-    ok.
+    lists:foreach(
+        fun({Mon, _Pid}) ->
+            Mon ! {cets_remote_down, Mon, Num}
+        end,
+        List
+    ).
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -588,3 +607,24 @@ servers_to_dests(Servers) ->
 
 server_pid_to_server_num(Pid, #{server_nums := Nums}) ->
     maps:get(Pid, Nums).
+
+%% Send to other servers an async request to verify that our Mon and Dest are valid
+check_servers(#{other_servers := Servers}) ->
+    [gen_server:cast(Pid, {check_server, self(), Mon, Dest}) || {Pid, Mon, Dest} <- Servers],
+    ok.
+
+is_known_monitor(Mon, #{other_servers := Servers}) ->
+    lists:keymember(Mon, 2, Servers).
+
+%% Forces to the remote server to disconnect if we don't know his alias
+handle_check_server(Source, Mon, Dest, State) ->
+    case is_known_monitor(Dest, State) of
+        true ->
+            ok;
+        false ->
+            %% Simulate disconnect for this alias.
+            %% This would prevent us from the partially applied dumps.
+            %% This could happen if send_dump failed for this or for the remote node.
+            Source ! {'DOWN', Mon, process, self(), check_server_failed},
+            ok
+    end.

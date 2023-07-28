@@ -65,8 +65,8 @@ join2(_Info, LocalPid, RemotePid) ->
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
     RemPids = [RemotePid | RemoteOtherPids],
-    Aliases = make_aliases(LocPids, RemPids) ++ make_aliases(RemPids, LocPids),
     AllPids = LocPids ++ RemPids,
+    Aliases = make_aliases(AllPids),
     Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
@@ -78,6 +78,7 @@ join2(_Info, LocalPid, RemotePid) ->
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
+        [cets:schedule_check_servers_after_down(Pid, self()) || Pid <- AllPids],
         RemF = fun(Pid) -> cets:send_dump(Pid, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
         LocF = fun(Pid) -> cets:send_dump(Pid, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
         lists:foreach(RemF, RemPids),
@@ -87,12 +88,14 @@ join2(_Info, LocalPid, RemotePid) ->
         lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
     end.
 
-make_aliases(Pids, Pids2) ->
+%% Recreate all aliases
+%% So we apply don't receive new updates unless we have applied a data diff
+make_aliases(AllPids) ->
     %% Pid monitors Pid2
     [
         {Pid, Pid2, Alias}
-     || Pid <- Pids,
-        {Pid2, Alias} <- cets:make_alias_for(Pid, Pids2)
+     || Pid <- AllPids,
+        {Pid2, Alias} <- cets:make_alias_for(Pid, lists:delete(Pid, AllPids))
     ].
 
 aliases_for(Pid, Aliases) ->
@@ -101,8 +104,10 @@ aliases_for(Pid, Aliases) ->
     %% Pid we monitor
     %% Monitor to detect that we the remote server is down
     %% Alias to send messages from Pid to Pid2
-    Res = [{Pid2, Alias, find_destination(Pid, Pid2, Aliases)}
-           || {Pid2, Alias} <- PidMons],
+    Res = [
+        {Pid2, Alias, find_destination(Pid, Pid2, Aliases)}
+     || {Pid2, Alias} <- PidMons
+    ],
     assert_aliases_are_different(Res),
     Res.
 

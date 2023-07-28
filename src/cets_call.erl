@@ -61,7 +61,7 @@ async_operation(Server, Msg) ->
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
     %% We monitor the local server until the response from all servers is collected.
-%   wait_response(Mon, infinity).
+    %   wait_response(Mon, infinity).
     wait_response(Mon, 5000).
 
 %% This function must be called to receive the result of the multinode operation.
@@ -104,12 +104,12 @@ do_wait_for_updated(Mon, Servers, Timeout) ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})
     after Timeout ->
-%       error(timeout)
+        %       error(timeout)
         error({timeout, Servers})
     end.
 
 unset_flag(Pos, Bits) ->
-   Bits band (bnot (1 bsl Pos)).
+    Bits band (bnot (1 bsl Pos)).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
