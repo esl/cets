@@ -28,7 +28,8 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
-    send_dump/4,
+    send_dump/5,
+    apply_dump/2,
     schedule_check_servers_after_down/2,
     table_name/1,
     other_nodes/1,
@@ -114,7 +115,8 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    verify_pidmon := {pid(), reference()} | false
+    verify_pidmon := {pid(), reference()} | false,
+    pending_dump := false | term()
 }.
 
 -type long_msg() ::
@@ -127,7 +129,7 @@
     | other_pids
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
-    | {send_dump, Nums :: server_nums(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
+    | {send_dump, Ref :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -193,10 +195,15 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), server_nums(), [server_tuple()], [tuple()]) -> ok.
-send_dump(Server, Nums, NewServers, OurDump) ->
+-spec send_dump(server_ref(), reference(), server_nums(), [server_tuple()], [tuple()]) -> ok.
+send_dump(Server, Ref, Nums, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, Nums, NewServers, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, Ref, Nums, NewServers, OurDump}, Info).
+
+-spec apply_dump(server_ref(), reference()) -> ok.
+apply_dump(Server, Ref) ->
+    Info = #{msg => apply_dump},
+    cets_call:long_call(Server, {apply_dump, Ref}, Info).
 
 -spec schedule_check_servers_after_down(pid(), pid()) -> ok.
 schedule_check_servers_after_down(Server, Who) ->
@@ -328,7 +335,8 @@ init({Tab, Opts}) ->
         opts => Opts,
         backlog => [],
         pause_monitors => [],
-        verify_pidmon => false
+        verify_pidmon => false,
+        pending_dump => false
     }}.
 
 -spec handle_call(term(), from(), state()) ->
@@ -354,8 +362,10 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump, Nums, NewServers, Dump}, _From, State) ->
-    handle_send_dump(Nums, NewServers, Dump, State);
+handle_call({send_dump, _Ref, _Nums, _NewServers, _Dump} = M, _From, State) ->
+    handle_send_dump(M, State);
+handle_call({apply_dump, Ref}, _From, State) ->
+    handle_apply_send_dump(Ref, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -404,10 +414,15 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(Nums, NewServers, Dump, State = #{tab := Tab}) ->
+handle_send_dump(M, State) ->
+    {reply, ok, State#{pending_dump := M}}.
+
+handle_apply_send_dump(Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}) ->
     ets:insert(Tab, Dump),
-    State2 = State#{server_nums := Nums, server_num := maps:get(self(), Nums)},
-    {reply, ok, set_servers(NewServers, State2)}.
+    State2 = State#{server_nums := Nums, server_num := maps:get(self(), Nums), pending_dump := false},
+    {reply, ok, set_servers(NewServers, State2)};
+handle_apply_send_dump(_Ref, State) ->
+    {reply, {error, unknown_dump_ref}, State}.
 
 remove_server(Mon, State = #{other_servers := Servers}) ->
     Servers2 = lists:keydelete(Mon, 2, Servers),

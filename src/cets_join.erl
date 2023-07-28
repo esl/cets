@@ -76,6 +76,7 @@ join2(_Info, LocalPid, RemotePid) ->
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
+    Ref = make_ref(),
     try
         cets:sync(LocalPid),
         cets:sync(RemotePid),
@@ -83,13 +84,14 @@ join2(_Info, LocalPid, RemotePid) ->
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
         [cets:schedule_check_servers_after_down(Pid, self()) || Pid <- AllPids],
-        RemF = fun(Pid) -> cets:send_dump(Pid, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
-        LocF = fun(Pid) -> cets:send_dump(Pid, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
+        RemF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
+        LocF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
         lists:foreach(RemF, RemPids),
         lists:foreach(LocF, LocPids),
+        lists:foreach(fun(Pid) -> cets:apply_dump(Pid, Ref) end, AllPids),
         ok
     after
-        lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
+        lists:foreach(fun({Pid, PauseRef}) -> cets:unpause(Pid, PauseRef) end, Paused)
     end.
 
 %% Recreate all aliases
