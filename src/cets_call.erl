@@ -85,7 +85,7 @@ wait_for_updated(Mon, {Servers, MonTab}, Timeout) ->
     after
         erlang:demonitor(Mon, [flush]),
         flush_messages(Mon),
-        ets:delete(MonTab, Mon)
+        MonTab ! Mon
     end.
 
 do_wait_for_updated(_Mon, 0, _Timeout) ->

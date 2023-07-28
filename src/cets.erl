@@ -321,8 +321,10 @@ init({Tab, Opts}) ->
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}, {read_concurrency, true}]),
     _ = ets:new(MonTab, [public, named_table, {write_concurrency, true}]),
+MonMon = spawn(fun() -> drop_all(#{}) end),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
+mon_mon => MonMon,
         tab => Tab,
         mon_tab => MonTab,
         mon_pid => MonPid,
@@ -337,6 +339,14 @@ init({Tab, Opts}) ->
         pause_monitors => [],
         last_applied_dump_ref => make_ref()
     }}.
+
+drop_all(Map) ->
+    receive 
+{Mon, Pid} ->
+drop_all(maps:put(Mon, Pid, Map));
+Mon when is_reference(Mon) ->
+drop_all(maps:remove(Mon, Map))
+end.
 
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
@@ -549,11 +559,12 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_dests := Dests, remote_bits := Bits}) ->
+replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, mon_mon := MonMon, just_dests := Dests, remote_bits := Bits}) ->
     %% Reply would be routed directly to FromPid
     [send_to_remote(Dest, {remote_op, Dest, Alias, Msg}) || Dest <- Dests],
-    ets:insert(MonTab, From),
-    {Bits, MonTab}.
+%   ets:insert(MonTab, From),
+MonMon ! From,
+    {Bits, MonMon}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
