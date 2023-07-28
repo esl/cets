@@ -114,9 +114,13 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    pending_dump := term(),
+    pending_dump := send_dump_msg() | none(), %% Optional
     last_applied_dump_ref := reference()
 }.
+
+-type send_dump_msg() ::
+    {send_dump, DumpRef :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()],
+        Dump :: [tuple()]}.
 
 -type long_msg() ::
     pause
@@ -128,8 +132,7 @@
     | other_pids
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
-    | {send_dump, DumpRef :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()],
-        Dump :: [tuple()]}
+    | send_dump_msg()
     | {apply_dump, DumpRef :: reference()}.
 
 -type info() :: #{
@@ -412,8 +415,8 @@ handle_apply_dump(
 ) ->
     ets:insert(Tab, Dump),
     State2 = maps:remove(pending_dump, State#{
-        server_nums := Nums,
         server_num := maps:get(self(), Nums),
+        server_nums := Nums,
         last_applied_dump_ref := Ref
     }),
     %% We need to clean mon_tab table to avoid possible infinite waiting
@@ -502,16 +505,12 @@ erase_mon_tab(#{mon_tab := MonTab}) ->
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
-ets_delete_keys(Tab, [Key | Keys]) ->
-    ets:delete(Tab, Key),
-    ets_delete_keys(Tab, Keys);
-ets_delete_keys(_Tab, []) ->
+ets_delete_keys(Tab, Keys) ->
+    [ets:delete(Tab, Key) || Key <- Keys],
     ok.
 
-ets_delete_objects(Tab, [Object | Objects]) ->
-    ets:delete_object(Tab, Object),
-    ets_delete_objects(Tab, Objects);
-ets_delete_objects(_Tab, []) ->
+ets_delete_objects(Tab, Objects) ->
+    [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
 
 reply_updated(Alias, #{server_num := Num}) ->
@@ -648,7 +647,7 @@ check_servers(State = #{other_servers := Servers, last_applied_dump_ref := DumpR
      || {Pid, Mon, Dest} <- Servers
     ],
     %% Reset dump if any before unpause
-    State#{pending_dump := false}.
+    maps:remove(pending_dump, State).
 
 is_known_monitor(Mon, #{other_servers := Servers}) ->
     lists:keymember(Mon, 2, Servers).
