@@ -61,8 +61,7 @@ async_operation(Server, Msg) ->
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
     %% We monitor the local server until the response from all servers is collected.
-    %   wait_response(Mon, infinity).
-    wait_response(Mon, 5000).
+    wait_response(Mon, infinity).
 
 %% This function must be called to receive the result of the multinode operation.
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.

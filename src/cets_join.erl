@@ -4,6 +4,9 @@
 -export([join/5]).
 -include_lib("kernel/include/logger.hrl").
 
+%% Used in tests
+-ignore_xref([join/5]).
+
 -type lock_key() :: term().
 
 -spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
