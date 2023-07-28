@@ -30,7 +30,6 @@
     remote_dump/1,
     send_dump/5,
     apply_dump/2,
-    schedule_check_servers_after_down/2,
     table_name/1,
     other_nodes/1,
     other_pids/1,
@@ -116,7 +115,8 @@
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
     verify_pidmon := {pid(), reference()} | false,
-    pending_dump := false | term()
+    pending_dump := false | term(),
+    last_applied_dump_ref := reference()
 }.
 
 -type long_msg() ::
@@ -129,7 +129,9 @@
     | other_pids
     | {make_alias_for, [pid()]}
     | {unpause, reference()}
-    | {send_dump, Ref :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()], Dump :: [tuple()]}.
+    | {send_dump, DumpRef :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()],
+        Dump :: [tuple()]}
+    | {apply_dump, DumpRef :: reference()}.
 
 -type info() :: #{
     table := table_name(),
@@ -182,7 +184,7 @@ stop(Server) ->
     gen_server:stop(Server).
 
 -spec dump(table_name()) -> Records :: [tuple()].
-dump(Tab) ->
+dump(Tab) when is_atom(Tab) ->
     ets:tab2list(Tab).
 
 -spec remote_dump(server_ref()) -> {ok, Records :: [tuple()]}.
@@ -204,10 +206,6 @@ send_dump(Server, Ref, Nums, NewServers, OurDump) ->
 apply_dump(Server, Ref) ->
     Info = #{msg => apply_dump},
     cets_call:long_call(Server, {apply_dump, Ref}, Info).
-
--spec schedule_check_servers_after_down(pid(), pid()) -> ok.
-schedule_check_servers_after_down(Server, Who) ->
-    gen_server:cast(Server, {schedule_check_servers_after_down, Who}).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -336,7 +334,8 @@ init({Tab, Opts}) ->
         backlog => [],
         pause_monitors => [],
         verify_pidmon => false,
-        pending_dump => false
+        pending_dump => false,
+        last_applied_dump_ref => make_ref()
     }}.
 
 -spec handle_call(term(), from(), state()) ->
@@ -383,21 +382,15 @@ handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Bac
     %% Backlog is a list of pending operation, when our server is paused.
     %% The list would be applied, once our server is unpaused.
     {noreply, State#{backlog := [{Msg, From} | Backlog]}};
-handle_cast({schedule_check_servers_after_down, Pid}, State) ->
-    %% Called by the join coordinator process
-    %% Once that process exits, we need to check which aliases we could still use
-    %% to talk to the remote servers
-    Mon = erlang:monitor(process, Pid),
-    {noreply, State#{verify_pidmon := {Pid, Mon}}};
-handle_cast({check_server, Source, Mon, Dest}, State) ->
-    handle_check_server(Source, Mon, Dest, State),
+handle_cast({check_server, Source, Mon, Dest, DumpRef}, State) ->
+    handle_check_server(Source, Mon, Dest, DumpRef, State),
     {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, Alias, Msg}, State) ->
+handle_info({remote_op, _Dest, Alias, Msg}, State) ->
     handle_remote_op(Alias, Msg, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
@@ -417,9 +410,16 @@ code_change(_OldVsn, State, _Extra) ->
 handle_send_dump(M, State) ->
     {reply, ok, State#{pending_dump := M}}.
 
-handle_apply_send_dump(Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}) ->
+handle_apply_send_dump(
+    Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}
+) ->
     ets:insert(Tab, Dump),
-    State2 = State#{server_nums := Nums, server_num := maps:get(self(), Nums), pending_dump := false},
+    State2 = State#{
+        server_nums := Nums,
+        server_num := maps:get(self(), Nums),
+        pending_dump := false,
+        last_applied_dump_ref := Ref
+    },
     {reply, ok, set_servers(NewServers, State2)};
 handle_apply_send_dump(_Ref, State) ->
     {reply, {error, unknown_dump_ref}, State}.
@@ -442,9 +442,6 @@ make_remote_bits(Pids, #{server_nums := Nums}) ->
 set_flag(Pos, Bits) ->
     Bits bor (1 bsl Pos).
 
-handle_down(Mon, Pid, State = #{verify_pidmon := {Pid, Mon}}) ->
-    check_servers(State),
-    {noreply, State#{verify_pidmon := false}};
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
@@ -538,8 +535,7 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
 
 replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, just_dests := Dests, remote_bits := Bits}) ->
     %% Reply would be routed directly to FromPid
-    Msg2 = {remote_op, Alias, Msg},
-    [send_to_remote(Dest, Msg2) || Dest <- Dests],
+    [send_to_remote(Dest, {remote_op, Dest, Alias, Msg}) || Dest <- Dests],
     ets:insert(MonTab, From),
     {Bits, MonTab}.
 
@@ -561,20 +557,22 @@ handle_unpause2(Mon, Mons, State) ->
     erlang:demonitor(Mon, [flush]),
     Mons2 = lists:delete(Mon, Mons),
     State2 = State#{pause_monitors := Mons2},
-    State3 =
+    State4 =
         case Mons2 of
             [] ->
-                apply_backlog(State2);
+                State3 = check_servers(State2),
+                apply_backlog(State3);
             _ ->
                 State2
         end,
-    {reply, ok, State3}.
+    {reply, ok, State4}.
 
 -spec handle_get_info(state()) -> {reply, info(), state()}.
 handle_get_info(
     State = #{
         tab := Tab,
         just_pids := Pids,
+        just_dests := Dests,
         mon_pid := MonPid,
         opts := Opts
     }
@@ -582,6 +580,7 @@ handle_get_info(
     Info = #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Pids])),
+        server_to_dest => maps:from_list(lists:zip(Pids, Dests)),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         mon_pid => MonPid,
@@ -623,23 +622,48 @@ servers_to_dests(Servers) ->
 server_pid_to_server_num(Pid, #{server_nums := Nums}) ->
     maps:get(Pid, Nums).
 
+%% First thing to do after unpause is to send message check_server.
+%% So the remote server has a chance to unalias (block) us.
 %% Send to other servers an async request to verify that our Mon and Dest are valid
-check_servers(#{other_servers := Servers}) ->
-    [gen_server:cast(Pid, {check_server, self(), Mon, Dest}) || {Pid, Mon, Dest} <- Servers],
-    ok.
+check_servers(State = #{other_servers := Servers, last_applied_dump_ref := DumpRef}) ->
+    [
+        gen_server:cast(Pid, {check_server, self(), Mon, Dest, DumpRef})
+     || {Pid, Mon, Dest} <- Servers
+    ],
+    %% Reset dump if any before unpause
+    State#{pending_dump := false}.
 
 is_known_monitor(Mon, #{other_servers := Servers}) ->
     lists:keymember(Mon, 2, Servers).
 
-%% Forces to the remote server to disconnect if we don't know his alias
-handle_check_server(Source, Mon, Dest, State) ->
-    case is_known_monitor(Dest, State) of
-        true ->
+%% Forces the remote server to disconnect if we don't know his alias
+handle_check_server(Source, Mon, Dest, DumpRef, State = #{last_applied_dump_ref := OurDumpRef}) ->
+    case {is_known_monitor(Dest, State), DumpRef} of
+        {true, OurDumpRef} ->
             ok;
-        false ->
+        _ ->
+            %% Prevent from receiving remote_ops.
+            %% Though messages that are already in our message box would not get rejected.
+            case erlang:unalias(Dest) of
+                true ->
+                    flush_remote_ops(Dest);
+                false ->
+                    ?LOG_ERROR(#{
+                        what => unknown_check_server_alias, alias => Dest, from_pid => Source
+                    })
+            end,
             %% Simulate disconnect for this alias.
             %% This would prevent us from the partially applied dumps.
             %% This could happen if send_dump failed for this or for the remote node.
             Source ! {'DOWN', Mon, process, self(), check_server_failed},
             ok
+    end.
+
+%% Reject messages to the alias which are already in our message box
+flush_remote_ops(Dest) ->
+    receive
+        {remote_op, Dest, _Alias, _Msg} ->
+            flush_remote_ops(Dest)
+    after 0 ->
+        ok
     end.

@@ -1,17 +1,22 @@
 %% @doc Cluster join logic.
 -module(cets_join).
 -export([join/4]).
+-export([join/5]).
 -include_lib("kernel/include/logger.hrl").
 
 -type lock_key() :: term().
 
+-spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
+join(LockKey, Info, LocalPid, RemotePid) ->
+    join(LockKey, Info, LocalPid, RemotePid, #{}).
+
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
--spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
-join(_LockKey, _Info, Pid, Pid) ->
+-spec join(lock_key(), cets_long:log_info(), pid(), pid(), Opts :: #{}) -> ok | {error, term()}.
+join(_LockKey, _Info, Pid, Pid, _Opts) ->
     {error, same_pid};
-join(LockKey, Info, LocalPid, RemotePid) when
+join(LockKey, Info, LocalPid, RemotePid, Opts) when
     is_pid(LocalPid), is_pid(RemotePid), LocalPid =/= RemotePid
 ->
     Info2 = Info#{
@@ -19,20 +24,20 @@ join(LockKey, Info, LocalPid, RemotePid) when
         remote_pid => RemotePid,
         remote_node => node(RemotePid)
     },
-    F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid) end,
+    F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid, Opts) end,
     cets_long:run_safely(Info2#{long_task_name => join}, F).
 
-join1(LockKey, Info, LocalPid, RemotePid) ->
+join1(LockKey, Info, LocalPid, RemotePid, Opts) ->
     OtherPids = cets:other_pids(LocalPid),
     case lists:member(RemotePid, OtherPids) of
         true ->
             {error, already_joined};
         false ->
             Start = erlang:system_time(millisecond),
-            join_loop(LockKey, Info, LocalPid, RemotePid, Start)
+            join_loop(LockKey, Info, LocalPid, RemotePid, Start, Opts)
     end.
 
-join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
+join_loop(LockKey, Info, LocalPid, RemotePid, Start, Opts) ->
     %% Only one join at a time:
     %% - for performance reasons, we don't want to cause too much load for active nodes
     %% - to avoid deadlocks, because joining does gen_server calls
@@ -42,7 +47,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
         %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
         %% Do joining in a separate process to reduce GC
-        cets_long:run_spawn(Info, fun() -> join2(Info, LocalPid, RemotePid) end)
+        cets_long:run_spawn(Info, fun() -> join2(Info, LocalPid, RemotePid, Opts) end)
     end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
@@ -51,16 +56,17 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start) ->
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
             ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
-            join_loop(LockKey, Info, LocalPid, RemotePid, Start);
+            join_loop(LockKey, Info, LocalPid, RemotePid, Start, Opts);
         Result ->
             Result
     end.
 
-join2(_Info, LocalPid, RemotePid) ->
+join2(_Info, LocalPid, RemotePid, Opts) ->
+    run_step(join_start, Opts),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
-    #{opts := Opts} = cets:info(LocalPid),
+    #{opts := CetsOpts} = cets:info(LocalPid),
     %% Ensure that these two servers have processed any pending check_server requests
     %% and their other_pids list is fully updated
     cets:sync(LocalPid),
@@ -70,29 +76,40 @@ join2(_Info, LocalPid, RemotePid) ->
     LocPids = [LocalPid | LocalOtherPids],
     RemPids = [RemotePid | RemoteOtherPids],
     AllPids = LocPids ++ RemPids,
+    run_step({all_pids_known, AllPids}, Opts),
     Aliases = make_aliases(AllPids),
     Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
-    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    _Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    run_step(paused, Opts),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
     Ref = make_ref(),
-    try
-        cets:sync(LocalPid),
-        cets:sync(RemotePid),
-        {ok, LocalDump} = remote_or_local_dump(LocalPid),
-        {ok, RemoteDump} = remote_or_local_dump(RemotePid),
-        {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
-        [cets:schedule_check_servers_after_down(Pid, self()) || Pid <- AllPids],
-        RemF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
-        LocF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
-        lists:foreach(RemF, RemPids),
-        lists:foreach(LocF, LocPids),
-        lists:foreach(fun(Pid) -> cets:apply_dump(Pid, Ref) end, AllPids),
-        ok
-    after
-        lists:foreach(fun({Pid, PauseRef}) -> cets:unpause(Pid, PauseRef) end, Paused)
-    end.
+    cets:sync(LocalPid),
+    cets:sync(RemotePid),
+    {ok, LocalDump} = remote_or_local_dump(LocalPid),
+    {ok, RemoteDump} = remote_or_local_dump(RemotePid),
+    %% Should continue only if still paused
+    {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
+    %% Don't send dumps in parallel to not cause out-of-memory.
+    %% It could be faster though.
+    RemF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
+    LocF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
+    lists:foreach(RemF, RemPids),
+    lists:foreach(LocF, LocPids),
+    %% We could do voting here and nodes would apply automatically once they receive
+    %% ack that other nodes have the same dump pending.
+    %% Though it means more logic.
+    lists:foreach(
+        fun(Pid) ->
+            Num = maps:get(Pid, Nums),
+            run_step({before_apply_dump, Num, Pid}, Opts),
+            cets:apply_dump(Pid, Ref)
+        end,
+        AllPids
+    ),
+    %% Would be unpaused automatically after this process exits
+    ok.
 
 %% Recreate all aliases
 %% So we apply don't receive new updates unless we have applied a data diff
@@ -173,3 +190,8 @@ apply_resolver_for_sorted(
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
+
+run_step(Step, #{step_handler := F}) ->
+    F(Step);
+run_step(_Step, _Opts) ->
+    ok.

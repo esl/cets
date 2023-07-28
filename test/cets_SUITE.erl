@@ -20,6 +20,11 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
         join_with_the_same_pid,
+        join_start_fails,
+        join_if_fails_before_apply_dump,
+        join_if_fails_before_apply_dump_with_partial_apply,
+        join_if_fails_then_pending_ops_are_filtered,
+        join_if_fails_then_old_alias_is_disabled,
         test_multinode,
         node_list_is_correct,
         test_multinode_auto_discovery,
@@ -202,6 +207,152 @@ join_with_the_same_pid(_Config) ->
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
+
+join_start_fails(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (join_start) -> error(sim_error);
+        (_) -> ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    [] = cets:other_pids(Pid1),
+    [] = cets:other_pids(Pid2).
+
+join_if_fails_before_apply_dump(Config) ->
+    Me = self(),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    cets:insert(Pid1, {1}),
+    cets:insert(Pid2, {2}),
+    ExpectedAllPids = [Pid1, Pid2],
+    F = fun
+        ({all_pids_known, Pids}) ->
+            Pids = ExpectedAllPids,
+            Me ! all_pids_known;
+        ({before_apply_dump, 1, P}) when Pid2 =:= P ->
+            error(sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(all_pids_known),
+    %% Not joined, some data exchanged
+    cets:sync(Pid1),
+    cets:sync(Pid2),
+    [] = cets:other_pids(Pid1),
+    [] = cets:other_pids(Pid2),
+    %% Pid1 applied new version of dump
+    %% Though, it got disconnected after
+    {ok, [{1}, {2}]} = cets:remote_dump(Pid1),
+    %% Pid2 rejected changes
+    {ok, [{2}]} = cets:remote_dump(Pid2),
+    receive_message({down_called, Pid1, Pid2}).
+
+join_if_fails_before_apply_dump_with_partial_apply(Config) ->
+    Me = self(),
+    [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
+    %% Pid1, Pid3, Pid4 are in the one network segment
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    [Pid3, Pid4] = cets:other_pids(Pid1),
+    cets:insert(Pid1, {1}),
+    cets:insert(Pid2, {2}),
+    ExpectedAllPids = [Pid1, Pid3, Pid4, Pid2],
+    F = fun
+        ({all_pids_known, Pids}) ->
+            Pids = ExpectedAllPids,
+            Me ! all_pids_known;
+        ({before_apply_dump, 2, P}) when Pid4 =:= P ->
+            error(sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(all_pids_known),
+    %% Not joined fully, some data exchanged
+    [cets:sync(P) || P <- ExpectedAllPids],
+    %% Bad join disconnects Pid4 from the old connections
+    [Pid3] = cets:other_pids(Pid1),
+    [] = cets:other_pids(Pid2),
+    [Pid1] = cets:other_pids(Pid3),
+    [] = cets:other_pids(Pid4),
+    {ok, [{1}, {2}]} = cets:remote_dump(Pid1),
+    {ok, [{2}]} = cets:remote_dump(Pid2),
+    {ok, [{1}, {2}]} = cets:remote_dump(Pid3),
+    {ok, [{1}]} = cets:remote_dump(Pid4).
+
+join_if_fails_then_pending_ops_are_filtered(Config) ->
+    Me = self(),
+    [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
+    %% Pid1, Pid3, Pid4 are in the one network segment
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    [Pid3, Pid4] = cets:other_pids(Pid1),
+    ExpectedAllPids = [Pid1, Pid3, Pid4, Pid2],
+    F = fun
+        ({all_pids_known, Pids}) ->
+            Pids = ExpectedAllPids,
+            Me ! all_pids_known;
+        ({before_apply_dump, 2, P}) when Pid4 =:= P ->
+            error(sim_error);
+        (paused) ->
+            %% Add some pending ops and check if they would be replicated later
+            cets:insert_request(Pid1, {p1}),
+            cets:insert_request(Pid2, {p2}),
+            cets:insert_request(Pid3, {p3}),
+            cets:insert_request(Pid4, {p4});
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(all_pids_known),
+    %% Not joined fully, some data exchanged
+    [cets:sync(P) || P <- ExpectedAllPids],
+    {ok, [{p1}, {p3}]} = cets:remote_dump(Pid1),
+    {ok, [{p2}]} = cets:remote_dump(Pid2),
+    {ok, [{p1}, {p3}]} = cets:remote_dump(Pid3),
+    {ok, [{p4}]} = cets:remote_dump(Pid4).
+
+join_if_fails_then_old_alias_is_disabled(Config) ->
+    Me = self(),
+    [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
+    %% Pid1, Pid3, Pid4 are in the one network segment
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    #{server_to_dest := #{Pid1 := Dest3to1}} = cets:info(Pid3),
+    #{server_to_dest := #{Pid1 := Dest4to1}} = cets:info(Pid4),
+    [Pid3, Pid4] = cets:other_pids(Pid1),
+    ExpectedAllPids = [Pid1, Pid3, Pid4, Pid2],
+    F = fun
+        ({all_pids_known, Pids}) ->
+            Pids = ExpectedAllPids,
+            Me ! all_pids_known;
+        ({before_apply_dump, 2, P}) when Pid4 =:= P ->
+            error(sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(all_pids_known),
+    %% Not joined fully, some data exchanged
+    [cets:sync(P) || P <- ExpectedAllPids],
+    %% Simulate remote_op-s
+    %% Dest4to1 alias should be deactivated
+    %% Dest3to1 alias should work
+    Dest3to1 ! {remote_op, Dest3to1, make_ref(), {insert, {z3}}},
+    Dest4to1 ! {remote_op, Dest4to1, make_ref(), {insert, {z4}}},
+    %% Ensure remote_op-s are received
+    cets:ping(Pid1),
+    {ok, [{z3}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -554,3 +705,18 @@ receive_down_for_monitor(Mon) ->
         {'DOWN', Mon, process, _Pid, _Reason} -> ok
     after 5000 -> ct:fail(timeout)
     end.
+
+receive_message(M) ->
+    receive
+        M -> ok
+    after 5000 -> error({receive_message_timeout, M})
+    end.
+
+make_n_servers(N, Config) ->
+    lists:map(
+        fun(X) ->
+            {ok, Pid} = cets:start(make_name(Config, X), #{}),
+            Pid
+        end,
+        lists:seq(1, N)
+    ).
