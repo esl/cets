@@ -100,14 +100,25 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     %% We could do voting here and nodes would apply automatically once they receive
     %% ack that other nodes have the same dump pending.
     %% Though it means more logic.
-    lists:foreach(
+    ApplyMons = lists:map(
         fun(Pid) ->
             Num = maps:get(Pid, Nums),
             run_step({before_apply_dump, Num, Pid}, Opts),
-            cets:apply_dump(Pid, Ref)
+            %% Do apply_dump in parallel to improve performance
+            spawn_monitor(fun() -> cets:apply_dump(Pid, Ref) end)
         end,
         AllPids
     ),
+    %% Block till all the processes process apply_dump
+    [
+        receive
+            {'DOWN', Mon, process, Pid, Reason} ->
+                Reason = normal
+        after timer:seconds(60) ->
+            error({apply_dump_timeout, Pid})
+        end
+     || {Pid, Mon} <- ApplyMons
+    ],
     %% Would be unpaused automatically after this process exits
     ok.
 
