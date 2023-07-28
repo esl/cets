@@ -114,8 +114,7 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    verify_pidmon := {pid(), reference()} | false,
-    pending_dump := false | term(),
+    pending_dump := term(),
     last_applied_dump_ref := reference()
 }.
 
@@ -333,8 +332,6 @@ init({Tab, Opts}) ->
         opts => Opts,
         backlog => [],
         pause_monitors => [],
-        verify_pidmon => false,
-        pending_dump => false,
         last_applied_dump_ref => make_ref()
     }}.
 
@@ -364,7 +361,7 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
 handle_call({send_dump, _Ref, _Nums, _NewServers, _Dump} = M, _From, State) ->
     handle_send_dump(M, State);
 handle_call({apply_dump, Ref}, _From, State) ->
-    handle_apply_send_dump(Ref, State);
+    handle_apply_dump(Ref, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -408,20 +405,24 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal logic
 
 handle_send_dump(M, State) ->
-    {reply, ok, State#{pending_dump := M}}.
+    {reply, ok, State#{pending_dump => M}}.
 
-handle_apply_send_dump(
+handle_apply_dump(
     Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}
 ) ->
     ets:insert(Tab, Dump),
-    State2 = State#{
+    State2 = maps:remove(pending_dump, State#{
         server_nums := Nums,
         server_num := maps:get(self(), Nums),
-        pending_dump := false,
         last_applied_dump_ref := Ref
-    },
+    }),
+    %% We need to clean mon_tab table to avoid possible infinite waiting
+    %% Though, we don't expect a lot of record in the table once we reached
+    %% apply_dump step
+    %% We have to do it because we set new server_nums
+    erase_mon_tab(State),
     {reply, ok, set_servers(NewServers, State2)};
-handle_apply_send_dump(_Ref, State) ->
+handle_apply_dump(_Ref, State) ->
     {reply, {error, unknown_dump_ref}, State}.
 
 remove_server(Mon, State = #{other_servers := Servers}) ->
@@ -487,6 +488,16 @@ notify_remote_down(Num, MonTab) ->
         end,
         List
     ).
+
+erase_mon_tab(#{mon_tab := MonTab}) ->
+    List = ets:tab2list(MonTab),
+    lists:foreach(
+        fun({Mon, _Pid}) ->
+            Mon ! {cets_remote_down, Mon, all}
+        end,
+        List
+    ),
+    ets:match_delete(MonTab, '_').
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).

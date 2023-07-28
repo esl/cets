@@ -73,6 +73,7 @@ wait_response(Mon, Timeout) ->
             wait_for_updated(Mon, WaitInfo, Timeout)
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
+        flush_messages(Mon),
         error(timeout)
     end.
 
@@ -83,6 +84,7 @@ wait_for_updated(Mon, {Servers, MonTab}, Timeout) ->
         do_wait_for_updated(Mon, Servers, Timeout)
     after
         erlang:demonitor(Mon, [flush]),
+        flush_messages(Mon),
         ets:delete(MonTab, Mon)
     end.
 
@@ -103,10 +105,11 @@ do_wait_for_updated(Mon, Servers, Timeout) ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})
     after Timeout ->
-        %       error(timeout)
-        error({timeout, Servers})
+                error(timeout)
     end.
 
+unset_flag(all, _Bits) ->
+    0;
 unset_flag(Pos, Bits) ->
     Bits band (bnot (1 bsl Pos)).
 
@@ -116,3 +119,13 @@ where(Name) when is_atom(Name) -> whereis(Name);
 where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
+
+%% It is called after we unalias to flush all non-received messages
+%% from the message box
+%% (no new messages would be received after that though)
+flush_messages(Mon) ->
+    receive
+        {cets_updated, _Mon, _Num} -> flush_messages(Mon);
+        {cets_remote_down, _Mon, _Num} -> flush_messages(Mon)
+    after 0 -> ok
+    end.
