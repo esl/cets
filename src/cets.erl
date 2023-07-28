@@ -103,7 +103,6 @@
 -type server_nums() :: map().
 -type state() :: #{
     tab := table_name(),
-    mon_tab := atom(),
     mon_pid := pid(),
     server_num := server_num(),
     server_nums := server_nums(),
@@ -114,7 +113,8 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    pending_dump := send_dump_msg() | none(), %% Optional
+    %% Optional
+    pending_dump := send_dump_msg() | none(),
     last_applied_dump_ref := reference()
 }.
 
@@ -315,18 +315,14 @@ init({Tab, Opts}) ->
     %% It is supported starting from OTP 25.3.
     catch process_flag(async_dist, true),
     process_flag(message_queue_data, off_heap),
-    MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     Type = maps:get(type, Opts, ordered_set),
     KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}, {read_concurrency, true}]),
-    _ = ets:new(MonTab, [public, named_table, {write_concurrency, true}]),
-MonMon = spawn(fun() -> drop_all(#{}) end),
-    {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
+    MonName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
+    {ok, MonPid} = cets_mon_cleaner:start_link(MonName),
     {ok, #{
-mon_mon => MonMon,
         tab => Tab,
-        mon_tab => MonTab,
         mon_pid => MonPid,
         server_num => 0,
         server_nums => #{self() => 0},
@@ -339,14 +335,6 @@ mon_mon => MonMon,
         pause_monitors => [],
         last_applied_dump_ref => make_ref()
     }}.
-
-drop_all(Map) ->
-    receive 
-{Mon, Pid} ->
-drop_all(maps:put(Mon, Pid, Map));
-Mon when is_reference(Mon) ->
-drop_all(maps:remove(Mon, Map))
-end.
 
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
@@ -476,11 +464,11 @@ handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Servers}) ->
+handle_down2(Mon, RemotePid, State = #{mon_pid := MonPid, other_servers := Servers}) ->
     case lists:keymember(Mon, 2, Servers) of
         true ->
             Num = server_pid_to_server_num(RemotePid, State),
-            notify_remote_down(Num, MonTab),
+            notify_remote_down(Num, MonPid),
             call_user_handle_down(RemotePid, State),
             {noreply, remove_server(Mon, State)};
         false ->
@@ -493,24 +481,12 @@ handle_down2(Mon, RemotePid, State = #{mon_tab := MonTab, other_servers := Serve
             {noreply, State}
     end.
 
-notify_remote_down(Num, MonTab) ->
-    List = ets:tab2list(MonTab),
-    lists:foreach(
-        fun({Mon, _Pid}) ->
-            Mon ! {cets_remote_down, Mon, Num}
-        end,
-        List
-    ).
+notify_remote_down(Num, MonPid) ->
+    MonPid ! {cets_remote_down, Num},
+    ok.
 
-erase_mon_tab(#{mon_tab := MonTab}) ->
-    List = ets:tab2list(MonTab),
-    lists:foreach(
-        fun({Mon, _Pid}) ->
-            Mon ! {cets_remote_down, Mon, all}
-        end,
-        List
-    ),
-    ets:match_delete(MonTab, '_').
+erase_mon_tab(#{mon_pid := MonPid}) ->
+    MonPid ! erase.
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -559,12 +535,11 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{mon_tab := MonTab, mon_mon := MonMon, just_dests := Dests, remote_bits := Bits}) ->
+replicate({Alias, _} = From, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
     %% Reply would be routed directly to FromPid
     [send_to_remote(Dest, {remote_op, Dest, Alias, Msg}) || Dest <- Dests],
-%   ets:insert(MonTab, From),
-MonMon ! From,
-    {Bits, MonMon}.
+    MonPid ! From,
+    {Bits, MonPid}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],

@@ -508,14 +508,12 @@ write_returns_if_remote_server_crashes(_Config) ->
 
 mon_cleaner_works(_Config) ->
     {ok, Pid1} = cets:start(c3, #{}),
-    %% Suspend, so to avoid unexpected check
-    sys:suspend(c3_mon),
     %% Two cases to check: an alive process and a dead process
     R = cets:insert_request(c3, {2}),
     %% Ensure insert_request reaches the server
     cets:ping(Pid1),
     %% There is one monitor
-    [_] = ets:tab2list(c3_mon),
+    1 = maps:size(gen_server:call(c3_mon, dump)),
     {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
     receive
         {'DOWN', Mon, process, Pid, _Reason} -> ok
@@ -524,17 +522,14 @@ mon_cleaner_works(_Config) ->
     %% Ensure insert_request reaches the server
     cets:ping(Pid1),
     %% There are two monitors
-    [_, _] = ets:tab2list(c3_mon),
+    2 = maps:size(gen_server:call(c3_mon, dump)),
     %% Force check
-    sys:resume(c3_mon),
     c3_mon ! check,
-    %% Ensure, that check is finished
-    sys:get_state(c3_mon),
     %% A monitor for a dead process is removed
-    [_] = ets:tab2list(c3_mon),
+    1 = maps:size(gen_server:call(c3_mon, dump)),
     %% The monitor is finally removed once wait_response returns
     ok = cets:wait_response(R, 5000),
-    [] = ets:tab2list(c3_mon).
+    0 = maps:size(gen_server:call(c3_mon, dump)).
 
 mon_cleaner_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(cleaner_stops, #{}),

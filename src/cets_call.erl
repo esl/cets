@@ -79,13 +79,13 @@ wait_response(Mon, Timeout) ->
 
 %% Wait for response from the remote nodes that the operation is completed.
 %% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Mon, {Servers, MonTab}, Timeout) ->
+wait_for_updated(Mon, {Servers, MonPid}, Timeout) ->
     try
         do_wait_for_updated(Mon, Servers, Timeout)
     after
         erlang:demonitor(Mon, [flush]),
-        flush_messages(Mon),
-        MonTab ! Mon
+        MonPid ! Mon,
+        flush_messages(Mon)
     end.
 
 do_wait_for_updated(_Mon, 0, _Timeout) ->
@@ -105,7 +105,7 @@ do_wait_for_updated(Mon, Servers, Timeout) ->
             %% Local server is down, this is a critical error
             error({cets_down, Reason})
     after Timeout ->
-                error(timeout)
+        error(timeout)
     end.
 
 unset_flag(all, _Bits) ->
