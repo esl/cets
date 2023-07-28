@@ -393,8 +393,8 @@ handle_cast(Msg, State) ->
 handle_info({remote_op, _Dest, Alias, Msg}, State) ->
     handle_remote_op(Alias, Msg, State),
     {noreply, State};
-handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State);
+handle_info({'DOWN', Mon, process, Pid, Reason}, State) ->
+    handle_down(Mon, Pid, Reason, State);
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -442,14 +442,20 @@ make_remote_bits(Pids, #{server_nums := Nums}) ->
 set_flag(Pos, Bits) ->
     Bits bor (1 bsl Pos).
 
-handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
+handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            ?LOG_ERROR(#{
-                what => pause_owner_crashed,
-                state => State,
-                paused_by_pid => Pid
-            }),
+            case Reason of
+                normal ->
+                    ok;
+                _ ->
+                    ?LOG_ERROR(#{
+                        what => pause_owner_crashed,
+                        reason => Reason,
+                        state => State,
+                        paused_by_pid => Pid
+                    })
+            end,
             {reply, ok, State2} = handle_unpause(Mon, State),
             {noreply, State2};
         false ->
