@@ -630,6 +630,12 @@ remote_down_is_not_received_after_timeout(Config) ->
     Ref = erlang:monitor(process, Pid2),
     exit(Pid2, kill),
     receive_down_for_monitor(Ref),
+    cets:ping(Pid1),
+    %% The main reason we don't receive the message is that
+    %% we've demonitored after wait_response failed.
+    %% And cets_mon_cleaner would try to respond to our invalidated alias.
+    %% Though, cets_mon_cleaner would probably receive delete request for
+    %% the alias before.
     ensure_no_down_message().
 
 start(Node, Tab) ->

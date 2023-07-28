@@ -97,8 +97,8 @@ handle_erase(State) ->
     maps:foreach(fun send_down_all/2, State),
     maps:with(state_keys(), State).
 
-send_down_all(Mon, Pid) when is_reference(Mon) ->
-    Pid ! {cets_remote_down, Mon, all};
+send_down_all(Mon, _Pid) when is_reference(Mon) ->
+    Mon ! {cets_remote_down, Mon, all};
 send_down_all(_Key, _Val) ->
     true.
 
@@ -106,7 +106,7 @@ handle_remote_down(Num, State) ->
     maps:foreach(fun(K, V) -> send_remote_down(K, V, Num) end, State),
     State.
 
-send_remote_down(Mon, Pid, Num) when is_reference(Mon) ->
-    Pid ! {cets_remote_down, Mon, Num};
+send_remote_down(Mon, _Pid, Num) when is_reference(Mon) ->
+    Mon ! {cets_remote_down, Mon, Num};
 send_remote_down(_Key, _Val, _Num) ->
     true.
