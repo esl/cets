@@ -21,7 +21,13 @@ jobs:
     - name: Compile
       run: rebar3 compile
     - name: Run tests
-      run: rebar3 ct --sname=ct1
+      run: rebar3 as test ct --sname=ct1 --cover
+    - name: Send test coverage report
+      run: rebar3 as test codecov analyze
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   dialyzer:
     runs-on: ubuntu-latest
