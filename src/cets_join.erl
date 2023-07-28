@@ -61,6 +61,10 @@ join2(_Info, LocalPid, RemotePid) ->
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
     #{opts := Opts} = cets:info(LocalPid),
+    %% Ensure that these two servers have processed any pending check_server requests
+    %% and their other_pids list is fully updated
+    cets:sync(LocalPid),
+    cets:sync(RemotePid),
     LocalOtherPids = cets:other_pids(LocalPid),
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
