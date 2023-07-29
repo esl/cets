@@ -48,6 +48,7 @@ all() ->
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
         info_contains_opts,
+        wait_for_updated_timeout,
         updated_is_not_received_after_timeout,
         remote_down_is_not_received_after_timeout,
         unknown_alias_in_check_server_message
@@ -641,6 +642,17 @@ insert_into_keypos_table(_Config) ->
 info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
+
+wait_for_updated_timeout(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    %% Pause the remote server
+    sys:suspend(Pid2),
+    R = cets:insert_request(Pid1, {1}),
+    %% Ensure we receive the result of the async operation from our local server
+    pong = cets:ping(Pid1),
+    wait_response_fails_with_timeout(R).
 
 updated_is_not_received_after_timeout(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
