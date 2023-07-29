@@ -113,15 +113,14 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
         AllPids
     ),
     %% Block till all the processes process apply_dump
-    [
+    Reasons = [
         receive
             {'DOWN', Mon, process, Pid, Reason} ->
-                Reason = normal
-        after timer:seconds(60) ->
-            error({apply_dump_timeout, Pid})
+                Reason
         end
      || {Pid, Mon} <- ApplyMons
     ],
+    [normal] = lists:usort(Reasons),
     %% Would be unpaused automatically after this process exits
     ok.
 
