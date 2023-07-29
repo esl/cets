@@ -21,10 +21,11 @@ all() ->
         bag_with_conflict_handler_not_allowed,
         join_with_the_same_pid,
         join_start_fails,
-        join_if_fails_before_apply_dump,
-        join_if_fails_before_apply_dump_with_partial_apply,
-        join_if_fails_then_pending_ops_are_filtered,
-        join_if_fails_then_old_alias_is_disabled,
+        join_fails_before_apply_dump,
+        join_fails_before_apply_dump_with_partial_apply,
+        join_fails_then_pending_ops_are_filtered,
+        join_fails_then_old_alias_is_disabled,
+        apply_dump_with_unknown_dump_ref_would_be_ignored,
         test_multinode,
         node_list_is_correct,
         test_multinode_auto_discovery,
@@ -220,7 +221,7 @@ join_start_fails(Config) ->
     [] = cets:other_pids(Pid1),
     [] = cets:other_pids(Pid2).
 
-join_if_fails_before_apply_dump(Config) ->
+join_fails_before_apply_dump(Config) ->
     Me = self(),
     DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
         Me ! {down_called, self(), RemotePid}
@@ -254,7 +255,7 @@ join_if_fails_before_apply_dump(Config) ->
     {ok, [{2}]} = cets:remote_dump(Pid2),
     receive_message({down_called, Pid1, Pid2}).
 
-join_if_fails_before_apply_dump_with_partial_apply(Config) ->
+join_fails_before_apply_dump_with_partial_apply(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
@@ -288,7 +289,7 @@ join_if_fails_before_apply_dump_with_partial_apply(Config) ->
     {ok, [{1}, {2}]} = cets:remote_dump(Pid3),
     {ok, [{1}]} = cets:remote_dump(Pid4).
 
-join_if_fails_then_pending_ops_are_filtered(Config) ->
+join_fails_then_pending_ops_are_filtered(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
@@ -321,7 +322,7 @@ join_if_fails_then_pending_ops_are_filtered(Config) ->
     {ok, [{p1}, {p3}]} = cets:remote_dump(Pid3),
     {ok, [{p4}]} = cets:remote_dump(Pid4).
 
-join_if_fails_then_old_alias_is_disabled(Config) ->
+join_fails_then_old_alias_is_disabled(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
@@ -353,6 +354,22 @@ join_if_fails_then_old_alias_is_disabled(Config) ->
     %% Ensure remote_op-s are received
     cets:ping(Pid1),
     {ok, [{z3}]} = cets:remote_dump(Pid1).
+
+apply_dump_with_unknown_dump_ref_would_be_ignored(Config) ->
+    Me = self(),
+    [Pid1, Pid2] = make_n_servers(2, Config),
+    F = fun
+        ({before_apply_dump, 0, Pid}) ->
+            {error, unknown_dump_ref} = cets:apply_dump(Pid, make_ref()),
+            Me ! before_apply_dump_called;
+        (_) ->
+            ok
+    end,
+    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(before_apply_dump_called),
+    %% Check that join is successful
+    ok = cets:insert(Pid1, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid2).
 
 test_multinode(Config) ->
     Node1 = node(),
