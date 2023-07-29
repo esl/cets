@@ -48,7 +48,13 @@ run_safely(Info, Fun) ->
             {error, {Class, Reason, Stacktrace}}
     after
         Diff = diff(Start),
-        ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
+        case Diff > 50 of
+            true ->
+                ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff});
+            false ->
+                %% Do not log something really quick
+                ok
+        end,
         Pid ! stop
     end.
 
