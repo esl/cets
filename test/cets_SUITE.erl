@@ -33,6 +33,7 @@ all() ->
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
         pause_multiple_times,
+        unpause_when_pause_owner_crashes,
         unpause_twice,
         write_returns_if_remote_server_crashes,
         mon_cleaner_works,
@@ -506,6 +507,21 @@ pause_multiple_times(_Config) ->
     cets:wait_response(Ref1, 5000),
     cets:wait_response(Ref2, 5000),
     [{1}, {2}] = lists:sort(cets:dump(T)).
+
+unpause_when_pause_owner_crashes(Config) ->
+    Me = self(),
+    {ok, Pid} = cets:start(make_name(Config, 1), #{}),
+    Other = spawn(fun() ->
+        cets:pause(Pid),
+        Me ! paused,
+        receive
+            ok -> ok
+        end
+    end),
+    Ref = cets:insert_request(Pid, {1}),
+    receive_message(paused),
+    erlang:exit(Other, crash_please),
+    ok = cets:wait_response(Ref, 5000).
 
 unpause_twice(_Config) ->
     T = t6,
