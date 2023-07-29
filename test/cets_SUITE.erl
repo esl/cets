@@ -49,7 +49,8 @@ all() ->
         insert_into_keypos_table,
         info_contains_opts,
         updated_is_not_received_after_timeout,
-        remote_down_is_not_received_after_timeout
+        remote_down_is_not_received_after_timeout,
+        unknown_alias_in_check_server_message
     ].
 
 init_per_suite(Config) ->
@@ -670,6 +671,15 @@ remote_down_is_not_received_after_timeout(Config) ->
     %% Though, cets_mon_cleaner would probably receive delete request for
     %% the alias before.
     ensure_no_down_message().
+
+unknown_alias_in_check_server_message(Config) ->
+    {ok, Pid} = cets:start(make_name(Config, 1), #{}),
+    Source = self(),
+    Mon = make_ref(),
+    Dest = make_ref(),
+    DumpRef = make_ref(),
+    gen_server:cast(Pid, {check_server, Source, Mon, Dest, DumpRef}),
+    receive_message({'DOWN', Mon, process, Pid, check_server_failed}).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
