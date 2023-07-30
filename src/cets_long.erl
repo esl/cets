@@ -33,7 +33,7 @@ run_spawn(Info, F) ->
 run_safely(Info, Fun) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
-    ?LOG_INFO(Info#{what => long_task_started}),
+    ?LOG_DEBUG(Info#{what => long_task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
         Fun()
