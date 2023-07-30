@@ -231,9 +231,9 @@ table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
 -spec send_dump(server_ref(), reference(), server_nums(), [server_tuple()], [tuple()]) -> ok.
-send_dump(Server, Ref, Nums, NewServers, OurDump) ->
+send_dump(Server, DumpRef, Nums, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, Ref, Nums, NewServers, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, DumpRef, Nums, NewServers, OurDump}, Info).
 
 -spec apply_dump(server_ref(), reference()) -> ok.
 apply_dump(Server, Ref) ->
@@ -446,10 +446,10 @@ handle_send_dump(M, State) ->
     {reply, ok, State#{pending_dump => M}}.
 
 handle_apply_dump(
-    Ref,
+    DumpRef,
     State = #{
         tab := Tab,
-        pending_dump := {send_dump, Ref, Nums, NewServers, Dump},
+        pending_dump := {send_dump, DumpRef, Nums, NewServers, Dump},
         ack_pid := AckPid
     }
 ) ->
@@ -459,7 +459,7 @@ handle_apply_dump(
         server_num := Num,
         server_mask := cets_bits:unset_flag_mask(Num),
         server_nums := Nums,
-        last_applied_dump_ref := Ref
+        last_applied_dump_ref := DumpRef
     }),
     %% We need to clean cets_ack process to avoid possible infinite
     %% gen_server:wait_response/2 calls from the client.
