@@ -97,7 +97,7 @@
     | {delete_many, [term()]}
     | {delete_objects, [term()]}.
 -type from() :: {pid(), reference()}.
--type backlog_entry() :: {op(), from()}.
+-type backlog_entry() :: {reference(), op()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference()}.
@@ -266,7 +266,7 @@ delete_objects_request(Server, Objects) ->
 
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
 wait_response(Mon, Timeout) ->
-    cets_call:wait_response(Mon, Timeout).
+    gen_server:wait_response(Mon, Timeout).
 
 -spec make_alias_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
 make_alias_for(Server, RemotePids) ->
@@ -341,6 +341,13 @@ init({Tab, Opts}) ->
 
 -spec handle_call(term(), from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
+handle_call({op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := []}) ->
+    handle_op(Alias, Msg, State),
+    {noreply, State};
+handle_call({op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
+    %% Backlog is a list of pending operation, when our server is paused.
+    %% The list would be applied, once our server is unpaused.
+    {noreply, State#{backlog := [{Alias, Msg} | Backlog]}};
 handle_call(other_pids, _From, State = #{just_pids := Pids}) ->
     {reply, Pids, State};
 handle_call({make_alias_for, Pids}, _From, State) ->
@@ -376,13 +383,6 @@ handle_call(get_info, _From, State) ->
     handle_get_info(State).
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
-handle_cast({op, From, Msg}, State = #{pause_monitors := []}) ->
-    handle_op(From, Msg, State),
-    {noreply, State};
-handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
-    %% Backlog is a list of pending operation, when our server is paused.
-    %% The list would be applied, once our server is unpaused.
-    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
 handle_cast({check_server, Source, Mon, Dest, DumpRef}, State) ->
     handle_check_server(Source, Mon, Dest, DumpRef, State),
     {noreply, State};
@@ -537,21 +537,20 @@ do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op({Alias, _} = _From, Msg, State) ->
+handle_op(Alias, Msg, State) ->
     do_op(Msg, State),
     replicate(Alias, Msg, State).
 
 replicate(Alias, _Msg, #{remote_bits := 0}) ->
     %% Skip replication
-    Alias ! {cets_ok, Alias},
-    ok;
+    cets_call:reply(Alias, ok);
 replicate(Alias, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
     MonPid ! {Alias, Bits},
     [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
     ok.
 
 apply_backlog(State = #{backlog := Backlog}) ->
-    [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
+    [handle_op(Alias, Msg, State) || {Alias, Msg} <- lists:reverse(Backlog)],
     State#{backlog := []}.
 
 %% We support multiple pauses

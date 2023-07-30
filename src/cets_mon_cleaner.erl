@@ -66,7 +66,7 @@ handle_erase(State) ->
     maps:with(state_keys(), State).
 
 send_down_all(Mon, _Val) when is_reference(Mon) ->
-    Mon ! {cets_ok, Mon};
+    cets_call:reply(Mon, ok);
 send_down_all(_Key, _Val) ->
     true.
 
@@ -79,7 +79,7 @@ handle_updated(Mon, Mask, State) ->
 handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
     case apply_mask(Mask, Bits) of
         0 ->
-            Mon ! {cets_ok, Mon},
+            cets_call:reply(Mon, ok),
             maps:remove(Mon, State);
         Bits2 ->
             State#{Mon := Bits2}

@@ -7,7 +7,7 @@
 -export([long_call/2, long_call/3]).
 -export([async_operation/2]).
 -export([sync_operation/2]).
--export([wait_response/2]).
+-export([reply/2]).
 
 -type request_id() :: cets:request_id().
 -type op() :: cets:op().
@@ -45,30 +45,11 @@ long_call(Server, Msg, Info) ->
 %% to keep monitoring the local gen_server till all responses are received).
 -spec async_operation(server_ref(), op()) -> request_id().
 async_operation(Server, Msg) ->
-    Mon = erlang:monitor(process, Server, [{alias, demonitor}]),
-    %% It could be call now
-    gen_server:cast(Server, {op, {Mon, self()}, Msg}),
-    Mon.
+    gen_server:send_request(Server, {op, Msg}).
 
 -spec sync_operation(server_ref(), op()) -> ok.
 sync_operation(Server, Msg) ->
-    Mon = async_operation(Server, Msg),
-    %% We monitor the local server until the response from all servers is collected.
-    wait_response(Mon, infinity).
-
-%% This function must be called to receive the result of the multinode operation.
--spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
-wait_response(Mon, Timeout) ->
-    receive
-        {cets_ok, Mon} ->
-            erlang:demonitor(Mon, [flush]),
-            ok;
-        {'DOWN', Mon, process, _Pid, Reason} ->
-            error({cets_down, Reason})
-    after Timeout ->
-        erlang:demonitor(Mon, [flush]),
-        error(timeout)
-    end.
+    gen_server:call(Server, {op, Msg}).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
@@ -76,3 +57,7 @@ where(Name) when is_atom(Name) -> whereis(Name);
 where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
+
+reply(Alias, Reply) ->
+    %% Pid part is not used
+    gen_server:reply({x, [alias | Alias]}, Reply).
