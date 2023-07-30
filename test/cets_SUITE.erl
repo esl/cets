@@ -24,6 +24,7 @@ all() ->
         join_fails_before_apply_dump,
         join_fails_before_apply_dump_with_partial_apply,
         join_fails_then_pending_ops_are_filtered,
+        join_fails_after_got_dump_because_gets_unpaused,
         join_fails_then_old_alias_is_disabled,
         pending_aliases_are_removed_after_unpause,
         apply_dump_with_unknown_dump_ref_would_be_ignored,
@@ -325,6 +326,27 @@ join_fails_then_pending_ops_are_filtered(Config) ->
     {ok, [{p2}]} = cets:remote_dump(Pid2),
     {ok, [{p1}, {p3}]} = cets:remote_dump(Pid3),
     {ok, [{p4}]} = cets:remote_dump(Pid4).
+
+join_fails_after_got_dump_because_gets_unpaused(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (got_dump) ->
+            #{pause_monitors := [PauseRef]} = cets:info(Pid1),
+            cets:unpause(Pid1, PauseRef),
+            Me ! got_dump;
+        (_) ->
+            ok
+    end,
+    {error, {error, {assert_paused, Pid1, local}, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(got_dump),
+    %% Servers are not connected
+    ok = cets:insert(Pid1, {1}),
+    ok = cets:insert(Pid2, {2}),
+    {ok, [{1}]} = cets:remote_dump(Pid1),
+    {ok, [{2}]} = cets:remote_dump(Pid2).
 
 join_fails_then_old_alias_is_disabled(Config) ->
     Me = self(),

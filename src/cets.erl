@@ -642,6 +642,7 @@ handle_get_info(
         just_dests := Dests,
         ack_pid := AckPid,
         pending_aliases := PendingAliases,
+        pause_monitors := PauseRefs,
         opts := Opts
     }
 ) ->
@@ -653,6 +654,7 @@ handle_get_info(
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
         pending_aliases => PendingAliases,
+        pause_monitors => PauseRefs,
         opts => Opts
     },
     {reply, Info, State}.

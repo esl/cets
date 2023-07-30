@@ -96,9 +96,10 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     ok = cets:sync(RemotePid),
     {ok, LocalDump} = cets:remote_or_local_dump(LocalPid),
     {ok, RemoteDump} = cets:remote_or_local_dump(RemotePid),
+    run_step(got_dump, Opts),
     %% Check that we haven't unpaused for some reason while making a dump
-    true = cets:is_paused(LocalPid, maps:get(LocalPid, Pid2PauseRef)),
-    true = cets:is_paused(RemotePid, maps:get(RemotePid, Pid2PauseRef)),
+    assert_paused(LocalPid, Pid2PauseRef, local),
+    assert_paused(RemotePid, Pid2PauseRef, remote),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
@@ -209,6 +210,15 @@ apply_resolver_for_sorted(
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
+
+assert_paused(Pid, Pid2PauseRef, Info) ->
+    PauseRef = maps:get(Pid, Pid2PauseRef),
+    case cets:is_paused(Pid, PauseRef) of
+        true ->
+            ok;
+        false ->
+            error({assert_paused, Pid, Info})
+    end.
 
 run_step(Step, #{step_handler := F}) ->
     F(Step);
