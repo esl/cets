@@ -58,7 +58,7 @@ init(_) ->
     State = #{},
     {ok, State}.
 
--spec handle_call(term(), _, state()) -> {reply, state()}.
+-spec handle_call(term(), _From, state()) -> {reply, state()}.
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -70,7 +70,7 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({ack, Mon, Mask}, State) ->
     {noreply, handle_updated(Mon, Mask, State)};
-handle_info({add, Mon, Bits}, State) when is_reference(Mon) ->
+handle_info({add, Mon, Bits}, State) ->
     {noreply, maps:put(Mon, Bits, State)};
 handle_info({cets_remote_down, Num}, State) ->
     {noreply, handle_remote_down(Num, State)};
@@ -97,11 +97,8 @@ send_down_all(Mon, _Val) when is_reference(Mon) ->
 -spec handle_remote_down(integer(), state()) -> state().
 handle_remote_down(Num, State) ->
     Mask = cets_bits:unset_flag_mask(Num),
-    maps:fold(
-        fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V) end,
-        State,
-        State
-    ).
+    F = fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V) end,
+    maps:fold(F, State, State).
 
 -spec handle_updated(reference(), integer(), state()) -> state().
 handle_updated(Mon, Mask, State) ->
