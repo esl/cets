@@ -43,12 +43,12 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
-handle_info({cets_updated, Mon, Num}, State) when is_reference(Mon) ->
-    {noreply, handle_updated(Mon, Num, State)};
+handle_info({cets_updated, Mon, Mask}, State) ->
+    {noreply, handle_updated(Mon, Mask, State)};
 handle_info({Mon, Bits}, State) when is_reference(Mon) ->
     {noreply, maps:put(Mon, Bits, State)};
-handle_info({cets_remote_down, Num}, State) ->
-    {noreply, handle_remote_down(Num, State)};
+handle_info({cets_remote_down, Mask}, State) ->
+    {noreply, handle_remote_down(Mask, State)};
 handle_info(erase, State) ->
     {noreply, handle_erase(State)};
 handle_info(Msg, State) ->
@@ -70,22 +70,22 @@ send_down_all(Mon, _Val) when is_reference(Mon) ->
 send_down_all(_Key, _Val) ->
     true.
 
-handle_remote_down(Num, State) ->
-    maps:fold(fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Num, Acc, V); (_, _, Acc) -> Acc end, State, State).
+handle_remote_down(Mask, State) ->
+    maps:fold(fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V); (_, _, Acc) -> Acc end, State, State).
 
-handle_updated(Mon, Num, State) ->
-    handle_updated(Mon, Num, State, maps:get(Mon, State, false)).
+handle_updated(Mon, Mask, State) ->
+    handle_updated(Mon, Mask, State, maps:get(Mon, State, false)).
 
-handle_updated(Mon, Num, State, Bits) when is_integer(Bits) ->
-    case unset_flag(Num, Bits) of
+handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
+    case apply_mask(Mask, Bits) of
         0 ->
             Mon ! {cets_ok, Mon},
             maps:remove(Mon, State);
         Bits2 ->
             State#{Mon := Bits2}
     end;
-handle_updated(Mon, Num, State, false) ->
+handle_updated(_Mon, _Mask, State, false) ->
     {noreply, State}.
 
-unset_flag(Pos, Bits) ->
-    Bits band (bnot (1 bsl Pos)).
+apply_mask(Mask, Bits) ->
+    Bits band Mask.

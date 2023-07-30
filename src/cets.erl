@@ -87,6 +87,7 @@
     | {global, term()}
     | {via, module(), term()}.
 -type server_num() :: pos_integer().
+-type server_mask() :: integer().
 -type request_id() :: reference().
 -type op() ::
     {insert, tuple()}
@@ -105,6 +106,7 @@
     tab := table_name(),
     mon_pid := pid(),
     server_num := server_num(),
+    server_mask := server_mask(),
     server_nums := server_nums(),
     other_servers := [server_tuple()],
     remote_bits := non_neg_integer(),
@@ -325,6 +327,7 @@ init({Tab, Opts}) ->
         tab => Tab,
         mon_pid => MonPid,
         server_num => 0,
+        server_mask => unset_flag_mask(0),
         server_nums => #{self() => 0},
         remote_bits => 0,
         other_servers => [],
@@ -412,8 +415,10 @@ handle_apply_dump(
     Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}
 ) ->
     ets:insert(Tab, Dump),
+    Num = maps:get(self(), Nums),
     State2 = maps:remove(pending_dump, State#{
-        server_num := maps:get(self(), Nums),
+        server_num := Num,
+        server_mask := unset_flag_mask(Num),
         server_nums := Nums,
         last_applied_dump_ref := Ref
     }),
@@ -443,6 +448,9 @@ make_remote_bits(Pids, #{server_nums := Nums}) ->
 
 set_flag(Pos, Bits) ->
     Bits bor (1 bsl Pos).
+
+unset_flag_mask(Pos) ->
+    bnot (1 bsl Pos).
 
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -482,7 +490,7 @@ handle_down2(Mon, RemotePid, State = #{mon_pid := MonPid, other_servers := Serve
     end.
 
 notify_remote_down(Num, MonPid) ->
-    MonPid ! {cets_remote_down, Num},
+    MonPid ! {cets_remote_down, unset_flag_mask(Num)},
     ok.
 
 erase_mon_tab(#{mon_pid := MonPid}) ->
@@ -499,9 +507,9 @@ ets_delete_objects(Tab, Objects) ->
     [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
 
-reply_updated(Alias, ReplyTo, #{server_num := Num}) ->
+reply_updated(Alias, ReplyTo, #{server_mask := Mask}) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(ReplyTo, {cets_updated, Alias, Num}, [noconnect]).
+    erlang:send(ReplyTo, {cets_updated, Alias, Mask}, [noconnect]).
 
 send_to_remote(RemoteAlias, Msg) ->
     erlang:send(RemoteAlias, Msg, [noconnect]).
