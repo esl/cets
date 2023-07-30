@@ -436,7 +436,12 @@ handle_send_dump(M, State) ->
     {reply, ok, State#{pending_dump => M}}.
 
 handle_apply_dump(
-    Ref, State = #{tab := Tab, pending_dump := {send_dump, Ref, Nums, NewServers, Dump}}
+    Ref,
+    State = #{
+        tab := Tab,
+        pending_dump := {send_dump, Ref, Nums, NewServers, Dump},
+        ack_pid := AckPid
+    }
 ) ->
     ets:insert(Tab, Dump),
     Num = maps:get(self(), Nums),
@@ -451,7 +456,7 @@ handle_apply_dump(
     %% We don't expect a lot of records in cets_ack once we reached
     %% apply_dump step.
     %% We have to do it because we set new server_nums during the join procedure.
-    erase_ack_process(State),
+    cets_ack:erase(AckPid),
     {reply, ok, set_servers(NewServers, State2)};
 handle_apply_dump(_Ref, State) ->
     {reply, {error, unknown_dump_ref}, State}.
@@ -495,7 +500,7 @@ handle_down2(Mon, RemotePid, State = #{ack_pid := AckPid, other_servers := Serve
     case lists:keymember(Mon, 2, Servers) of
         true ->
             Num = server_pid_to_server_num(RemotePid, State),
-            notify_remote_down(Num, AckPid),
+            cets_ack:send_remote_down(AckPid, Num),
             call_user_handle_down(RemotePid, State),
             {noreply, remove_server(Mon, State)};
         false ->
@@ -507,13 +512,6 @@ handle_down2(Mon, RemotePid, State = #{ack_pid := AckPid, other_servers := Serve
             }),
             {noreply, State}
     end.
-
-notify_remote_down(Num, AckPid) ->
-    AckPid ! {cets_remote_down, cets_bits:unset_flag_mask(Num)},
-    ok.
-
-erase_ack_process(#{ack_pid := AckPid}) ->
-    AckPid ! erase.
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -564,7 +562,7 @@ replicate(Alias, _Msg, #{remote_bits := 0}) ->
     %% Skip replication
     cets_call:reply(Alias, ok);
 replicate(Alias, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
-    AckPid ! {Alias, Bits},
+    cets_ack:add(AckPid, Alias, Bits),
     [send_to_remote(Dest, {remote_op, Dest, Alias, AckPid, Msg}) || Dest <- Dests],
     ok.
 

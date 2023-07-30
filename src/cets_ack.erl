@@ -3,7 +3,14 @@
 -module(cets_ack).
 -behaviour(gen_server).
 
--export([start_link/1]).
+%% API, called from cets module
+-export([
+    start_link/1,
+    add/3,
+    send_remote_down/2,
+    erase/1
+]).
+
 -export([
     init/1,
     handle_call/3,
@@ -22,13 +29,26 @@
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, false, []).
 
+-spec add(pid(), reference(), integer()) -> ok.
+add(AckPid, Alias, Bits) ->
+    AckPid ! {add, Alias, Bits},
+    ok.
+
+-spec send_remote_down(pid(), non_neg_integer()) -> ok.
+send_remote_down(AckPid, Num) ->
+    AckPid ! {cets_remote_down, Num},
+    ok.
+
+-spec erase(pid()) -> ok.
+erase(AckPid) ->
+    AckPid ! erase,
+    ok.
+
 init(_) ->
     State = #{},
     {ok, State}.
 
 -spec handle_call(term(), _, state()) -> {reply, state()}.
-handle_call(dump, _From, State) ->
-    {reply, State, State};
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -40,10 +60,10 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({ack, Mon, Mask}, State) ->
     {noreply, handle_updated(Mon, Mask, State)};
-handle_info({Mon, Bits}, State) when is_reference(Mon) ->
+handle_info({add, Mon, Bits}, State) when is_reference(Mon) ->
     {noreply, maps:put(Mon, Bits, State)};
-handle_info({cets_remote_down, Mask}, State) ->
-    {noreply, handle_remote_down(Mask, State)};
+handle_info({cets_remote_down, Num}, State) ->
+    {noreply, handle_remote_down(Num, State)};
 handle_info(erase, State) ->
     {noreply, handle_erase(State)};
 handle_info(Msg, State) ->
@@ -67,7 +87,8 @@ send_down_all(_Key, _Val) ->
     ok.
 
 -spec handle_remote_down(integer(), state()) -> state().
-handle_remote_down(Mask, State) ->
+handle_remote_down(Num, State) ->
+    Mask = cets_bits:unset_flag_mask(Num),
     maps:fold(
         fun
             (K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V);
