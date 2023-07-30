@@ -72,8 +72,8 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     #{opts := CetsOpts} = cets:info(LocalPid),
     %% Ensure that these two servers have processed any pending check_server requests
     %% and their other_pids list is fully updated
-    cets:sync(LocalPid),
-    cets:sync(RemotePid),
+    ok = cets:sync(LocalPid),
+    ok = cets:sync(RemotePid),
     LocalOtherPids = cets:other_pids(LocalPid),
     RemoteOtherPids = cets:other_pids(RemotePid),
     LocPids = [LocalPid | LocalOtherPids],
@@ -90,8 +90,8 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
     Ref = make_ref(),
-    cets:sync(LocalPid),
-    cets:sync(RemotePid),
+    ok = cets:sync(LocalPid),
+    ok = cets:sync(RemotePid),
     {ok, LocalDump} = remote_or_local_dump(LocalPid),
     {ok, RemoteDump} = remote_or_local_dump(RemotePid),
     {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
