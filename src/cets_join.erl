@@ -8,6 +8,7 @@
 -ignore_xref([join/5]).
 
 -type lock_key() :: term().
+-type pid_pid_alias() :: {pid(), pid(), reference()}.
 
 -spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) ->
@@ -108,7 +109,7 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     %% Reject getting the second dump if one is already pending.
     Send = fun(Pid, Dump) ->
         PauseRef = maps:get(Pid, Pid2PauseRef),
-        NewServers = aliases_for(Pid, Aliases),
+        NewServers = make_new_servers(Pid, Aliases),
         cets:send_dump(Pid, DumpRef, PauseRef, Nums, NewServers, Dump)
     end,
     RemF = fun(Pid) -> Send(Pid, LocalDump2) end,
@@ -145,25 +146,24 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
 
 %% Recreate all aliases
 %% So we apply don't receive new updates unless we have applied a data diff
+-spec make_aliases([pid()]) -> [pid_pid_alias()].
 make_aliases(AllPids) ->
-    %% Pid monitors Pid2
+    %% Pid monitors Pid2 using Alias as a monitor
+    %% Pid2 sends messages to Pid using Alias as a destination
     [
         {Pid, Pid2, Alias}
      || Pid <- AllPids,
         {Pid2, Alias} <- cets:make_aliases_for(Pid, lists:delete(Pid, AllPids))
     ].
 
-aliases_for(Pid, Aliases) ->
-    %% Pid monitors these:
-    PidMons = [{Pid2, Alias} || {Pid1, Pid2, Alias} <- Aliases, Pid =:= Pid1],
-    %% Pid we monitor
-    %% Monitor to detect that we the remote server is down
-    %% Alias to send messages from Pid to Pid2
+-spec make_new_servers(pid(), [pid_pid_alias()]) -> [cets:server_tuple()].
+make_new_servers(Pid, Aliases) ->
     [
-        {Pid2, Alias, find_destination(Pid, Pid2, Aliases)}
-     || {Pid2, Alias} <- PidMons
+        {Pid2, Mon, find_destination(Pid, Pid2, Aliases)}
+     || {Pid1, Pid2, Mon} <- Aliases, Pid =:= Pid1
     ].
 
+-spec find_destination(pid(), pid(), [pid_pid_alias(), ...]) -> reference().
 find_destination(Pid1, Pid2, [{Pid2, Pid1, Alias} | _]) ->
     Alias;
 find_destination(Pid1, Pid2, [_ | Aliases]) ->

@@ -179,7 +179,16 @@
     handle_conflict => handle_conflict_fun()
 }.
 
--export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0, called_from/0]).
+-export_type([
+    request_id/0,
+    op/0,
+    server_ref/0,
+    long_msg/0,
+    info/0,
+    table_name/0,
+    called_from/0,
+    server_tuple/0
+]).
 
 %% API functions
 
