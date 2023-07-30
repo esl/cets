@@ -101,20 +101,41 @@
 -type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference()}.
 -type server_nums() :: map().
 -type state() :: #{
+    %% ETS table to write data into
     tab := table_name(),
+    %% Process, that would receive acks from the remote nodes
     ack_pid := pid(),
+    %% Each node in cluster has an unique integer id.
+    %% Assigned in cets_join when joining the cluster.
+    %% Could be reassigned during another join.
     server_num := server_num(),
+    %% Mask to remove our server_num from a bitmask.
+    %% Used in cets_bits when collecting acks.
     server_mask := server_mask(),
+    %% Map to get server_num of other servers in the cluster.
+    %% Assigned during the cluster join.
     server_nums := server_nums(),
+    %% A list of remote servers.
+    %% Each server has a pid, a monitor and an alias to send messages.
+    %% Assigned during the cluster join.
     other_servers := [server_tuple()],
+    %% Bitfield with ones set for the remote server_nums.
     remote_bits := non_neg_integer(),
+    %% Pids from other_servers list.
     just_pids := [pid()],
+    %% Aliases from other_servers list.
     just_dests := [reference()],
     opts := start_opts(),
+    %% Pending operations collected when we are paused.
     backlog := [backlog_entry()],
+    %% Who are blocking us from writing into the table.
     pause_monitors := [pause_monitor()],
     %% Optional
+    %% We store dump between send_dump and apply_dump calls.
     pending_dump := send_dump_msg() | none(),
+    %% Reference assigned when joining.
+    %% All nodes in the cluster should have the same last_applied_dump_ref.
+    %% Verified in handle_check_server function.
     last_applied_dump_ref := reference()
 }.
 

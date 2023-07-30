@@ -81,8 +81,10 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     AllPids = LocPids ++ RemPids,
     run_step({all_pids_known, AllPids}, Opts),
     Aliases = make_aliases(AllPids),
+    %% Asign server_num for each server in the new cluster.
     Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
-    _Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    %% Ask processes to stop applying messages.
+    [true = is_reference(cets:pause(Pid)) || Pid <- AllPids],
     run_step(paused, Opts),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
@@ -92,17 +94,16 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     cets:sync(RemotePid),
     {ok, LocalDump} = remote_or_local_dump(LocalPid),
     {ok, RemoteDump} = remote_or_local_dump(RemotePid),
-    %% Should continue only if still paused
     {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
     %% Don't send dumps in parallel to not cause out-of-memory.
     %% It could be faster though.
+    %% We could check if pause reference is still valid here.
     RemF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
     LocF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
     lists:foreach(RemF, RemPids),
     lists:foreach(LocF, LocPids),
     %% We could do voting here and nodes would apply automatically once they receive
     %% ack that other nodes have the same dump pending.
-    %% Though it means more logic.
     ApplyMons = lists:map(
         fun(Pid) ->
             Num = maps:get(Pid, Nums),
