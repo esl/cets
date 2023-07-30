@@ -24,17 +24,13 @@
     reference() => pid()
 }.
 
-state_keys() -> [interval, timer_ref].
+state_keys() -> [].
 
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, false, []).
 
 init(_) ->
-    Interval = 30000,
-    State = #{
-        interval => Interval,
-        timer_ref => start_timer(Interval)
-    },
+    State = #{},
     {ok, State}.
 
 handle_call(dump, _From, State) ->
@@ -57,8 +53,6 @@ handle_info({cets_remote_down, Num}, State) ->
     {noreply, handle_remote_down(Num, State)};
 handle_info(erase, State) ->
     {noreply, handle_erase(State)};
-handle_info(check, State) ->
-    {noreply, handle_check(State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -68,32 +62,6 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
--spec schedule_check(state()) -> state().
-schedule_check(State = #{interval := Interval, timer_ref := OldRef}) ->
-    %% Match result to prevent the Dialyzer warning
-    _ = erlang:cancel_timer(OldRef),
-    flush_all_checks(),
-    State#{timer_ref := start_timer(Interval)}.
-
-flush_all_checks() ->
-    receive
-        check -> flush_all_checks()
-    after 0 -> ok
-    end.
-
-start_timer(Interval) ->
-    erlang:send_after(Interval, self(), check).
-
--spec handle_check(state()) -> state().
-handle_check(State) ->
-    State2 = maps:filter(fun check_filter/2, State),
-    schedule_check(State2).
-
-check_filter(Mon, Pid) when is_reference(Mon) ->
-    is_process_alive(Pid);
-check_filter(_Key, _Val) ->
-    true.
 
 handle_erase(State) ->
     maps:foreach(fun send_down_all/2, State),
