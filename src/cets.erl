@@ -97,8 +97,8 @@
     | {insert_many, [tuple()]}
     | {delete_many, [term()]}
     | {delete_objects, [term()]}.
--type from() :: {pid(), reference()}.
--type backlog_entry() :: {reference(), op()}.
+-type called_from() :: Alias :: reference() | {Pid :: pid, Mon :: reference()}.
+-type backlog_entry() :: {called_from(), op()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type server_tuple() :: {pid(), Monitor :: reference(), Dest :: reference()}.
@@ -177,7 +177,7 @@
     handle_conflict => handle_conflict_fun()
 }.
 
--export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
+-export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0, called_from/0]).
 
 %% API functions
 
@@ -373,17 +373,17 @@ init({Tab, Opts}) ->
         last_applied_dump_ref => make_ref()
     }}.
 
--spec handle_call(term(), from(), state()) ->
+-spec handle_call(term(), called_from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
-handle_call({op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := []}) ->
-    handle_op(Alias, Msg, State),
+handle_call({op, Msg}, From, State = #{pause_monitors := []}) ->
+    handle_op(cets_call:prepare_from(From), Msg, State),
     {noreply, State};
 handle_call(
-    {op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := [_ | _], backlog := Backlog}
+    {op, Msg}, From, State = #{pause_monitors := [_ | _], backlog := Backlog}
 ) ->
     %% Backlog is a list of pending operation, when our server is paused.
     %% The list would be applied, once our server is unpaused.
-    {noreply, State#{backlog := [{Alias, Msg} | Backlog]}};
+    {noreply, State#{backlog := [{cets_call:prepare_from(From), Msg} | Backlog]}};
 handle_call(other_pids, _From, State = #{just_pids := Pids}) ->
     {reply, Pids, State};
 handle_call({make_aliases_for, Pids}, _From, State) ->
@@ -565,20 +565,20 @@ do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op(Alias, Msg, State) ->
+handle_op(From, Msg, State) ->
     do_op(Msg, State),
-    replicate(Alias, Msg, State).
+    replicate(From, Msg, State).
 
-replicate(Alias, _Msg, #{remote_bits := 0}) ->
+replicate(From, _Msg, #{remote_bits := 0}) ->
     %% Skip replication
-    cets_call:reply(Alias);
-replicate(Alias, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
-    cets_ack:add(AckPid, Alias, Bits),
-    [send_to_remote(Dest, {remote_op, Dest, Alias, AckPid, Msg}) || Dest <- Dests],
+    cets_call:reply(From);
+replicate(From, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
+    cets_ack:add(AckPid, From, Bits),
+    [send_to_remote(Dest, {remote_op, Dest, From, AckPid, Msg}) || Dest <- Dests],
     ok.
 
 apply_backlog(State = #{backlog := Backlog}) ->
-    [handle_op(Alias, Msg, State) || {Alias, Msg} <- lists:reverse(Backlog)],
+    [handle_op(From, Msg, State) || {From, Msg} <- lists:reverse(Backlog)],
     State#{backlog := []}.
 
 %% We support multiple pauses

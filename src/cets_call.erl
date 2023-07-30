@@ -7,6 +7,7 @@
 -export([long_call/2, long_call/3]).
 -export([async_operation/2]).
 -export([sync_operation/2]).
+-export([prepare_from/1]).
 -export([reply/1]).
 
 -type request_id() :: cets:request_id().
@@ -25,9 +26,9 @@ long_call(Server, Msg, Info) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
             Info2 = Info#{
-                remote_server => Server,
-                remote_pid => Pid,
-                remote_node => node(Pid)
+                server => Server,
+                pid => Pid,
+                node => node(Pid)
             },
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
             cets_long:run_safely(Info2, F);
@@ -44,7 +45,7 @@ async_operation(Server, Msg) ->
 
 -spec sync_operation(server_ref(), op()) -> ok.
 sync_operation(Server, Msg) ->
-    gen_server:call(Server, {op, Msg}).
+    gen_server:call(Server, {op, Msg}, infinity).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
@@ -53,6 +54,17 @@ where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
 
-reply(Alias) ->
+%% Optimization: make From record more compact
+-spec prepare_from(From :: tuple()) -> cets:called_from().
+prepare_from({_Pid, [alias | Alias]}) ->
+    Alias;
+prepare_from(From) ->
+    %% gen_server does not use references for calls that are waiting forever
+    From.
+
+-spec reply(cets:called_from()) -> ok.
+reply(Alias) when is_reference(Alias) ->
     %% Pid part is not used
-    gen_server:reply({x, [alias | Alias]}, ok).
+    gen_server:reply({x, [alias | Alias]}, ok);
+reply(From) ->
+    gen_server:reply(From, ok).

@@ -24,24 +24,24 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type state() :: #{
-    reference() => Mask :: integer()
+    cets:called_from() => Mask :: integer()
 }.
 
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, false, []).
 
--spec add(pid(), reference(), integer()) -> ok.
-add(AckPid, Alias, Bits) ->
-    AckPid ! {add, Alias, Bits},
+-spec add(pid(), cets:called_from(), integer()) -> ok.
+add(AckPid, From, Bits) ->
+    AckPid ! {add, From, Bits},
     ok.
 
 %% Called by a remote server after an operation is applied.
 %% Alias is an alias from the original gen_server:call made by a client.
 %% Mask identifies the remote server.
--spec ack(pid(), reference(), integer()) -> ok.
-ack(AckPid, Alias, Mask) ->
+-spec ack(pid(), cets:called_from(), integer()) -> ok.
+ack(AckPid, From, Mask) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(AckPid, {ack, Alias, Mask}, [noconnect]),
+    erlang:send(AckPid, {ack, From, Mask}, [noconnect]),
     ok.
 
 -spec send_remote_down(pid(), non_neg_integer()) -> ok.
@@ -68,10 +68,10 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({ack, Mon, Mask}, State) ->
-    {noreply, handle_updated(Mon, Mask, State)};
-handle_info({add, Mon, Bits}, State) ->
-    {noreply, maps:put(Mon, Bits, State)};
+handle_info({ack, From, Mask}, State) ->
+    {noreply, handle_updated(From, Mask, State)};
+handle_info({add, From, Bits}, State) ->
+    {noreply, maps:put(From, Bits, State)};
 handle_info({cets_remote_down, Num}, State) ->
     {noreply, handle_remote_down(Num, State)};
 handle_info(erase, State) ->
@@ -91,26 +91,26 @@ handle_erase(State) ->
     maps:foreach(fun send_down_all/2, State),
     #{}.
 
-send_down_all(Mon, _Val) when is_reference(Mon) ->
-    cets_call:reply(Mon).
+send_down_all(From, _Val) ->
+    cets_call:reply(From).
 
 -spec handle_remote_down(integer(), state()) -> state().
 handle_remote_down(Num, State) ->
     Mask = cets_bits:unset_flag_mask(Num),
-    F = fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V) end,
+    F = fun(From, Bits, Acc) -> handle_updated(From, Mask, Acc, Bits) end,
     maps:fold(F, State, State).
 
--spec handle_updated(reference(), integer(), state()) -> state().
-handle_updated(Mon, Mask, State) ->
-    handle_updated(Mon, Mask, State, maps:get(Mon, State, false)).
+-spec handle_updated(cets:called_from(), integer(), state()) -> state().
+handle_updated(From, Mask, State) ->
+    handle_updated(From, Mask, State, maps:get(From, State, false)).
 
-handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
+handle_updated(From, Mask, State, Bits) when is_integer(Bits) ->
     case cets_bits:apply_mask(Mask, Bits) of
         0 ->
-            cets_call:reply(Mon),
-            maps:remove(Mon, State);
+            cets_call:reply(From),
+            maps:remove(From, State);
         Bits2 ->
-            State#{Mon := Bits2}
+            State#{From := Bits2}
     end;
-handle_updated(_Mon, _Mask, State, false) ->
+handle_updated(_From, _Mask, State, false) ->
     State.
