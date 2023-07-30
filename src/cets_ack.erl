@@ -68,7 +68,14 @@ send_down_all(_Key, _Val) ->
     true.
 
 handle_remote_down(Mask, State) ->
-    maps:fold(fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V); (_, _, Acc) -> Acc end, State, State).
+    maps:fold(
+        fun
+            (K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V);
+            (_, _, Acc) -> Acc
+        end,
+        State,
+        State
+    ).
 
 handle_updated(Mon, Mask, State) ->
     handle_updated(Mon, Mask, State, maps:get(Mon, State, false)).

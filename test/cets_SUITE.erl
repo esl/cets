@@ -717,8 +717,8 @@ wait_response_fails_with_timeout(R) ->
 ensure_has_reply_message() ->
     receive
         %% From gen.erl
-        {[alias|Alias], _} ->
-           Alias
+        {[alias | Alias], _} ->
+            Alias
     after 0 -> ct:fail(no_incoming_reply)
     end.
 

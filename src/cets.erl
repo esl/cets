@@ -345,7 +345,9 @@ init({Tab, Opts}) ->
 handle_call({op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := []}) ->
     handle_op(Alias, Msg, State),
     {noreply, State};
-handle_call({op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
+handle_call(
+    {op, Msg}, {_, [alias | Alias]}, State = #{pause_monitors := [_ | _], backlog := Backlog}
+) ->
     %% Backlog is a list of pending operation, when our server is paused.
     %% The list would be applied, once our server is unpaused.
     {noreply, State#{backlog := [{Alias, Msg} | Backlog]}};
