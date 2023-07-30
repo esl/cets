@@ -7,7 +7,7 @@
 -export([long_call/2, long_call/3]).
 -export([async_operation/2]).
 -export([sync_operation/2]).
--export([reply/2]).
+-export([reply/1]).
 
 -type request_id() :: cets:request_id().
 -type op() :: cets:op().
@@ -53,6 +53,6 @@ where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
 
-reply(Alias, Reply) ->
+reply(Alias) ->
     %% Pid part is not used
-    gen_server:reply({x, [alias | Alias]}, Reply).
+    gen_server:reply({x, [alias | Alias]}, ok).

@@ -92,7 +92,7 @@ handle_erase(State) ->
     #{}.
 
 send_down_all(Mon, _Val) when is_reference(Mon) ->
-    cets_call:reply(Mon, ok).
+    cets_call:reply(Mon).
 
 -spec handle_remote_down(integer(), state()) -> state().
 handle_remote_down(Num, State) ->
@@ -107,7 +107,7 @@ handle_updated(Mon, Mask, State) ->
 handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
     case cets_bits:apply_mask(Mask, Bits) of
         0 ->
-            cets_call:reply(Mon, ok),
+            cets_call:reply(Mon),
             maps:remove(Mon, State);
         Bits2 ->
             State#{Mon := Bits2}

@@ -569,7 +569,7 @@ handle_op(Alias, Msg, State) ->
 
 replicate(Alias, _Msg, #{remote_bits := 0}) ->
     %% Skip replication
-    cets_call:reply(Alias, ok);
+    cets_call:reply(Alias);
 replicate(Alias, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
     cets_ack:add(AckPid, Alias, Bits),
     [send_to_remote(Dest, {remote_op, Dest, Alias, AckPid, Msg}) || Dest <- Dests],
