@@ -45,10 +45,8 @@ handle_cast(Msg, State) ->
 
 handle_info({cets_updated, Mon, Num}, State) when is_reference(Mon) ->
     {noreply, handle_updated(Mon, Num, State)};
-handle_info({{Mon, Pid}, Bits}, State) when is_reference(Mon) ->
-    {noreply, maps:put(Mon, {Pid, Bits}, State)};
-handle_info(Mon, State) when is_reference(Mon) ->
-    {noreply, maps:remove(Mon, State)};
+handle_info({Mon, Bits}, State) when is_reference(Mon) ->
+    {noreply, maps:put(Mon, Bits, State)};
 handle_info({cets_remote_down, Num}, State) ->
     {noreply, handle_remote_down(Num, State)};
 handle_info(erase, State) ->
@@ -67,30 +65,24 @@ handle_erase(State) ->
     maps:foreach(fun send_down_all/2, State),
     maps:with(state_keys(), State).
 
-send_down_all(Mon, _Pid) when is_reference(Mon) ->
-    Mon ! {cets_remote_down, Mon, all};
+send_down_all(Mon, _Val) when is_reference(Mon) ->
+    Mon ! {cets_ok, Mon};
 send_down_all(_Key, _Val) ->
     true.
 
 handle_remote_down(Num, State) ->
-    maps:foreach(fun(K, V) -> send_remote_down(K, V, Num) end, State),
-    State.
-
-send_remote_down(Mon, _Pid, Num) when is_reference(Mon) ->
-    Mon ! {cets_remote_down, Mon, Num};
-send_remote_down(_Key, _Val, _Num) ->
-    true.
+    maps:fold(fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Num, Acc, V); (_, _, Acc) -> Acc end, State, State).
 
 handle_updated(Mon, Num, State) ->
     handle_updated(Mon, Num, State, maps:get(Mon, State, false)).
 
-handle_updated(Mon, Num, State, {Pid, Bits}) ->
+handle_updated(Mon, Num, State, Bits) when is_integer(Bits) ->
     case unset_flag(Num, Bits) of
         0 ->
             Mon ! {cets_ok, Mon},
             maps:remove(Mon, State);
         Bits2 ->
-            State#{Mon := {Pid, Bits2}}
+            State#{Mon := Bits2}
     end;
 handle_updated(Mon, Num, State, false) ->
     {noreply, State}.

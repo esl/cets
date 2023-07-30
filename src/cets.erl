@@ -535,13 +535,13 @@ handle_op(From = {_Mon, Pid}, Msg, State) when is_pid(Pid) ->
 %   Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate({Alias, _} = From, Msg, #{just_dests := []}) ->
-    Alias ! {cets_ok, Alias};
-replicate({Alias, _} = From, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
-    MonPid ! {From, Bits},
+replicate({Alias, _} = From, Msg, #{mon_pid := MonPid, just_dests := [_|_] = Dests, remote_bits := Bits}) ->
+    MonPid ! {Alias, Bits},
     %% Reply would be routed directly to FromPid
     [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
-    ok.
+    ok;
+replicate({Alias, _} = From, Msg, #{just_dests := []}) ->
+    Alias ! {cets_ok, Alias}.
 %   {Bits, MonPid}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
