@@ -36,7 +36,7 @@ all() ->
         unpause_when_pause_owner_crashes,
         unpause_twice,
         write_returns_if_remote_server_crashes,
-        mon_cleaner_stops_correctly,
+        ack_process_stops_correctly,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -48,7 +48,7 @@ all() ->
         insert_into_keypos_table,
         info_contains_opts,
         wait_for_updated_timeout,
-        updated_is_not_received_after_timeout,
+        updated_is_received_after_timeout,
         remote_down_is_not_received_after_timeout,
         unknown_alias_in_check_server_message
     ].
@@ -541,8 +541,8 @@ write_returns_if_remote_server_crashes(_Config) ->
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
 
-mon_cleaner_stops_correctly(_Config) ->
-    {ok, Pid} = cets:start(cleaner_stops, #{}),
+ack_process_stops_correctly(_Config) ->
+    {ok, Pid} = cets:start(ack_stops, #{}),
     #{mon_pid := MonPid} = cets:info(Pid),
     MonMon = monitor(process, MonPid),
     cets:stop(Pid),
@@ -629,7 +629,7 @@ wait_for_updated_timeout(Config) ->
     pong = cets:ping(Pid1),
     wait_response_fails_with_timeout(R).
 
-updated_is_not_received_after_timeout(Config) ->
+updated_is_received_after_timeout(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
     ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
@@ -639,7 +639,9 @@ updated_is_not_received_after_timeout(Config) ->
     sys:resume(Pid2),
     %% Ensure that cets_updated message reaches us and filtered out
     cets:ping(Pid2),
-    ensure_no_updated_message().
+    #{mon_pid := MonPid} = cets:info(Pid2),
+    sys:get_state(MonPid),
+    R = ensure_has_reply_message().
 
 remote_down_is_not_received_after_timeout(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
@@ -652,11 +654,6 @@ remote_down_is_not_received_after_timeout(Config) ->
     exit(Pid2, kill),
     receive_down_for_monitor(Ref),
     cets:ping(Pid1),
-    %% The main reason we don't receive the message is that
-    %% we've demonitored after wait_response failed.
-    %% And cets_mon_cleaner would try to respond to our invalidated alias.
-    %% Though, cets_mon_cleaner would probably receive delete request for
-    %% the alias before.
     ensure_no_down_message().
 
 unknown_alias_in_check_server_message(Config) ->
@@ -717,16 +714,17 @@ wait_response_fails_with_timeout(R) ->
         error:timeout -> ok
     end.
 
-ensure_no_updated_message() ->
+ensure_has_reply_message() ->
     receive
-        {cets_updated, _, _} ->
-            error(unexpected_updated)
-    after 0 -> ok
+        %% From gen.erl
+        {[alias|Alias], _} ->
+           Alias
+    after 0 -> ct:fail(no_incoming_reply)
     end.
 
 ensure_no_down_message() ->
     receive
-        {cets_remote_down, _, _} ->
+        {'DOWN', _, _, _, _} ->
             error(unexpected_remote_down)
     after 0 -> ok
     end.

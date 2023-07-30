@@ -325,7 +325,7 @@ init({Tab, Opts}) ->
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}, {read_concurrency, true}]),
     MonName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
-    {ok, MonPid} = cets_mon_cleaner:start_link(MonName),
+    {ok, MonPid} = cets_ack:start_link(MonName),
     {ok, #{
         tab => Tab,
         mon_pid => MonPid,

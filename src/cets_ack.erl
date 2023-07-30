@@ -1,9 +1,6 @@
-%% Monitor Table contains processes, that are waiting for writes to finish.
-%% It is usually cleaned automatically.
-%% Unless the caller process crashes.
-%% This server removes such entries from the MonTab.
-%% We don't expect the MonTab to be extremely big, so this check should be quick.
--module(cets_mon_cleaner).
+%% Contains processes, that are waiting for writes to finish.
+%% Collects acks from nodes in the cluster.
+-module(cets_ack).
 -behaviour(gen_server).
 
 -export([start_link/1]).

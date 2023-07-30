@@ -38,11 +38,6 @@ long_call(Server, Msg, Info) ->
 %% Contacts the local server to broadcast multinode operation.
 %% Returns immediately.
 %% You can wait for response from all nodes by calling wait_response/2.
-%% You would have to call wait_response/2 to process incoming messages and to remove the monitor
-%% (or the caller process can just exit to clean this up).
-%%
-%% (could not be implemented by an async gen_server:call, because we want
-%% to keep monitoring the local gen_server till all responses are received).
 -spec async_operation(server_ref(), op()) -> request_id().
 async_operation(Server, Msg) ->
     gen_server:send_request(Server, {op, Msg}).
