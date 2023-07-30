@@ -16,12 +16,8 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type state() :: #{
-    interval := non_neg_integer(),
-    timer_ref := reference(),
-    reference() => pid()
+    reference() => Mask :: integer()
 }.
-
-state_keys() -> [].
 
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, false, []).
@@ -30,8 +26,9 @@ init(_) ->
     State = #{},
     {ok, State}.
 
+-spec handle_call(term(), _, state()) -> {reply, state()}.
 handle_call(dump, _From, State) ->
-    {reply, maps:without(state_keys(), State), State};
+    {reply, State, State};
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -40,6 +37,7 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
+-spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({ack, Mon, Mask}, State) ->
     {noreply, handle_updated(Mon, Mask, State)};
 handle_info({Mon, Bits}, State) when is_reference(Mon) ->
@@ -58,15 +56,17 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec handle_erase(state()) -> state().
 handle_erase(State) ->
     maps:foreach(fun send_down_all/2, State),
-    maps:with(state_keys(), State).
+    #{}.
 
 send_down_all(Mon, _Val) when is_reference(Mon) ->
     cets_call:reply(Mon, ok);
 send_down_all(_Key, _Val) ->
-    true.
+    ok.
 
+-spec handle_remote_down(integer(), state()) -> state().
 handle_remote_down(Mask, State) ->
     maps:fold(
         fun
@@ -77,6 +77,7 @@ handle_remote_down(Mask, State) ->
         State
     ).
 
+-spec handle_updated(reference(), integer(), state()) -> state().
 handle_updated(Mon, Mask, State) ->
     handle_updated(Mon, Mask, State, maps:get(Mon, State, false)).
 
@@ -89,4 +90,4 @@ handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
             State#{Mon := Bits2}
     end;
 handle_updated(_Mon, _Mask, State, false) ->
-    {noreply, State}.
+    State.
