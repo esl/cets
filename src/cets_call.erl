@@ -45,17 +45,10 @@ long_call(Server, Msg, Info) ->
 %% to keep monitoring the local gen_server till all responses are received).
 -spec async_operation(server_ref(), op()) -> request_id().
 async_operation(Server, Msg) ->
-    case where(Server) of
-        Pid when is_pid(Pid) ->
-            Mon = erlang:monitor(process, Pid, [{alias, demonitor}]),
-            gen_server:cast(Server, {op, {Mon, self()}, Msg}),
-            Mon;
-        undefined ->
-            Mon = make_ref(),
-            %% Simulate process down
-            self() ! {'DOWN', Mon, process, undefined, pid_not_found},
-            Mon
-    end.
+    Mon = erlang:monitor(process, Server, [{alias, demonitor}]),
+    %% It could be call now
+    gen_server:cast(Server, {op, {Mon, self()}, Msg}),
+    Mon.
 
 -spec sync_operation(server_ref(), op()) -> ok.
 sync_operation(Server, Msg) ->
@@ -67,52 +60,15 @@ sync_operation(Server, Msg) ->
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
 wait_response(Mon, Timeout) ->
     receive
-        {'DOWN', Mon, process, _Pid, Reason} ->
-            error({cets_down, Reason});
         {cets_ok, Mon} ->
             erlang:demonitor(Mon, [flush]),
-            ok
-    after Timeout ->
-        erlang:demonitor(Mon, [flush]),
-        flush_messages(Mon),
-        error(timeout)
-    end.
-
-%% Wait for response from the remote nodes that the operation is completed.
-%% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Mon, {Servers, MonPid}, Timeout) ->
-    try
-        do_wait_for_updated(Mon, Servers, Timeout)
-    after
-        erlang:demonitor(Mon, [flush]),
-        MonPid ! Mon,
-        flush_messages(Mon)
-    end.
-
-do_wait_for_updated(_Mon, 0, _Timeout) ->
-    ok;
-do_wait_for_updated(Mon, Servers, Timeout) ->
-    receive
-        {cets_updated, Mon, Num} ->
-            %% A replication confirmation from the remote server is received
-            Servers2 = unset_flag(Num, Servers),
-            do_wait_for_updated(Mon, Servers2, Timeout);
-        {cets_remote_down, Mon, Num} ->
-            %% This message is sent by our local server when
-            %% the remote server is down condition is detected
-            Servers2 = unset_flag(Num, Servers),
-            do_wait_for_updated(Mon, Servers2, Timeout);
+            ok;
         {'DOWN', Mon, process, _Pid, Reason} ->
-            %% Local server is down, this is a critical error
             error({cets_down, Reason})
     after Timeout ->
+        erlang:demonitor(Mon, [flush]),
         error(timeout)
     end.
-
-unset_flag(all, _Bits) ->
-    0;
-unset_flag(Pos, Bits) ->
-    Bits band (bnot (1 bsl Pos)).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
@@ -120,13 +76,3 @@ where(Name) when is_atom(Name) -> whereis(Name);
 where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
-
-%% It is called after we unalias to flush all non-received messages
-%% from the message box
-%% (no new messages would be received after that though)
-flush_messages(Mon) ->
-    receive
-        {cets_updated, _Mon, _Num} -> flush_messages(Mon);
-        {cets_remote_down, _Mon, _Num} -> flush_messages(Mon)
-    after 0 -> ok
-    end.
