@@ -84,24 +84,41 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     %% Asign server_num for each server in the new cluster.
     Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
     %% Ask processes to stop applying messages.
-    [true = is_reference(cets:pause(Pid)) || Pid <- AllPids],
+    PauseRefs = [cets:pause(Pid) || Pid <- AllPids],
+    %% Check that we hae pause references
+    [] = [Reply || Reply <- PauseRefs, not is_reference(Reply)],
+    Pid2PauseRef = maps:from_list(lists:zip(AllPids, PauseRefs)),
     run_step(paused, Opts),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
-    Ref = make_ref(),
+    DumpRef = make_ref(),
     ok = cets:sync(LocalPid),
     ok = cets:sync(RemotePid),
     {ok, LocalDump} = cets:remote_or_local_dump(LocalPid),
     {ok, RemoteDump} = cets:remote_or_local_dump(RemotePid),
+    %% Check that we haven't unpaused for some reason while making a dump
+    true = cets:is_paused(LocalPid, maps:get(LocalPid, Pid2PauseRef)),
+    true = cets:is_paused(RemotePid, maps:get(RemotePid, Pid2PauseRef)),
     {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
     %% Don't send dumps in parallel to not cause out-of-memory.
     %% It could be faster though.
-    %% We could check if pause reference is still valid here.
-    RemF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), LocalDump2) end,
-    LocF = fun(Pid) -> cets:send_dump(Pid, Ref, Nums, aliases_for(Pid, Aliases), RemoteDump2) end,
-    lists:foreach(RemF, RemPids),
-    lists:foreach(LocF, LocPids),
+    %% Check that pause reference is still valid here.
+    %% Reject getting the second dump if one is already pending.
+    Send = fun(Pid, Dump) ->
+        PauseRef = maps:get(Pid, Pid2PauseRef),
+        NewServers = aliases_for(Pid, Aliases),
+        cets:send_dump(Pid, DumpRef, PauseRef, Nums, NewServers, Dump)
+    end,
+    RemF = fun(Pid) -> Send(Pid, LocalDump2) end,
+    LocF = fun(Pid) -> Send(Pid, RemoteDump2) end,
+    SendResults = lists:map(LocF, LocPids) ++ lists:map(RemF, RemPids),
+    case lists:usort(SendResults) of
+        [ok] ->
+            ok;
+        _ ->
+            ?LOG_ERROR(#{what => join_send_dump_failed, all_pids => AllPids, results => SendResults})
+    end,
     %% We could do voting here and nodes would apply automatically once they receive
     %% ack that other nodes have the same dump pending.
     ApplyMons = lists:map(
@@ -109,7 +126,7 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
             Num = maps:get(Pid, Nums),
             run_step({before_apply_dump, Num, Pid}, Opts),
             %% Do apply_dump in parallel to improve performance
-            spawn_monitor(fun() -> cets:apply_dump(Pid, Ref) end)
+            spawn_monitor(fun() -> ok = cets:apply_dump(Pid, DumpRef) end)
         end,
         AllPids
     ),

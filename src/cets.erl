@@ -27,7 +27,7 @@
     dump/1,
     remote_dump/1,
     remote_or_local_dump/1,
-    send_dump/5,
+    send_dump/6,
     apply_dump/2,
     table_name/1,
     other_nodes/1,
@@ -35,6 +35,7 @@
     make_aliases_for/2,
     pause/1,
     unpause/2,
+    is_paused/2,
     sync/1,
     ping/1,
     info/1,
@@ -64,7 +65,6 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
-    pause/1,
     unpause/2,
     sync/1,
     ping/1,
@@ -143,8 +143,8 @@
 }.
 
 -type send_dump_msg() ::
-    {send_dump, DumpRef :: reference(), Nums :: server_nums(), NewServers :: [server_tuple()],
-        Dump :: [tuple()]}.
+    {send_dump, DumpRef :: reference(), PauseRef :: reference(), Nums :: server_nums(),
+        NewServers :: [server_tuple()], Dump :: [tuple()]}.
 
 -type long_msg() ::
     pause
@@ -232,10 +232,11 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), reference(), server_nums(), [server_tuple()], [tuple()]) -> ok.
-send_dump(Server, DumpRef, Nums, NewServers, OurDump) ->
+-spec send_dump(server_ref(), reference(), reference(), server_nums(), [server_tuple()], [tuple()]) ->
+    ok.
+send_dump(Server, DumpRef, PauseRef, Nums, NewServers, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, DumpRef, Nums, NewServers, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, DumpRef, PauseRef, Nums, NewServers, OurDump}, Info).
 
 -spec apply_dump(server_ref(), reference()) -> ok.
 apply_dump(Server, Ref) ->
@@ -324,6 +325,10 @@ pause(Server) ->
 unpause(Server, PauseRef) ->
     cets_call:long_call(Server, {unpause, PauseRef}).
 
+-spec is_paused(server_ref(), pause_monitor()) -> boolean().
+is_paused(Server, PauseRef) ->
+    cets_call:long_call(Server, {is_paused, PauseRef}).
+
 %% Waits till all pending operations are applied.
 -spec sync(server_ref()) -> ok.
 sync(Server) ->
@@ -405,8 +410,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, dump(Tab)) end),
     {noreply, State};
-handle_call({send_dump, _Ref, _Nums, _NewServers, _Dump} = M, _From, State) ->
-    handle_send_dump(M, State);
+handle_call({send_dump, _DumpRef, PauseRef, _Nums, _NewServers, _Dump} = Msg, _From, State) ->
+    handle_send_dump(PauseRef, Msg, State);
 handle_call({apply_dump, Ref}, _From, State) ->
     handle_apply_dump(Ref, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
@@ -415,6 +420,8 @@ handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     {reply, Mon, State#{pause_monitors := [Mon | Mons]}};
 handle_call({unpause, Ref}, _From, State) ->
     handle_unpause(Ref, State);
+handle_call({is_paused, Ref}, _From, State = #{pause_monitors := Mons}) ->
+    {reply, lists:member(Ref, Mons), State};
 handle_call(get_info, _From, State) ->
     handle_get_info(State).
 
@@ -444,14 +451,23 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
-handle_send_dump(M, State) ->
-    {reply, ok, State#{pending_dump => M}}.
+handle_send_dump(_PauseRef, _Msg, State = #{pending_dump := _}) ->
+    ?LOG_ERROR(#{what => already_have_pending_dump}),
+    {reply, {error, already_have_pending_dump}, State};
+handle_send_dump(PauseRef, Msg, State = #{pause_monitors := PauseRefs}) ->
+    case lists:member(PauseRef, PauseRefs) of
+        true ->
+            ?LOG_INFO(#{what => received_pending_dump}),
+            {reply, ok, State#{pending_dump => Msg}};
+        false ->
+            {reply, {error, unknown_pause_monitor}, State}
+    end.
 
 handle_apply_dump(
     DumpRef,
     State = #{
         tab := Tab,
-        pending_dump := {send_dump, DumpRef, Nums, NewServers, Dump},
+        pending_dump := {send_dump, DumpRef, _PauseRef, Nums, NewServers, Dump},
         ack_pid := AckPid
     }
 ) ->
