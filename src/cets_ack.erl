@@ -81,7 +81,7 @@ handle_updated(Mon, Mask, State) ->
     handle_updated(Mon, Mask, State, maps:get(Mon, State, false)).
 
 handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
-    case apply_mask(Mask, Bits) of
+    case cets_bits:apply_mask(Mask, Bits) of
         0 ->
             cets_call:reply(Mon, ok),
             maps:remove(Mon, State);
@@ -90,6 +90,3 @@ handle_updated(Mon, Mask, State, Bits) when is_integer(Bits) ->
     end;
 handle_updated(_Mon, _Mask, State, false) ->
     {noreply, State}.
-
-apply_mask(Mask, Bits) ->
-    Bits band Mask.

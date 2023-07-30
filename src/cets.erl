@@ -328,7 +328,7 @@ init({Tab, Opts}) ->
         tab => Tab,
         ack_pid => AckPid,
         server_num => 0,
-        server_mask => unset_flag_mask(0),
+        server_mask => cets_bits:unset_flag_mask(0),
         server_nums => #{self() => 0},
         remote_bits => 0,
         other_servers => [],
@@ -421,14 +421,15 @@ handle_apply_dump(
     Num = maps:get(self(), Nums),
     State2 = maps:remove(pending_dump, State#{
         server_num := Num,
-        server_mask := unset_flag_mask(Num),
+        server_mask := cets_bits:unset_flag_mask(Num),
         server_nums := Nums,
         last_applied_dump_ref := Ref
     }),
-    %% We need to clean cets_ack process to avoid possible infinite waiting
-    %% Though, we don't expect a lot of record in the table once we reached
-    %% apply_dump step
-    %% We have to do it because we set new server_nums
+    %% We need to clean cets_ack process to avoid possible infinite
+    %% gen_server:wait_response/2 calls from the client.
+    %% We don't expect a lot of records in cets_ack once we reached
+    %% apply_dump step.
+    %% We have to do it because we set new server_nums during the join procedure.
     erase_ack_process(State),
     {reply, ok, set_servers(NewServers, State2)};
 handle_apply_dump(_Ref, State) ->
@@ -447,13 +448,7 @@ set_servers(Servers, State) ->
 %% Make a bitmask with bits set to 1 for still alive remote servers
 make_remote_bits(Pids, #{server_nums := Nums}) ->
     RemoteNums = [Num || {Pid, Num} <- maps:to_list(Nums), lists:member(Pid, Pids)],
-    lists:foldl(fun set_flag/2, 0, RemoteNums).
-
-set_flag(Pos, Bits) ->
-    Bits bor (1 bsl Pos).
-
-unset_flag_mask(Pos) ->
-    bnot (1 bsl Pos).
+    lists:foldl(fun cets_bits:set_flag/2, 0, RemoteNums).
 
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -493,7 +488,7 @@ handle_down2(Mon, RemotePid, State = #{ack_pid := AckPid, other_servers := Serve
     end.
 
 notify_remote_down(Num, AckPid) ->
-    AckPid ! {cets_remote_down, unset_flag_mask(Num)},
+    AckPid ! {cets_remote_down, cets_bits:unset_flag_mask(Num)},
     ok.
 
 erase_ack_process(#{ack_pid := AckPid}) ->
