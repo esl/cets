@@ -69,8 +69,9 @@ wait_response(Mon, Timeout) ->
     receive
         {'DOWN', Mon, process, _Pid, Reason} ->
             error({cets_down, Reason});
-        {cets_reply, Mon, WaitInfo} ->
-            wait_for_updated(Mon, WaitInfo, Timeout)
+        {cets_ok, Mon} ->
+            erlang:demonitor(Mon, [flush]),
+            ok
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
         flush_messages(Mon),

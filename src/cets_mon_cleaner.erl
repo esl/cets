@@ -47,8 +47,10 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
-handle_info({Mon, Pid}, State) when is_reference(Mon) ->
-    {noreply, maps:put(Mon, Pid, State)};
+handle_info({cets_updated, Mon, Num}, State) when is_reference(Mon) ->
+    {noreply, handle_updated(Mon, Num, State)};
+handle_info({{Mon, Pid}, Bits}, State) when is_reference(Mon) ->
+    {noreply, maps:put(Mon, {Pid, Bits}, State)};
 handle_info(Mon, State) when is_reference(Mon) ->
     {noreply, maps:remove(Mon, State)};
 handle_info({cets_remote_down, Num}, State) ->
@@ -110,3 +112,20 @@ send_remote_down(Mon, _Pid, Num) when is_reference(Mon) ->
     Mon ! {cets_remote_down, Mon, Num};
 send_remote_down(_Key, _Val, _Num) ->
     true.
+
+handle_updated(Mon, Num, State) ->
+    handle_updated(Mon, Num, State, maps:get(Mon, State, false)).
+
+handle_updated(Mon, Num, State, {Pid, Bits}) ->
+    case unset_flag(Num, Bits) of
+        0 ->
+            Mon ! {cets_ok, Mon},
+            maps:remove(Mon, State);
+        Bits2 ->
+            State#{Mon := {Pid, Bits2}}
+    end;
+handle_updated(Mon, Num, State, false) ->
+    {noreply, State}.
+
+unset_flag(Pos, Bits) ->
+    Bits band (bnot (1 bsl Pos)).

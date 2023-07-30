@@ -38,6 +38,7 @@ all() ->
         write_returns_if_remote_server_crashes,
         mon_cleaner_works,
         mon_cleaner_stops_correctly,
+        mon_cleaner_erase_unsets_all_pending_replies,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,

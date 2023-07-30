@@ -1,3 +1,6 @@
 _build/
 # vim temporary files
-*.sw*
+.*.sw*
+.*.sv*
+rebar3.crashdump
+codecov.json

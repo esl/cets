@@ -388,8 +388,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, _Dest, Alias, Msg}, State) ->
-    handle_remote_op(Alias, Msg, State),
+handle_info({remote_op, _Dest, Alias, ReplyTo, Msg}, State) ->
+    handle_remote_op(Alias, Msg, ReplyTo, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, Reason}, State) ->
     handle_down(Mon, Pid, Reason, State);
@@ -499,17 +499,17 @@ ets_delete_objects(Tab, Objects) ->
     [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
 
-reply_updated(Alias, #{server_num := Num}) ->
+reply_updated(Alias, ReplyTo, #{server_num := Num}) ->
     %% nosuspend makes message sending unreliable
-    erlang:send(Alias, {cets_updated, Alias, Num}, [noconnect]).
+    erlang:send(ReplyTo, {cets_updated, Alias, Num}, [noconnect]).
 
 send_to_remote(RemoteAlias, Msg) ->
     erlang:send(RemoteAlias, Msg, [noconnect]).
 
 %% Handle operation from a remote node
-handle_remote_op(Alias, Msg, State) ->
+handle_remote_op(Alias, Msg, ReplyTo, State) ->
     do_op(Msg, State),
-    reply_updated(Alias, State).
+    reply_updated(Alias, ReplyTo, State).
 
 %% Apply operation for one local table only
 do_op(Msg, #{tab := Tab}) ->
@@ -529,17 +529,20 @@ do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
+handle_op(From = {_Mon, Pid}, Msg, State) when is_pid(Pid) ->
     do_op(Msg, State),
-    WaitInfo = replicate(From, Msg, State),
-    Pid ! {cets_reply, Mon, WaitInfo},
+    _WaitInfo = replicate(From, Msg, State),
+%   Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
+replicate({Alias, _} = From, Msg, #{just_dests := []}) ->
+    Alias ! {cets_ok, Alias};
 replicate({Alias, _} = From, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
+    MonPid ! {From, Bits},
     %% Reply would be routed directly to FromPid
-    [send_to_remote(Dest, {remote_op, Dest, Alias, Msg}) || Dest <- Dests],
-    MonPid ! From,
-    {Bits, MonPid}.
+    [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
+    ok.
+%   {Bits, MonPid}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
@@ -664,7 +667,7 @@ handle_check_server(Source, Mon, Dest, DumpRef, State = #{last_applied_dump_ref 
 %% Reject messages to the alias which are already in our message box
 flush_remote_ops(Dest) ->
     receive
-        {remote_op, Dest, _Alias, _Msg} ->
+        {remote_op, Dest, _Alias, _ReplyTo, _Msg} ->
             flush_remote_ops(Dest)
     after 0 ->
         ok
