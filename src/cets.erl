@@ -26,6 +26,7 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
+    remote_or_local_dump/1,
     send_dump/5,
     apply_dump/2,
     table_name/1,
@@ -206,17 +207,26 @@ start(Tab, Opts) when is_atom(Tab) ->
 stop(Server) ->
     gen_server:stop(Server).
 
--spec dump(table_name()) -> Records :: [tuple()].
+-spec dump(table_name()) -> {ok, Records :: [tuple()]}.
 dump(Tab) when is_atom(Tab) ->
-    ets:tab2list(Tab).
+    {ok, ets:tab2list(Tab)}.
 
 -spec remote_dump(server_ref()) -> {ok, Records :: [tuple()]}.
 remote_dump(Server) ->
     cets_call:long_call(Server, remote_dump).
 
--spec table_name(server_ref()) -> table_name().
+-spec remote_or_local_dump(pid()) -> {ok, Records :: [tuple()]}.
+remote_or_local_dump(Pid) when node(Pid) =:= node() ->
+    {ok, Tab} = cets:table_name(Pid),
+    %% Reduce copying
+    dump(Tab);
+remote_or_local_dump(Pid) ->
+    %% We actually need to ask the remote process
+    remote_dump(Pid).
+
+-spec table_name(server_ref()) -> {ok, table_name()}.
 table_name(Tab) when is_atom(Tab) ->
-    Tab;
+    {ok, Tab};
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
@@ -391,7 +401,7 @@ handle_call(table_name, _From, State = #{tab := Tab}) ->
     {reply, {ok, Tab}, State};
 handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
-    proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
+    proc_lib:spawn_link(fun() -> gen_server:reply(From, dump(Tab)) end),
     {noreply, State};
 handle_call({send_dump, _Ref, _Nums, _NewServers, _Dump} = M, _From, State) ->
     handle_send_dump(M, State);

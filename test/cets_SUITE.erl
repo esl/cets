@@ -167,9 +167,9 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_mo
     ok = cets_join:join(join_lock3_con, #{}, Pid1, Pid3),
     %% Key with the highest Number remains
     Dump = [{alice, 33}, {bob, 10}, {kate, 3}, {michal, 40}],
-    Dump = cets:dump(T1),
-    Dump = cets:dump(T2),
-    Dump = cets:dump(T3).
+    Dump = just_dump(T1),
+    Dump = just_dump(T2),
+    Dump = just_dump(T3).
 
 -record(user, {name, age, updated}).
 
@@ -456,8 +456,8 @@ test_locally(_Config) ->
     cets:insert(t1, {1}),
     cets:insert(t1, {1}),
     cets:insert(t2, {2}),
-    D = cets:dump(t1),
-    D = cets:dump(t2).
+    D = just_dump(t1),
+    D = just_dump(t2).
 
 handle_down_is_called(_Config) ->
     Parent = self(),
@@ -486,10 +486,10 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     cets:insert_request(T, {5}),
     R3 = cets:insert_request(T, [{6}, {7}]),
     R4 = cets:delete_many_request(T, [5, 4]),
-    [] = lists:sort(cets:dump(T)),
+    [] = lists:sort(just_dump(T)),
     ok = cets:unpause(Pid, PauseMon),
     [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
-    [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
+    [{2}, {3}, {6}, {7}] = lists:sort(just_dump(T)).
 
 pause_multiple_times(_Config) ->
     T = t5,
@@ -499,16 +499,16 @@ pause_multiple_times(_Config) ->
     Ref1 = cets:insert_request(Pid, {1}),
     Ref2 = cets:insert_request(Pid, {2}),
     %% No records yet, even after pong
-    [] = cets:dump(T),
+    [] = just_dump(T),
     ok = cets:unpause(Pid, PauseMon1),
     pong = cets:ping(Pid),
     %% No records yet, even after pong
-    [] = cets:dump(T),
+    [] = just_dump(T),
     ok = cets:unpause(Pid, PauseMon2),
     pong = cets:ping(Pid),
     cets:wait_response(Ref1, 5000),
     cets:wait_response(Ref2, 5000),
-    [{1}, {2}] = lists:sort(cets:dump(T)).
+    [{1}, {2}] = lists:sort(just_dump(T)).
 
 unpause_when_pause_owner_crashes(Config) ->
     Me = self(),
@@ -587,21 +587,21 @@ insert_into_bag(_Config) ->
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 2}),
-    [{1, 1}, {1, 2}] = lists:sort(cets:dump(T)).
+    [{1, 1}, {1, 2}] = lists:sort(just_dump(T)).
 
 delete_from_bag(_Config) ->
     T = b2,
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     cets:delete_object(T, {1, 2}),
-    [{1, 1}] = cets:dump(T).
+    [{1, 1}] = just_dump(T).
 
 delete_many_from_bag(_Config) ->
     T = b3,
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}, {1, 5}, {2, 3}]),
     cets:delete_objects(T, [{1, 2}, {1, 5}, {1, 4}]),
-    [{1, 1}, {1, 3}, {2, 3}] = lists:sort(cets:dump(T)).
+    [{1, 1}, {1, 3}, {2, 3}] = lists:sort(just_dump(T)).
 
 delete_request_from_bag(_Config) ->
     T = b4,
@@ -609,7 +609,7 @@ delete_request_from_bag(_Config) ->
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     R = cets:delete_object_request(T, {1, 2}),
     ok = cets:wait_response(R, 5000),
-    [{1, 1}] = cets:dump(T).
+    [{1, 1}] = just_dump(T).
 
 delete_request_many_from_bag(_Config) ->
     T = b5,
@@ -617,14 +617,14 @@ delete_request_many_from_bag(_Config) ->
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
     R = cets:delete_objects_request(T, [{1, 1}, {1, 3}]),
     ok = cets:wait_response(R, 5000),
-    [{1, 2}] = cets:dump(T).
+    [{1, 2}] = just_dump(T).
 
 insert_into_bag_is_replicated(_Config) ->
     {ok, Pid1} = cets:start(b6a, #{type => bag}),
     {ok, Pid2} = cets:start(T2 = b6b, #{type => bag}),
     ok = cets_join:join(join_lock_b6, #{}, Pid1, Pid2),
     cets:insert(Pid1, {1, 1}),
-    [{1, 1}] = cets:dump(T2).
+    [{1, 1}] = just_dump(T2).
 
 insert_into_keypos_table(_Config) ->
     T = kp1,
@@ -632,7 +632,7 @@ insert_into_keypos_table(_Config) ->
     cets:insert(T, {rec, 1}),
     cets:insert(T, {rec, 2}),
     [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
-    [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
+    [{rec, 1}, {rec, 2}] = lists:sort(just_dump(T)).
 
 info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
@@ -695,7 +695,8 @@ delete_many(Node, Tab, Keys) ->
     rpc(Node, cets, delete_many, [Tab, Keys]).
 
 dump(Node, Tab) ->
-    rpc(Node, cets, dump, [Tab]).
+    {ok, Records} = rpc(Node, cets, dump, [Tab]),
+    Records.
 
 other_nodes(Node, Tab) ->
     rpc(Node, cets, other_nodes, [Tab]).
@@ -776,3 +777,7 @@ join(Pid1, [Pid2 | Pids]) ->
     join(Pid1, Pids);
 join(_Pid1, []) ->
     ok.
+
+just_dump(Tab) ->
+    {ok, Records} = cets:dump(Tab),
+    Records.

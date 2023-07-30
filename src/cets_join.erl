@@ -92,8 +92,8 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     Ref = make_ref(),
     ok = cets:sync(LocalPid),
     ok = cets:sync(RemotePid),
-    {ok, LocalDump} = remote_or_local_dump(LocalPid),
-    {ok, RemoteDump} = remote_or_local_dump(RemotePid),
+    {ok, LocalDump} = cets:remote_or_local_dump(LocalPid),
+    {ok, RemoteDump} = cets:remote_or_local_dump(RemotePid),
     {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
     %% Don't send dumps in parallel to not cause out-of-memory.
     %% It could be faster though.
@@ -155,14 +155,6 @@ assert_aliases_are_different(Res) ->
 find_destination(Pid1, Pid2, Aliases) when Pid1 =/= Pid2 ->
     [Dest] = [Alias || {A, B, Alias} <- Aliases, A =:= Pid2, B =:= Pid1],
     Dest.
-
-remote_or_local_dump(Pid) when node(Pid) =:= node() ->
-    {ok, Tab} = cets:table_name(Pid),
-    %% Reduce copying
-    {ok, cets:dump(Tab)};
-remote_or_local_dump(Pid) ->
-    %% We actually need to ask the remote process
-    cets:remote_dump(Pid).
 
 maybe_apply_resolver(LocalDump, RemoteDump, Opts = #{handle_conflict := F}) ->
     Type = maps:get(type, Opts, ordered_set),
