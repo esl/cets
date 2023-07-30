@@ -108,9 +108,7 @@ join_works(_Config) ->
     ok = cets_join:join(join_lock1, #{}, Pid1, Pid2).
 
 other_pids_call_work_after_join(Config) ->
-    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
-    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    [Pid1, Pid2] = join(make_n_servers(2, Config)),
     [Pid2] = cets:other_pids(Pid1),
     [Pid1] = cets:other_pids(Pid2).
 
@@ -220,7 +218,7 @@ join_start_fails(Config) ->
         (_) -> ok
     end,
     {error, {error, sim_error, _}} =
-        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     [] = cets:other_pids(Pid1),
     [] = cets:other_pids(Pid2).
 
@@ -244,7 +242,7 @@ join_fails_before_apply_dump(Config) ->
             ok
     end,
     {error, {error, sim_error, _}} =
-        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(all_pids_known),
     %% Not joined, some data exchanged
     cets:sync(Pid1),
@@ -262,8 +260,8 @@ join_fails_before_apply_dump_with_partial_apply(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid4, #{}),
     [Pid3, Pid4] = cets:other_pids(Pid1),
     cets:insert(Pid1, {1}),
     cets:insert(Pid2, {2}),
@@ -278,7 +276,7 @@ join_fails_before_apply_dump_with_partial_apply(Config) ->
             ok
     end,
     {error, {error, sim_error, _}} =
-        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(all_pids_known),
     %% Not joined fully, some data exchanged
     [cets:sync(P) || P <- ExpectedAllPids],
@@ -296,8 +294,8 @@ join_fails_then_pending_ops_are_filtered(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid4, #{}),
     [Pid3, Pid4] = cets:other_pids(Pid1),
     ExpectedAllPids = [Pid1, Pid3, Pid4, Pid2],
     F = fun
@@ -316,7 +314,7 @@ join_fails_then_pending_ops_are_filtered(Config) ->
             ok
     end,
     {error, {error, sim_error, _}} =
-        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(all_pids_known),
     %% Not joined fully, some data exchanged
     [cets:sync(P) || P <- ExpectedAllPids],
@@ -329,8 +327,8 @@ join_fails_then_old_alias_is_disabled(Config) ->
     Me = self(),
     [Pid1, Pid2, Pid3, Pid4] = make_n_servers(4, Config),
     %% Pid1, Pid3, Pid4 are in the one network segment
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid3, #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid4, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3, #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid4, #{}),
     #{server_to_dest := #{Pid1 := Dest3to1}} = cets:info(Pid3),
     #{server_to_dest := #{Pid1 := Dest4to1}} = cets:info(Pid4),
     [Pid3, Pid4] = cets:other_pids(Pid1),
@@ -345,7 +343,7 @@ join_fails_then_old_alias_is_disabled(Config) ->
             ok
     end,
     {error, {error, sim_error, _}} =
-        cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(all_pids_known),
     %% Not joined fully, some data exchanged
     [cets:sync(P) || P <- ExpectedAllPids],
@@ -369,7 +367,7 @@ apply_dump_with_unknown_dump_ref_would_be_ignored(Config) ->
         (_) ->
             ok
     end,
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2, #{step_handler => F}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(before_apply_dump_called),
     %% Check that join is successful
     ok = cets:insert(Pid1, {1}),
@@ -543,8 +541,7 @@ write_returns_if_remote_server_crashes(_Config) ->
     ok = cets:wait_response(R, 5000).
 
 write_returns_if_local_ack_process_crashes(Config) ->
-    [Pid1, Pid2] = make_n_servers(2, Config),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    [Pid1, Pid2] = join(make_n_servers(2, Config)),
     sys:suspend(Pid2),
     #{ack_pid := AckPid} = cets:info(Pid1),
     R = cets:insert_request(Pid1, {1}),
@@ -634,9 +631,7 @@ info_contains_opts(_Config) ->
     #{opts := #{type := bag}} = cets:info(Pid).
 
 wait_for_updated_timeout(Config) ->
-    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
-    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    [Pid1, Pid2] = join(make_n_servers(2, Config)),
     %% Pause the remote server
     sys:suspend(Pid2),
     R = cets:insert_request(Pid1, {1}),
@@ -645,9 +640,7 @@ wait_for_updated_timeout(Config) ->
     wait_response_fails_with_timeout(R).
 
 updated_is_received_after_timeout(Config) ->
-    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
-    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    [Pid1, Pid2] = join(make_n_servers(2, Config)),
     sys:suspend(Pid2),
     R = cets:insert_request(Pid1, {1}),
     wait_response_fails_with_timeout(R),
@@ -659,9 +652,7 @@ updated_is_received_after_timeout(Config) ->
     R = ensure_has_reply_message().
 
 remote_down_is_not_received_after_timeout(Config) ->
-    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
-    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    ok = cets_join:join(make_name(Config, 0), #{}, Pid1, Pid2),
+    [Pid1, Pid2] = join(make_n_servers(2, Config)),
     sys:suspend(Pid2),
     R = cets:insert_request(Pid1, {1}),
     wait_response_fails_with_timeout(R),
@@ -767,3 +758,13 @@ make_n_servers(N, Config) ->
         end,
         lists:seq(1, N)
     ).
+
+join([H | T] = Pids) ->
+    join(H, T),
+    Pids.
+
+join(Pid1, [Pid2 | Pids]) ->
+    ok = cets_join:join(lockname, #{}, Pid1, Pid2),
+    join(Pid1, Pids);
+join(_Pid1, []) ->
+    ok.
