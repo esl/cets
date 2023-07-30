@@ -36,6 +36,7 @@ all() ->
         unpause_when_pause_owner_crashes,
         unpause_twice,
         write_returns_if_remote_server_crashes,
+        write_returns_if_local_ack_process_crashes,
         ack_process_stops_correctly,
         sync_using_name_works,
         insert_many_request,
@@ -541,6 +542,20 @@ write_returns_if_remote_server_crashes(_Config) ->
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
 
+write_returns_if_local_ack_process_crashes(Config) ->
+    [Pid1, Pid2] = make_n_servers(2, Config),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    R = cets:insert_request(Pid1, {1}),
+    exit(AckPid, oops),
+    try
+        cets:wait_response(R, 5000)
+    catch
+        error:{error, {oops, _}} ->
+            ok
+    end.
+
 ack_process_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(ack_stops, #{}),
     #{ack_pid := AckPid} = cets:info(Pid),
@@ -701,6 +716,9 @@ start_node(Sname) ->
     {ok, Node} = ct_slave:start(Sname, [{monitor_master, true}]),
     rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
+
+lock_name(Config) ->
+    make_name(Config, 0).
 
 make_name(Config, Num) ->
     Testcase = proplists:get_value(testcase, Config),
