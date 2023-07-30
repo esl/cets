@@ -637,7 +637,7 @@ updated_is_received_after_timeout(Config) ->
     R = cets:insert_request(Pid1, {1}),
     wait_response_fails_with_timeout(R),
     sys:resume(Pid2),
-    %% Ensure that cets_updated message reaches us and filtered out
+    %% Ensure that cets_ack processed the reply
     cets:ping(Pid2),
     #{ack_pid := AckPid} = cets:info(Pid2),
     sys:get_state(AckPid),

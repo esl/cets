@@ -40,7 +40,7 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
-handle_info({cets_updated, Mon, Mask}, State) ->
+handle_info({ack, Mon, Mask}, State) ->
     {noreply, handle_updated(Mon, Mask, State)};
 handle_info({Mon, Bits}, State) when is_reference(Mon) ->
     {noreply, maps:put(Mon, Bits, State)};
