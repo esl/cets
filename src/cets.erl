@@ -575,6 +575,7 @@ replicate(From, _Msg, #{remote_bits := 0}) ->
 replicate(From, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
     cets_ack:add(AckPid, From, Bits),
     [send_to_remote(Dest, {remote_op, Dest, From, AckPid, Msg}) || Dest <- Dests],
+    %% AckPid would call cets_call:reply(From) ones all the remote servers reply
     ok.
 
 apply_backlog(State = #{backlog := Backlog}) ->
