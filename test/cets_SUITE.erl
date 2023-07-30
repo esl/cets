@@ -543,11 +543,11 @@ write_returns_if_remote_server_crashes(_Config) ->
 
 ack_process_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(ack_stops, #{}),
-    #{mon_pid := MonPid} = cets:info(Pid),
-    MonMon = monitor(process, MonPid),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    AckMon = monitor(process, AckPid),
     cets:stop(Pid),
     receive
-        {'DOWN', MonMon, process, MonPid, normal} -> ok
+        {'DOWN', AckMon, process, AckPid, normal} -> ok
     after 5000 -> ct:fail(timeout)
     end.
 
@@ -639,8 +639,8 @@ updated_is_received_after_timeout(Config) ->
     sys:resume(Pid2),
     %% Ensure that cets_updated message reaches us and filtered out
     cets:ping(Pid2),
-    #{mon_pid := MonPid} = cets:info(Pid2),
-    sys:get_state(MonPid),
+    #{ack_pid := AckPid} = cets:info(Pid2),
+    sys:get_state(AckPid),
     R = ensure_has_reply_message().
 
 remote_down_is_not_received_after_timeout(Config) ->

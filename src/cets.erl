@@ -2,8 +2,6 @@
 %% One file, everything is simple, but we don't silently hide race conditions.
 %% No transactions support.
 %% We don't use rpc module, because it is a single gen_server.
-%% We use MonTab table instead of monitors to detect if one of remote servers
-%% is down and would not send a replication result.
 %% While Tab is an atom, we can join tables with different atoms for the local testing.
 %% We pause writes when a new node is joining (we resume them again). It is to
 %% ensure that all writes would be bulk copied.
@@ -104,7 +102,7 @@
 -type server_nums() :: map().
 -type state() :: #{
     tab := table_name(),
-    mon_pid := pid(),
+    ack_pid := pid(),
     server_num := server_num(),
     server_mask := server_mask(),
     server_nums := server_nums(),
@@ -142,7 +140,7 @@
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    mon_pid := pid(),
+    ack_pid := pid(),
     opts := start_opts()
 }.
 
@@ -324,11 +322,11 @@ init({Tab, Opts}) ->
     KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}, {read_concurrency, true}]),
-    MonName = list_to_atom(atom_to_list(Tab) ++ "_mon"),
-    {ok, MonPid} = cets_ack:start_link(MonName),
+    AckName = list_to_atom(atom_to_list(Tab) ++ "_ack"),
+    {ok, AckPid} = cets_ack:start_link(AckName),
     {ok, #{
         tab => Tab,
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         server_num => 0,
         server_mask => unset_flag_mask(0),
         server_nums => #{self() => 0},
@@ -403,8 +401,8 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
-terminate(_Reason, _State = #{mon_pid := MonPid}) ->
-    ok = gen_server:stop(MonPid).
+terminate(_Reason, _State = #{ack_pid := AckPid}) ->
+    ok = gen_server:stop(AckPid).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -425,11 +423,11 @@ handle_apply_dump(
         server_nums := Nums,
         last_applied_dump_ref := Ref
     }),
-    %% We need to clean mon_tab table to avoid possible infinite waiting
+    %% We need to clean cets_ack process to avoid possible infinite waiting
     %% Though, we don't expect a lot of record in the table once we reached
     %% apply_dump step
     %% We have to do it because we set new server_nums
-    erase_mon_tab(State),
+    erase_ack_process(State),
     {reply, ok, set_servers(NewServers, State2)};
 handle_apply_dump(_Ref, State) ->
     {reply, {error, unknown_dump_ref}, State}.
@@ -475,11 +473,11 @@ handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
             handle_down2(Mon, Pid, State)
     end.
 
-handle_down2(Mon, RemotePid, State = #{mon_pid := MonPid, other_servers := Servers}) ->
+handle_down2(Mon, RemotePid, State = #{ack_pid := AckPid, other_servers := Servers}) ->
     case lists:keymember(Mon, 2, Servers) of
         true ->
             Num = server_pid_to_server_num(RemotePid, State),
-            notify_remote_down(Num, MonPid),
+            notify_remote_down(Num, AckPid),
             call_user_handle_down(RemotePid, State),
             {noreply, remove_server(Mon, State)};
         false ->
@@ -492,12 +490,12 @@ handle_down2(Mon, RemotePid, State = #{mon_pid := MonPid, other_servers := Serve
             {noreply, State}
     end.
 
-notify_remote_down(Num, MonPid) ->
-    MonPid ! {cets_remote_down, unset_flag_mask(Num)},
+notify_remote_down(Num, AckPid) ->
+    AckPid ! {cets_remote_down, unset_flag_mask(Num)},
     ok.
 
-erase_mon_tab(#{mon_pid := MonPid}) ->
-    MonPid ! erase.
+erase_ack_process(#{ack_pid := AckPid}) ->
+    AckPid ! erase.
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -547,9 +545,9 @@ handle_op(Alias, Msg, State) ->
 replicate(Alias, _Msg, #{remote_bits := 0}) ->
     %% Skip replication
     cets_call:reply(Alias, ok);
-replicate(Alias, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
-    MonPid ! {Alias, Bits},
-    [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
+replicate(Alias, Msg, #{ack_pid := AckPid, just_dests := Dests, remote_bits := Bits}) ->
+    AckPid ! {Alias, Bits},
+    [send_to_remote(Dest, {remote_op, Dest, Alias, AckPid, Msg}) || Dest <- Dests],
     ok.
 
 apply_backlog(State = #{backlog := Backlog}) ->
@@ -586,7 +584,7 @@ handle_get_info(
         tab := Tab,
         just_pids := Pids,
         just_dests := Dests,
-        mon_pid := MonPid,
+        ack_pid := AckPid,
         opts := Opts
     }
 ) ->
@@ -596,7 +594,7 @@ handle_get_info(
         server_to_dest => maps:from_list(lists:zip(Pids, Dests)),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         opts => Opts
     },
     {reply, Info, State}.
