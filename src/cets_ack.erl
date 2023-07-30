@@ -92,18 +92,13 @@ handle_erase(State) ->
     #{}.
 
 send_down_all(Mon, _Val) when is_reference(Mon) ->
-    cets_call:reply(Mon, ok);
-send_down_all(_Key, _Val) ->
-    ok.
+    cets_call:reply(Mon, ok).
 
 -spec handle_remote_down(integer(), state()) -> state().
 handle_remote_down(Num, State) ->
     Mask = cets_bits:unset_flag_mask(Num),
     maps:fold(
-        fun
-            (K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V);
-            (_, _, Acc) -> Acc
-        end,
+        fun(K, V, Acc) when is_reference(K) -> handle_updated(K, Mask, Acc, V) end,
         State,
         State
     ).
