@@ -164,9 +164,10 @@ aliases_for(Pid, Aliases) ->
      || {Pid2, Alias} <- PidMons
     ].
 
-find_destination(Pid1, Pid2, Aliases) when Pid1 =/= Pid2 ->
-    [Dest] = [Alias || {A, B, Alias} <- Aliases, A =:= Pid2, B =:= Pid1],
-    Dest.
+find_destination(Pid1, Pid2, [{Pid2, Pid1, Alias} | _]) ->
+    Alias;
+find_destination(Pid1, Pid2, [_ | Aliases]) ->
+    find_destination(Pid1, Pid2, Aliases).
 
 maybe_apply_resolver(LocalDump, RemoteDump, Opts = #{handle_conflict := F}) ->
     Type = maps:get(type, Opts, ordered_set),
