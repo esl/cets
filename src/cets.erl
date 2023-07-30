@@ -529,20 +529,18 @@ do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op(From = {_Mon, Pid}, Msg, State) when is_pid(Pid) ->
+handle_op({Alias, _} = _From, Msg, State) ->
     do_op(Msg, State),
-    _WaitInfo = replicate(From, Msg, State),
-%   Pid ! {cets_reply, Mon, WaitInfo},
-    ok.
+    replicate(Alias, Msg, State).
 
-replicate({Alias, _} = From, Msg, #{mon_pid := MonPid, just_dests := [_|_] = Dests, remote_bits := Bits}) ->
-    MonPid ! {Alias, Bits},
-    %% Reply would be routed directly to FromPid
-    [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
+replicate(Alias, _Msg, #{remote_bits := 0}) ->
+    %% Skip replication
+    Alias ! {cets_ok, Alias},
     ok;
-replicate({Alias, _} = From, Msg, #{just_dests := []}) ->
-    Alias ! {cets_ok, Alias}.
-%   {Bits, MonPid}.
+replicate(Alias, Msg, #{mon_pid := MonPid, just_dests := Dests, remote_bits := Bits}) ->
+    MonPid ! {Alias, Bits},
+    [send_to_remote(Dest, {remote_op, Dest, Alias, MonPid, Msg}) || Dest <- Dests],
+    ok.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
