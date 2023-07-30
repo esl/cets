@@ -266,7 +266,10 @@ delete_objects_request(Server, Objects) ->
 
 -spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
 wait_response(Mon, Timeout) ->
-    gen_server:wait_response(Mon, Timeout).
+    case gen_server:wait_response(Mon, Timeout) of
+        {reply, ok} -> ok;
+        Other -> error(Other)
+    end.
 
 -spec make_alias_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
 make_alias_for(Server, RemotePids) ->

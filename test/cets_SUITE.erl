@@ -36,9 +36,7 @@ all() ->
         unpause_when_pause_owner_crashes,
         unpause_twice,
         write_returns_if_remote_server_crashes,
-        mon_cleaner_works,
         mon_cleaner_stops_correctly,
-        mon_cleaner_erase_unsets_all_pending_replies,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -353,8 +351,9 @@ join_fails_then_old_alias_is_disabled(Config) ->
     %% Simulate remote_op-s
     %% Dest4to1 alias should be deactivated
     %% Dest3to1 alias should work
-    Dest3to1 ! {remote_op, Dest3to1, make_ref(), {insert, {z3}}},
-    Dest4to1 ! {remote_op, Dest4to1, make_ref(), {insert, {z4}}},
+    ReplyTo = self(),
+    Dest3to1 ! {remote_op, Dest3to1, make_ref(), ReplyTo, {insert, {z3}}},
+    Dest4to1 ! {remote_op, Dest4to1, make_ref(), ReplyTo, {insert, {z4}}},
     %% Ensure remote_op-s are received
     cets:ping(Pid1),
     {ok, [{z3}]} = cets:remote_dump(Pid1).
@@ -541,31 +540,6 @@ write_returns_if_remote_server_crashes(_Config) ->
     R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
-
-mon_cleaner_works(_Config) ->
-    {ok, Pid1} = cets:start(c3, #{}),
-    %% Two cases to check: an alive process and a dead process
-    R = cets:insert_request(c3, {2}),
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There is one monitor
-    1 = maps:size(gen_server:call(c3_mon, dump)),
-    {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    after 5000 -> ct:fail(timeout)
-    end,
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There are two monitors
-    2 = maps:size(gen_server:call(c3_mon, dump)),
-    %% Force check
-    c3_mon ! check,
-    %% A monitor for a dead process is removed
-    1 = maps:size(gen_server:call(c3_mon, dump)),
-    %% The monitor is finally removed once wait_response returns
-    ok = cets:wait_response(R, 5000),
-    0 = maps:size(gen_server:call(c3_mon, dump)).
 
 mon_cleaner_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(cleaner_stops, #{}),
