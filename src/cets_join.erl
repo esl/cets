@@ -66,6 +66,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, Opts) ->
 
 join2(_Info, LocalPid, RemotePid, Opts) ->
     run_step(join_start, Opts),
+    DumpRef = make_ref(),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
@@ -80,19 +81,16 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     RemPids = [RemotePid | RemoteOtherPids],
     AllPids = LocPids ++ RemPids,
     run_step({all_pids_known, AllPids}, Opts),
-    Aliases = make_aliases(AllPids),
     %% Asign server_num for each server in the new cluster.
     Nums = maps:from_list(lists:zip(AllPids, lists:seq(0, length(AllPids) - 1))),
     %% Ask processes to stop applying messages.
     PauseRefs = [cets:pause(Pid) || Pid <- AllPids],
+    %% If we crash before applying the dump - we would need to clean them after unpause
+    Aliases = make_aliases(AllPids),
     %% Check that we hae pause references
     [] = [Reply || Reply <- PauseRefs, not is_reference(Reply)],
     Pid2PauseRef = maps:from_list(lists:zip(AllPids, PauseRefs)),
     run_step(paused, Opts),
-    %% Merges data from two partitions together.
-    %% Each entry in the table is allowed to be updated by the node that owns
-    %% the key only, so merging is easy.
-    DumpRef = make_ref(),
     ok = cets:sync(LocalPid),
     ok = cets:sync(RemotePid),
     {ok, LocalDump} = cets:remote_or_local_dump(LocalPid),
@@ -100,6 +98,9 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     %% Check that we haven't unpaused for some reason while making a dump
     true = cets:is_paused(LocalPid, maps:get(LocalPid, Pid2PauseRef)),
     true = cets:is_paused(RemotePid, maps:get(RemotePid, Pid2PauseRef)),
+    %% Merges data from two partitions together.
+    %% Each entry in the table is allowed to be updated by the node that owns
+    %% the key only, so merging is easy.
     {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, CetsOpts),
     %% Don't send dumps in parallel to not cause out-of-memory.
     %% It could be faster though.

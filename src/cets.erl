@@ -136,6 +136,7 @@
     %% Optional
     %% We store dump between send_dump and apply_dump calls.
     pending_dump := send_dump_msg() | none(),
+    pending_aliases := [{pid(), reference()}],
     %% Reference assigned when joining.
     %% All nodes in the cluster should have the same last_applied_dump_ref.
     %% Verified in handle_check_server function.
@@ -156,6 +157,7 @@
     | other_pids
     | {make_aliases_for, [pid()]}
     | {unpause, reference()}
+    | {is_paused, reference()}
     | send_dump_msg()
     | {apply_dump, DumpRef :: reference()}.
 
@@ -375,6 +377,7 @@ init({Tab, Opts}) ->
         opts => Opts,
         backlog => [],
         pause_monitors => [],
+        pending_aliases => [],
         last_applied_dump_ref => make_ref()
     }}.
 
@@ -391,10 +394,10 @@ handle_call(
     {noreply, State#{backlog := [{cets_call:prepare_from(From), Msg} | Backlog]}};
 handle_call(other_pids, _From, State = #{just_pids := Pids}) ->
     {reply, Pids, State};
-handle_call({make_aliases_for, Pids}, _From, State) ->
+handle_call({make_aliases_for, Pids}, _From, State = #{pending_aliases := PendingAliases}) ->
     %% Create channels used to deliver remote_op messages
     Aliases = [{Pid, erlang:monitor(process, Pid, [{alias, demonitor}])} || Pid <- Pids],
-    {reply, Aliases, State};
+    {reply, Aliases, State#{pending_aliases := Aliases ++ PendingAliases}};
 handle_call(sync, From, State = #{just_pids := Pids}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
@@ -629,6 +632,7 @@ handle_get_info(
         just_pids := Pids,
         just_dests := Dests,
         ack_pid := AckPid,
+        pending_aliases := PendingAliases,
         opts := Opts
     }
 ) ->
@@ -639,6 +643,7 @@ handle_get_info(
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
+        pending_aliases => PendingAliases,
         opts => Opts
     },
     {reply, Info, State}.
@@ -686,7 +691,25 @@ check_servers(State = #{other_servers := Servers, last_applied_dump_ref := DumpR
      || {Pid, Mon, Dest} <- Servers
     ],
     %% Reset dump if any before unpause
-    maps:remove(pending_dump, State).
+    State2 = maps:remove(pending_dump, State),
+    check_pending_aliases(State2).
+
+check_pending_aliases(State = #{pending_aliases := Aliases}) ->
+    lists:foreach(
+        fun({Pid, Alias}) ->
+            case is_known_monitor(Alias, State) of
+                true ->
+                    ok;
+                false ->
+                    %% Alias was made by make_aliases_for but for some reason
+                    %% it is not in the list of other_servers
+                    ?LOG_ERROR(#{what => destroy_alias, remote_pid => Pid, alias => Alias}),
+                    destroy_alias(Pid, Alias)
+            end
+        end,
+        Aliases
+    ),
+    State#{pending_aliases := []}.
 
 is_known_monitor(Mon, #{other_servers := Servers}) ->
     lists:keymember(Mon, 2, Servers).
@@ -697,22 +720,26 @@ handle_check_server(Source, Mon, Dest, DumpRef, State = #{last_applied_dump_ref 
         {true, OurDumpRef} ->
             ok;
         _ ->
-            %% Prevent from receiving remote_ops.
-            %% Though messages that are already in our message box would not get rejected.
-            case erlang:unalias(Dest) of
-                true ->
-                    flush_remote_ops(Dest);
-                false ->
-                    ?LOG_ERROR(#{
-                        what => unknown_check_server_alias, alias => Dest, from_pid => Source
-                    })
-            end,
+            destroy_alias(Source, Dest),
             %% Simulate disconnect for this alias.
             %% This would prevent us from the partially applied dumps.
             %% This could happen if send_dump failed for this or for the remote node.
             Source ! {'DOWN', Mon, process, self(), check_server_failed},
             ok
     end.
+
+destroy_alias(Source, Dest) when is_pid(Source), is_reference(Dest) ->
+    %% Prevent from receiving remote_ops.
+    %% Though messages that are already in our message box would not get rejected.
+    case erlang:unalias(Dest) of
+        true ->
+            flush_remote_ops(Dest);
+        false ->
+            ?LOG_ERROR(#{
+                what => unknown_check_server_alias, alias => Dest, from_pid => Source
+            })
+    end,
+    ok.
 
 %% Reject messages to the alias which are already in our message box
 flush_remote_ops(Dest) ->

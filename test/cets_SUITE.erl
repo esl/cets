@@ -25,6 +25,7 @@ all() ->
         join_fails_before_apply_dump_with_partial_apply,
         join_fails_then_pending_ops_are_filtered,
         join_fails_then_old_alias_is_disabled,
+        pending_aliases_are_removed_after_unpause,
         apply_dump_with_unknown_dump_ref_would_be_ignored,
         test_multinode,
         node_list_is_correct,
@@ -358,6 +359,16 @@ join_fails_then_old_alias_is_disabled(Config) ->
     %% Ensure remote_op-s are received
     cets:ping(Pid1),
     {ok, [{z3}]} = cets:remote_dump(Pid1).
+
+pending_aliases_are_removed_after_unpause(Config) ->
+    {ok, Pid} = cets:start(make_name(Config, 1), #{}),
+    Ref = cets:pause(Pid),
+    Me = self(),
+    Aliases = cets:make_aliases_for(Pid, [Me]),
+    [{Me, _Alias}] = Aliases,
+    #{pending_aliases := Aliases} = cets:info(Pid),
+    ok = cets:unpause(Pid, Ref),
+    #{pending_aliases := []} = cets:info(Pid).
 
 apply_dump_with_unknown_dump_ref_would_be_ignored(Config) ->
     Me = self(),
