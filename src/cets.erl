@@ -31,7 +31,7 @@
     table_name/1,
     other_nodes/1,
     other_pids/1,
-    make_alias_for/2,
+    make_aliases_for/2,
     pause/1,
     unpause/2,
     sync/1,
@@ -151,7 +151,7 @@
     | table_name
     | get_info
     | other_pids
-    | {make_alias_for, [pid()]}
+    | {make_aliases_for, [pid()]}
     | {unpause, reference()}
     | send_dump_msg()
     | {apply_dump, DumpRef :: reference()}.
@@ -290,9 +290,9 @@ wait_response(Mon, Timeout) ->
         Other -> error(Other)
     end.
 
--spec make_alias_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
-make_alias_for(Server, RemotePids) ->
-    cets_call:long_call(Server, {make_alias_for, RemotePids}).
+-spec make_aliases_for(server_ref(), [server_ref()]) -> [{server_ref(), reference()}].
+make_aliases_for(Server, RemotePids) ->
+    cets_call:long_call(Server, {make_aliases_for, RemotePids}).
 
 %% Get a list of other nodes in the cluster that are connected together.
 -spec other_nodes(server_ref()) -> [node()].
@@ -374,7 +374,7 @@ handle_call(
     {noreply, State#{backlog := [{Alias, Msg} | Backlog]}};
 handle_call(other_pids, _From, State = #{just_pids := Pids}) ->
     {reply, Pids, State};
-handle_call({make_alias_for, Pids}, _From, State) ->
+handle_call({make_aliases_for, Pids}, _From, State) ->
     %% Create channels used to deliver remote_op messages
     Aliases = [{Pid, erlang:monitor(process, Pid, [{alias, demonitor}])} || Pid <- Pids],
     {reply, Aliases, State};

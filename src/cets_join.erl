@@ -132,7 +132,7 @@ make_aliases(AllPids) ->
     [
         {Pid, Pid2, Alias}
      || Pid <- AllPids,
-        {Pid2, Alias} <- cets:make_alias_for(Pid, lists:delete(Pid, AllPids))
+        {Pid2, Alias} <- cets:make_aliases_for(Pid, lists:delete(Pid, AllPids))
     ].
 
 aliases_for(Pid, Aliases) ->
