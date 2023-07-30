@@ -159,16 +159,10 @@ aliases_for(Pid, Aliases) ->
     %% Pid we monitor
     %% Monitor to detect that we the remote server is down
     %% Alias to send messages from Pid to Pid2
-    Res = [
+    [
         {Pid2, Alias, find_destination(Pid, Pid2, Aliases)}
      || {Pid2, Alias} <- PidMons
-    ],
-    assert_aliases_are_different(Res),
-    Res.
-
-assert_aliases_are_different(Res) ->
-    [] = [X || {_, A, A, _} = X <- Res],
-    ok.
+    ].
 
 find_destination(Pid1, Pid2, Aliases) when Pid1 =/= Pid2 ->
     [Dest] = [Alias || {A, B, Alias} <- Aliases, A =:= Pid2, B =:= Pid1],
