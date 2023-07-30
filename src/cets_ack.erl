@@ -7,6 +7,7 @@
 -export([
     start_link/1,
     add/3,
+    ack/3,
     send_remote_down/2,
     erase/1
 ]).
@@ -32,6 +33,15 @@ start_link(Name) ->
 -spec add(pid(), reference(), integer()) -> ok.
 add(AckPid, Alias, Bits) ->
     AckPid ! {add, Alias, Bits},
+    ok.
+
+%% Called by a remote server after an operation is applied.
+%% Alias is an alias from the original gen_server:call made by a client.
+%% Mask identifies the remote server.
+-spec ack(pid(), reference(), integer()) -> ok.
+ack(AckPid, Alias, Mask) ->
+    %% nosuspend makes message sending unreliable
+    erlang:send(AckPid, {ack, Alias, Mask}, [noconnect]),
     ok.
 
 -spec send_remote_down(pid(), non_neg_integer()) -> ok.

@@ -38,6 +38,7 @@ all() ->
         write_returns_if_remote_server_crashes,
         write_returns_if_local_ack_process_crashes,
         ack_process_stops_correctly,
+        ack_process_handles_unknown_alias,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -562,6 +563,13 @@ ack_process_stops_correctly(_Config) ->
         {'DOWN', AckMon, process, AckPid, normal} -> ok
     after 5000 -> ct:fail(timeout)
     end.
+
+ack_process_handles_unknown_alias(Config) ->
+    [Pid1, _Pid2] = join(make_n_servers(2, Config)),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    cets_ack:ack(AckPid, make_ref(), cets_bits:unset_flag_mask(42)),
+    %% Ack process still works fine
+    ok = cets:insert(Pid1, {1}).
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),

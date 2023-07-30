@@ -525,8 +525,7 @@ ets_delete_objects(Tab, Objects) ->
     ok.
 
 reply_updated(Alias, ReplyTo, #{server_mask := Mask}) ->
-    %% nosuspend makes message sending unreliable
-    erlang:send(ReplyTo, {ack, Alias, Mask}, [noconnect]).
+    cets_ack:ack(ReplyTo, Alias, Mask).
 
 send_to_remote(RemoteAlias, Msg) ->
     erlang:send(RemoteAlias, Msg, [noconnect]).
