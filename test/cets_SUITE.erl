@@ -52,7 +52,8 @@ all() ->
         wait_for_updated_timeout,
         updated_is_received_after_timeout,
         remote_down_is_not_received_after_timeout,
-        unknown_alias_in_check_server_message
+        unknown_alias_in_check_server_message,
+        bits_could_set_and_unset_flags
     ].
 
 init_per_suite(Config) ->
@@ -678,6 +679,21 @@ unknown_alias_in_check_server_message(Config) ->
     DumpRef = make_ref(),
     gen_server:cast(Pid, {check_server, Source, Mon, Dest, DumpRef}),
     receive_message({'DOWN', Mon, process, Pid, check_server_failed}).
+
+bits_could_set_and_unset_flags(_Config) ->
+    Flags23 = cets_bits:set_flags([2, 3], 0),
+    Flags123 = cets_bits:set_flags([1, 2, 3], 0),
+    %% Try to unset flag 1
+    Flags23 = cets_bits:apply_mask(cets_bits:unset_flag_mask(1), Flags123),
+    %% Try to set new flag
+    Flags123 = cets_bits:set_flags([1], Flags23),
+    %% Try to set flag again
+    Flags23 = cets_bits:set_flags([2], Flags23),
+    %% Try to set very big flag (erlang has no limit)
+    Flag1m = cets_bits:set_flags([1000000], 0),
+    %% It is a very big integer
+    true = Flag1m > 100000 andalso is_integer(Flag1m),
+    0 = cets_bits:apply_mask(cets_bits:unset_flag_mask(1000000), Flag1m).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).

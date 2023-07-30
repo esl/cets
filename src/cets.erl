@@ -62,6 +62,8 @@
     delete_many/2,
     delete_object/2,
     delete_objects/2,
+    dump/1,
+    remote_dump/1,
     pause/1,
     unpause/2,
     sync/1,
@@ -484,7 +486,7 @@ set_servers(Servers, State) ->
 %% Make a bitmask with bits set to 1 for still alive remote servers
 make_remote_bits(Pids, #{server_nums := Nums}) ->
     RemoteNums = [Num || {Pid, Num} <- maps:to_list(Nums), lists:member(Pid, Pids)],
-    lists:foldl(fun cets_bits:set_flag/2, 0, RemoteNums).
+    cets_bits:set_flags(RemoteNums, 0).
 
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
