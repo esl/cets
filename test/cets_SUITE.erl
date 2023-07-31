@@ -482,6 +482,6 @@ rpc(Node, M, F, Args) ->
     end.
 
 start_node(Sname) ->
-    {ok, Node} = ct_slave:start(Sname, [{monitor_master, true}]),
-    rpc:call(Node, code, add_paths, [code:get_path()]),
+    {ok, _Peer, Node} = peer:start(#{name => Sname}),
+    ok = rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
