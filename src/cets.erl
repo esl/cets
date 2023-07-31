@@ -165,8 +165,11 @@
     table := table_name(),
     nodes := [node()],
     size := non_neg_integer(),
+    server_to_dest := #{pid() => reference()},
     memory := non_neg_integer(),
     ack_pid := pid(),
+    pending_aliases := [{pid(), reference()}],
+    pause_monitors := [pause_monitor()],
     opts := start_opts()
 }.
 
@@ -544,6 +547,17 @@ handle_down2(Mon, RemotePid, State = #{ack_pid := AckPid, other_servers := Serve
             call_user_handle_down(RemotePid, State),
             {noreply, remove_server(Mon, State)};
         false ->
+            handle_down3(Mon, RemotePid, State)
+    end.
+
+handle_down3(Mon, RemotePid, State = #{pending_aliases := PendingAliases}) ->
+    PidMon = {RemotePid, Mon},
+    case lists:member(PidMon, PendingAliases) of
+        true ->
+            %% RemotePid crashed before we even applied dump from it
+            PendingAliases2 = lists:delete(PidMon, PendingAliases),
+            {noreply, State#{pending_aliases := PendingAliases2}};
+        false ->
             %% This should not happen
             ?LOG_ERROR(#{
                 what => handle_down_failed,
@@ -705,7 +719,7 @@ check_servers(State = #{other_servers := Servers, last_applied_dump_ref := DumpR
     State2 = maps:remove(pending_dump, State),
     check_pending_aliases(State2).
 
-check_pending_aliases(State = #{pending_aliases := Aliases}) ->
+check_pending_aliases(State = #{pending_aliases := Aliases, other_servers := Servers}) ->
     lists:foreach(
         fun({Pid, Alias}) ->
             case is_known_monitor(Alias, State) of
@@ -720,6 +734,19 @@ check_pending_aliases(State = #{pending_aliases := Aliases}) ->
         end,
         Aliases
     ),
+    %% We've received unknown monitor
+    %% Ask ourself to remove that server and run cleanup function handle_down_fun
+    [
+        begin
+            ?LOG_ERROR(#{
+                what => remove_already_dead_server, remote_pid => Pid, remote_node => node(Pid)
+            }),
+            self() ! {'DOWN', Mon, process, Pid, already_dead},
+            ok
+        end
+     || {Pid, Mon, _Dest} <- Servers,
+        not lists:member({Pid, Mon}, Aliases)
+    ],
     State#{pending_aliases := []}.
 
 is_known_monitor(Mon, #{other_servers := Servers}) ->

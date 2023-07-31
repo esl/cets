@@ -411,18 +411,30 @@ apply_dump_with_unknown_dump_ref_would_be_ignored(Config) ->
 
 send_dump_fails_during_join(Config) ->
     Me = self(),
-    [Pid1, Pid2] = make_n_servers(2, Config),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    [Pid1, Pid2] = make_n_servers(2, Config, #{handle_down => DownFn}),
     F = fun
         ({before_send_dump, 0, _Pid}) ->
+            %% It does not crash the join process.
+            %% Pid1 would receive a dump with Pid2 in the server list.
             exit(Pid2, sim_error),
+            %% Ensure Pid1 got DOWN message from Pid2 already
+            pong = cets:ping(Pid1),
             Me ! before_send_dump_called;
         (_) ->
             ok
     end,
     {error, _} = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(before_send_dump_called),
+    pong = cets:ping(Pid1),
+    receive_message({down_called, Pid1, Pid2}),
+    #{pause_monitors := []} = cets:info(Pid1),
+    [] = cets:other_pids(Pid1),
     %% Pid1 still works
-    ok = cets:insert(Pid1, {1}),
+    R = cets:insert_request(Pid1, {1}),
+    cets:wait_response(R, 1000),
     {ok, [{1}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
@@ -826,9 +838,12 @@ receive_message(M) ->
     end.
 
 make_n_servers(N, Config) ->
+    make_n_servers(N, Config, #{}).
+
+make_n_servers(N, Config, Opts) ->
     lists:map(
         fun(X) ->
-            {ok, Pid} = cets:start(make_name(Config, X), #{}),
+            {ok, Pid} = cets:start(make_name(Config, X), Opts),
             Pid
         end,
         lists:seq(1, N)
