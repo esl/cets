@@ -129,9 +129,18 @@ where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
 
+%% Wait around 15 seconds before giving up
+%% (we don't count how much we spend calling the leader though)
+%% If fails - this means there are some major issues
+backoff_intervals() ->
+    [10, 50, 100, 500, 1000, 5000, 5000].
+
 %% Sends all requests to a single node in the cluster
 -spec send_leader_op(server_ref(), op()) -> term().
 send_leader_op(Server, Op) ->
+    send_leader_op(Server, Op, backoff_intervals()).
+
+send_leader_op(Server, Op, Backoff) ->
     Leader = cets:get_leader(Server),
     Res = cets_call:sync_operation(Leader, {leader_op, Op}),
     case Res of
@@ -142,7 +151,13 @@ send_leader_op(Server, Op) ->
             %% The only issue could be if there are bugs in the leader election logic
             %% (i.e. our server thinks there is one leader in the cluster,
             %% while that leader has another leader selected - i.e. an impossible case)
-            send_leader_op(Server, Op);
+            case Backoff of
+                [Milliseconds | NextBackoff] ->
+                    timer:sleep(Milliseconds),
+                    send_leader_op(Server, Op, NextBackoff);
+                [] ->
+                    error(send_leader_op_failed)
+            end;
         _ ->
             Res
     end.
