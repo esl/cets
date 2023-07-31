@@ -111,6 +111,8 @@ join2(_Info, LocalPid, RemotePid, Opts) ->
     Send = fun(Pid, Dump) ->
         PauseRef = maps:get(Pid, Pid2PauseRef),
         NewServers = make_new_servers(Pid, Aliases),
+        Num = maps:get(Pid, Nums),
+        run_step({before_send_dump, Num, Pid}, Opts),
         cets:send_dump(Pid, DumpRef, PauseRef, Nums, NewServers, Dump)
     end,
     RemF = fun(Pid) -> Send(Pid, LocalDump2) end,

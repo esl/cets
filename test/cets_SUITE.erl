@@ -28,6 +28,7 @@ all() ->
         join_fails_then_old_alias_is_disabled,
         pending_aliases_are_removed_after_unpause,
         apply_dump_with_unknown_dump_ref_would_be_ignored,
+        send_dump_fails_during_join,
         test_multinode,
         node_list_is_correct,
         test_multinode_auto_discovery,
@@ -407,6 +408,22 @@ apply_dump_with_unknown_dump_ref_would_be_ignored(Config) ->
     %% Check that join is successful
     ok = cets:insert(Pid1, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid2).
+
+send_dump_fails_during_join(Config) ->
+    Me = self(),
+    [Pid1, Pid2] = make_n_servers(2, Config),
+    F = fun
+        ({before_send_dump, 0, _Pid}) ->
+            exit(Pid2, sim_error),
+            Me ! before_send_dump_called;
+        (_) ->
+            ok
+    end,
+    {error, _} = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(before_send_dump_called),
+    %% Pid1 still works
+    ok = cets:insert(Pid1, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),
