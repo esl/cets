@@ -196,19 +196,27 @@ insert_new_is_retried_when_leader_is_reelected(_Config) ->
     {ok, Pid2} = cets:start(newins2tab_back2, #{handle_wrong_leader => F}),
     ok = cets_join:join(join_lock1_insnew_back2, #{}, Pid1, Pid2),
     Leader = cets:get_leader(Pid1),
+    %% Ask process to reject all the leader operations
     cets:set_leader(Leader, false),
     spawn(fun() ->
         timer:sleep(100),
+        %% Fix the leader, so it can process our insert_new call
         cets:set_leader(Leader, true)
     end),
+    %% This function would block, because Leader process would reject the operation
+    %% Until we call cets:set_leader(Leader, true)
     true = cets:insert_new(Pid1, {alice, 32}),
     %% Check that we actually use retry logic
+    %% Check that handle_wrong_leader callback function is called at least once
     receive
         {wrong_leader_detected, Info} ->
             ct:pal("wrong_leader_detected ~p", [Info])
     after 5000 ->
         ct:fail(wrong_leader_not_detected)
-    end.
+    end,
+    %% Check that data is written (i.e. retry works)
+    {ok, [{alice, 32}]} = cets:remote_dump(Pid1),
+    {ok, [{alice, 32}]} = cets:remote_dump(Pid2).
 
 %% We could retry automatically, but in this case return value from insert_new
 %% could be incorrect.

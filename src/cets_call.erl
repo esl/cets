@@ -84,12 +84,13 @@ wait_response(Mon, Timeout) ->
 
 %% Wait for response from the remote nodes that the operation is completed.
 %% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Mon, {Servers, MonTab}) ->
+-spec wait_for_updated(reference(), cets:wait_info() | false) -> ok.
+wait_for_updated(Mon, {Servers, MonTabInfo}) ->
     try
         do_wait_for_updated(Mon, Servers)
     after
         erlang:demonitor(Mon, [flush]),
-        delete_from_mon_tab(MonTab, Mon)
+        delete_from_mon_tab(MonTabInfo, Mon)
     end;
 wait_for_updated(Mon, false) ->
     %% not replicated
@@ -97,6 +98,7 @@ wait_for_updated(Mon, false) ->
     ok.
 
 %% Edgecase: special treatment if Server is on the remote node
+-spec delete_from_mon_tab(cets:local_or_remote_mon_tab(), reference()) -> ok.
 delete_from_mon_tab({remote, Node, MonTab}, Mon) ->
     rpc:async_call(Node, ets, delete, [MonTab, Mon]);
 delete_from_mon_tab(MonTab, Mon) ->
@@ -135,14 +137,11 @@ send_leader_op(Server, Op) ->
     case Res of
         {error, wrong_leader} ->
             ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),
-            timer:sleep(10),
             %% We are free to retry
             %% While it is infinite retries, the leader election logic is simple.
             %% The only issue could be if there are bugs in the leader election logic
             %% (i.e. our server thinks there is one leader in the cluster,
             %% while that leader has another leader selected - i.e. an impossible case)
-
-            %% Retry
             send_leader_op(Server, Op);
         _ ->
             Res

@@ -151,6 +151,12 @@
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
+-type local_mon_tab() :: atom().
+-type remote_mon_tab() :: {remote, node(), local_mon_tab()}.
+-type local_or_remote_mon_tab() :: local_mon_tab() | remote_mon_tab().
+-type wait_info() :: {Servers :: [pid()], MonTabInfo :: local_or_remote_mon_tab()}.
+-export_type([wait_info/0, local_or_remote_mon_tab/0]).
+
 %% API functions
 
 %% Table and server has the same name
@@ -571,6 +577,7 @@ handle_wrong_leader(From, Msg, _State = #{opts := #{handle_wrong_leader := F}}) 
 handle_wrong_leader(_State, _From, _Msg) ->
     ok.
 
+-spec replicate(pid(), {reference(), pid()}, op(), state()) -> wait_info().
 replicate(Pid, From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
