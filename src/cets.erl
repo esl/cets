@@ -549,11 +549,14 @@ handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
 
 handle_leader_op(From = {Mon, Pid}, Msg, State = #{is_leader := true}) ->
     case do_op(Msg, State) of
-        false -> %% Skip the replication - insert_new returns false.
-            Pid ! {cets_reply, Mon, false, {error, rejected}};
+        %% Skip the replication - insert_new returns false.
+        false ->
+            Pid ! {cets_reply, Mon, false, {error, rejected}},
+            ok;
         true ->
             WaitInfo = replicate(Pid, From, Msg, State),
-            Pid ! {cets_reply, Mon, WaitInfo}
+            Pid ! {cets_reply, Mon, WaitInfo},
+            ok
     end;
 handle_leader_op(From = {Mon, Pid}, Msg, State) ->
     %% Reject operation - not a leader
@@ -573,7 +576,8 @@ replicate(Pid, From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     Msg2 = {remote_op, From, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
     ets:insert(MonTab, From),
-    MonTabInfo = case node(Pid) =:= node() of
+    MonTabInfo =
+        case node(Pid) =:= node() of
             true -> MonTab;
             false -> {remote, node(), MonTab}
         end,

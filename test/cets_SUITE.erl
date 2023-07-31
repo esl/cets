@@ -126,7 +126,10 @@ insert_new_works_when_leader_is_back(_Config) ->
     %% Highest Pid is the leader:
     Pid2 = Leader,
     cets:set_leader(Leader, false),
-    spawn(fun() -> timer:sleep(100), cets:set_leader(Leader, true) end),
+    spawn(fun() ->
+        timer:sleep(100),
+        cets:set_leader(Leader, true)
+    end),
     true = cets:insert_new(Pid1, {alice, 32}).
 
 insert_new_when_new_leader_has_joined(_Config) ->
@@ -142,7 +145,7 @@ insert_new_when_new_leader_has_joined(_Config) ->
         timer:sleep(100),
         ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
         cets:unpause(Leader, PauseMon)
-        end),
+    end),
     %% Inserted by Pid3
     true = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 32}],
@@ -164,7 +167,7 @@ insert_new_when_new_leader_has_joined_duplicate(_Config) ->
         timer:sleep(100),
         ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
         cets:unpause(Leader, PauseMon)
-        end),
+    end),
     %% Checked and ignored by Pid3
     false = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 33}],
@@ -194,14 +197,17 @@ insert_new_is_retried_when_leader_is_reelected(_Config) ->
     ok = cets_join:join(join_lock1_insnew_back2, #{}, Pid1, Pid2),
     Leader = cets:get_leader(Pid1),
     cets:set_leader(Leader, false),
-    spawn(fun() -> timer:sleep(100), cets:set_leader(Leader, true) end),
+    spawn(fun() ->
+        timer:sleep(100),
+        cets:set_leader(Leader, true)
+    end),
     true = cets:insert_new(Pid1, {alice, 32}),
     %% Check that we actually use retry logic
     receive
         {wrong_leader_detected, Info} ->
             ct:pal("wrong_leader_detected ~p", [Info])
-        after 5000 ->
-            ct:fail(wrong_leader_not_detected)
+    after 5000 ->
+        ct:fail(wrong_leader_not_detected)
     end.
 
 %% We could retry automatically, but in this case return value from insert_new
@@ -215,14 +221,27 @@ insert_new_fails_if_the_leader_dies(_Config) ->
     {ok, Pid2} = cets:start(newins2tab_back3, #{}),
     ok = cets_join:join(join_lock1_insnew_back3, #{}, Pid1, Pid2),
     cets:pause(Pid2),
-    spawn(fun() -> timer:sleep(100), exit(Pid2, kill) end),
-    try cets:insert_new(Pid1, {alice, 32}) catch error:{cets_down, killed} -> ok end.
+    spawn(fun() ->
+        timer:sleep(100),
+        exit(Pid2, kill)
+    end),
+    try
+        cets:insert_new(Pid1, {alice, 32})
+    catch
+        error:{cets_down, killed} -> ok
+    end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
     %% Get a pid for a stopped process
     {Pid, Mon} = spawn_monitor(fun() -> ok end),
-    receive {'DOWN', Mon, process, Pid, _Reason} -> ok end,
-    try cets:insert_new(Pid, {alice, 32}) catch exit:{noproc, {gen_server, call, _}} -> ok end.
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} -> ok
+    end,
+    try
+        cets:insert_new(Pid, {alice, 32})
+    catch
+        exit:{noproc, {gen_server, call, _}} -> ok
+    end.
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),
@@ -361,7 +380,8 @@ test_multinode_remote_insert(Config) ->
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
     ok = join(Node2, Tab, Pid2, Pid3),
-    true = node() =/= node(Pid2), %% Ensure it is a remote node
+    %% Ensure it is a remote node
+    true = node() =/= node(Pid2),
     %% Insert without calling rpc module
     cets:insert(Pid2, {a}),
     [{a}] = dump(Node3, Tab).

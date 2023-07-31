@@ -1,10 +1,14 @@
 -module(cets_metadata).
--export([init/1,
-         set/3,
-         get/2]).
+-export([
+    init/1,
+    set/3,
+    get/2
+]).
 
 init(Name) ->
-    ets:new(name(Name), [named_table, public, {read_concurrency, true}]).
+    FullName = name(Name),
+    FullName = ets:new(FullName, [named_table, public, {read_concurrency, true}]),
+    ok.
 
 set(Name, K, V) ->
     ets:insert(name(Name), {K, V}).

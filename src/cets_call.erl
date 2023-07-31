@@ -92,7 +92,8 @@ wait_for_updated(Mon, {Servers, MonTab}) ->
         delete_from_mon_tab(MonTab, Mon)
     end;
 wait_for_updated(Mon, false) ->
-    erlang:demonitor(Mon, [flush]), %% not replicated
+    %% not replicated
+    erlang:demonitor(Mon, [flush]),
     ok.
 
 %% Edgecase: special treatment if Server is on the remote node
@@ -140,7 +141,9 @@ send_leader_op(Server, Op) ->
             %% The only issue could be if there are bugs in the leader election logic
             %% (i.e. our server thinks there is one leader in the cluster,
             %% while that leader has another leader selected - i.e. an impossible case)
-            send_leader_op(Server, Op); %% Retry
+
+            %% Retry
+            send_leader_op(Server, Op);
         _ ->
             Res
     end.
