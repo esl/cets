@@ -153,10 +153,9 @@ flush_all_checks() ->
     end.
 
 do_join(Tab, Node) ->
-    LocalPid = whereis(Tab),
     %% That would trigger autoconnect for the first time
-    case rpc:call(Node, erlang, whereis, [Tab]) of
-        Pid when is_pid(Pid), is_pid(LocalPid) ->
+    case {whereis(Tab), rpc:call(Node, erlang, whereis, [Tab])} of
+        {LocalPid, Pid} when is_pid(Pid), is_pid(LocalPid) ->
             Result = cets_join:join(cets_discovery, #{table => Tab}, LocalPid, Pid),
             #{what => join_result, result => Result, node => Node, table => Tab};
         Other ->
