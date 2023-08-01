@@ -32,6 +32,7 @@ all() ->
         join_ref_is_same_after_join,
         join_fails_before_send_dump,
         join_fails_before_send_dump_and_there_are_pending_remote_ops,
+        send_dump_fails_during_join_because_receiver_exits,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -450,6 +451,34 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
     cets:ping(Pid2),
     %% Check that the insert was ignored
     {ok, []} = cets:remote_dump(Pid2).
+
+send_dump_fails_during_join_because_receiver_exits(Config) ->
+    Me = self(),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        ({before_send_dump, P}) when P =:= Pid1 ->
+            %% Kill Pid2 process.
+            %% It does not crash the join process.
+            %% Pid1 would receive a dump with Pid2 in the server list.
+            exit(Pid2, sim_error),
+            %% Ensure Pid1 got DOWN message from Pid2 already
+            pong = cets:ping(Pid1),
+            Me ! before_send_dump_called;
+        (_) ->
+            ok
+    end,
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(before_send_dump_called),
+    pong = cets:ping(Pid1),
+    receive_message({down_called, Pid1, Pid2}),
+    [] = cets:other_pids(Pid1),
+    %% Pid1 still works
+    cets:insert(Pid1, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),
