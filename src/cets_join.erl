@@ -68,10 +68,11 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
     #{opts := Opts} = cets:info(LocalPid),
-    LocalOtherPids = cets:other_pids(LocalPid),
-    RemoteOtherPids = cets:other_pids(RemotePid),
-    LocPids = [LocalPid | LocalOtherPids],
-    RemPids = [RemotePid | RemoteOtherPids],
+    LocPids = get_pids(LocalPid),
+    RemPids = get_pids(RemotePid),
+    run_step(before_check_fully_connected, JoinOpts),
+    check_fully_connected(LocPids),
+    check_fully_connected(RemPids),
     AllPids = LocPids ++ RemPids,
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
@@ -82,6 +83,10 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         cets:sync(RemotePid),
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
+        %% Check that still fully connected after getting the dumps
+        %% and before making any changes
+        check_fully_connected(LocPids),
+        check_fully_connected(RemPids),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
         RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
         LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
@@ -145,6 +150,53 @@ apply_resolver_for_sorted(
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
+
+get_pids(Pid) ->
+    case cets:other_pids(Pid) of
+        Pids when is_list(Pids) ->
+            [Pid | Pids];
+        Other ->
+            error({get_other_pids_failed, Pid, Other})
+    end.
+
+%% Checks that other_pids lists match for all nodes
+%% If they are not matching - the node removal process could be in progress
+check_fully_connected(Pids) ->
+    Lists = [get_pids(Pid) || Pid <- Pids],
+    case are_fully_connected_lists([Pids | Lists]) of
+        true ->
+            check_same_join_ref(Pids);
+        false ->
+            ?LOG_ERROR(#{
+                what => check_fully_connected_failed,
+                expected_pids => Pids,
+                server_lists => Lists
+            }),
+            error(check_fully_connected_failed)
+    end.
+
+%% Check that all elements of the list match (if sorted)
+are_fully_connected_lists(Lists) ->
+    length(lists:usort([lists:sort(List) || List <- Lists])) =:= 1.
+
+%% Check if all nodes have the same join_ref
+%% If not - we don't want to continue joining
+check_same_join_ref(Pids) ->
+    Refs = [pid_to_join_ref(Pid) || Pid <- Pids],
+    case lists:usort(Refs) of
+        [_] ->
+            ok;
+        _ ->
+            ?LOG_ERROR(#{
+                what => check_same_join_ref_failed,
+                refs => lists:zip(Pids, Refs)
+            }),
+            error(check_same_join_ref_failed)
+    end.
+
+pid_to_join_ref(Pid) ->
+    #{join_ref := JoinRef} = cets:info(Pid),
+    JoinRef.
 
 run_step(Step, #{step_handler := F}) ->
     F(Step);

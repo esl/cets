@@ -33,6 +33,7 @@ all() ->
         join_fails_before_send_dump,
         join_fails_before_send_dump_and_there_are_pending_remote_ops,
         send_dump_fails_during_join_because_receiver_exits,
+        join_fails_in_check_fully_connected,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -479,6 +480,29 @@ send_dump_fails_during_join_because_receiver_exits(Config) ->
     %% Pid1 still works
     cets:insert(Pid1, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid1).
+
+join_fails_in_check_fully_connected(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    [Pid3] = cets:other_pids(Pid2),
+    F = fun
+        (before_check_fully_connected) ->
+            %% Ask Pid2 to remove Pid3 from the list
+            Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
+            %% Ensure Pid2 did the cleaning
+            pong = cets:ping(Pid2),
+            [] = cets:other_pids(Pid2),
+            Me ! before_check_fully_connected_called;
+        (_) ->
+            ok
+    end,
+    {error, {error, check_fully_connected_failed, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    receive_message(before_check_fully_connected_called).
 
 test_multinode(Config) ->
     Node1 = node(),
