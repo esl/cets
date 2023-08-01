@@ -47,10 +47,14 @@ sync_operation(Server, Op) ->
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
-where(Name) when is_atom(Name) -> whereis(Name);
+where(Name) when is_atom(Name) -> pid_or_undefined(whereis(Name));
 where({global, Name}) -> global:whereis_name(Name);
-where({local, Name}) -> whereis(Name);
+where({local, Name}) -> pid_or_undefined(whereis(Name));
 where({via, Module, Name}) -> Module:whereis_name(Name).
+
+%% whereis/1 could return Port, so ignore Ports (makes Gradualizer happy)
+pid_or_undefined(undefined) -> undefined;
+pid_or_undefined(Pid) when is_pid(Pid) -> Pid.
 
 %% Wait around 15 seconds before giving up
 %% (we don't count how much we spend calling the leader though)
