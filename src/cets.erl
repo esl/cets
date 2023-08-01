@@ -394,7 +394,10 @@ handle_info({remote_op, Op, From, AckPid}, State) ->
     handle_remote_op(Op, From, AckPid, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    {noreply, handle_down(Mon, Pid, State)};
+    handle_down(Mon, Pid, State);
+handle_info({check_server, FromPid, JoinRef}, State) ->
+    handle_check_server(FromPid, JoinRef, State),
+    {noreply, State};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -588,10 +591,39 @@ handle_unpause2(Mon, Mons, State) ->
     State2 = State#{pause_monitors := Mons2},
     case Mons2 of
         [] ->
+            send_check_servers(State2),
             apply_backlog(State2);
         _ ->
             State2
     end.
+
+-spec send_check_servers(state()) -> ok.
+send_check_servers(#{join_ref := JoinRef, other_servers := OtherPids}) ->
+    [send_check_server(Pid, JoinRef) || Pid <- OtherPids],
+    ok.
+
+%% Send check_server before sending any new remote_op messages,
+%% so the remote node has a chance to disconnect from us
+%% (i.e. remove our pid from other_servers list and not allow remote ops)
+-spec send_check_server(pid(), reference()) -> ok.
+send_check_server(Pid, JoinRef) ->
+    Pid ! {check_server, self(), JoinRef},
+    ok.
+
+handle_check_server(_FromPid, JoinRef, #{join_ref := JoinRef}) ->
+    ok;
+handle_check_server(FromPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
+    ?LOG_WARNING(#{
+        what => cets_check_server_failed,
+        text => <<"Disconnect the remote server">>,
+        remote_pid => FromPid,
+        remote_join_ref => RemoteJoinRef,
+        join_ref => JoinRef
+    }),
+    %% Ask the remote server to disconnect from us
+    Reason = {check_server_failed, {RemoteJoinRef, JoinRef}},
+    FromPid ! {'DOWN', make_ref(), process, self(), Reason},
+    ok.
 
 -spec handle_get_info(state()) -> info().
 handle_get_info(
