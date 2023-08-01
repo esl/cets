@@ -146,11 +146,8 @@ send_leader_op(Server, Op, Backoff) ->
     case Res of
         {error, wrong_leader} ->
             ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),
-            %% We are free to retry
-            %% While it is infinite retries, the leader election logic is simple.
-            %% The only issue could be if there are bugs in the leader election logic
-            %% (i.e. our server thinks there is one leader in the cluster,
-            %% while that leader has another leader selected - i.e. an impossible case)
+            %% This could happen if a new node joins the cluster.
+            %% So, a simple retry should help.
             case Backoff of
                 [Milliseconds | NextBackoff] ->
                     timer:sleep(Milliseconds),
