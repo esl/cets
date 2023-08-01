@@ -89,6 +89,7 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         lists:foreach(RemF, RemPids),
         ok
     after
+        run_step(before_unpause, JoinOpts),
         lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
     end.
 

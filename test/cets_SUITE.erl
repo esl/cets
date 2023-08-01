@@ -31,6 +31,7 @@ all() ->
         join_with_the_same_pid,
         join_ref_is_same_after_join,
         join_fails_before_send_dump,
+        join_fails_before_send_dump_and_there_are_pending_remote_ops,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -416,6 +417,39 @@ join_fails_before_send_dump(Config) ->
     %% Pid2 rejected changes
     {ok, [{2}]} = cets:remote_dump(Pid2),
     receive_message({down_called, Pid1, Pid2}).
+
+%% Checks that remote ops are dropped if join_ref does not match in the state and in remote_op message
+join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        ({before_send_dump, P}) when Pid1 =:= P ->
+            Me ! before_send_dump_called_for_pid1;
+        ({before_send_dump, P}) when Pid2 =:= P ->
+            sys:suspend(Pid2),
+            error(sim_error);
+        (before_unpause) ->
+            %% Crash in before_unpause, otherwise cets_join will block in cets:unpause/2
+            %% (because Pid2 is suspended).
+            %% Servers would be unpaused automatically though, because cets_join process exits
+            %% (i.e. cets:unpause/2 call is totally optional)
+            error(sim_error2);
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error2, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    %% Ensure we sent dump to Pid1
+    receive_message(before_send_dump_called_for_pid1),
+    cets:insert_request(Pid1, {1}),
+    %% Check that the remote_op has reached Pid2 message box
+    cets_test_wait:wait_until(fun() -> count_remote_ops_in_the_message_box(Pid2) end, 1),
+    sys:resume(Pid2),
+    %% Wait till remote_op is processed
+    cets:ping(Pid2),
+    %% Check that the insert was ignored
+    {ok, []} = cets:remote_dump(Pid2).
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -832,3 +866,8 @@ make_name(Config, Num) ->
 lock_name(Config) ->
     Testcase = proplists:get_value(testcase, Config),
     list_to_atom(atom_to_list(Testcase) ++ "_lock").
+
+count_remote_ops_in_the_message_box(Pid) ->
+    {messages, Messages} = erlang:process_info(Pid, messages),
+    Ops = [M || M <- Messages, element(1, M) =:= remote_op],
+    length(Ops).

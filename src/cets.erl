@@ -102,7 +102,7 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: cets_ack:ack_pid()}.
+-type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: cets_ack:ack_pid(), JoinRef :: cets_join:join_ref()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
@@ -390,8 +390,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, Op, From, AckPid}, State) ->
-    handle_remote_op(Op, From, AckPid, State),
+handle_info({remote_op, Op, From, AckPid, JoinRef}, State) ->
+    handle_remote_op(Op, From, AckPid, JoinRef, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
@@ -502,9 +502,18 @@ ets_delete_objects(Tab, Objects) ->
     ok.
 
 %% Handle operation from a remote node
--spec handle_remote_op(op(), from(), cets_ack:ack_pid(), state()) -> ok.
-handle_remote_op(Op, From, AckPid, State) ->
+-spec handle_remote_op(op(), from(), cets_ack:ack_pid(), cets_join:join_ref(), state()) -> ok.
+handle_remote_op(Op, From, AckPid, JoinRef, State = #{join_ref := JoinRef}) ->
     do_op(Op, State),
+    cets_ack:ack(AckPid, From, self());
+handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
+    ?LOG_ERROR(#{
+        what => drop_remote_op,
+        from => From,
+        remote_join_ref => RemoteJoinRef,
+        join_ref => JoinRef,
+        msg => Msg
+    }),
     cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
@@ -556,9 +565,9 @@ handle_leader_op(Op, From, State = #{leader := Leader}) ->
 replicate(_Op, From, #{other_servers := []}) ->
     %% Skip replication
     gen_server:reply(From, ok);
-replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
+replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers, join_ref := JoinRef}) ->
     cets_ack:add(AckPid, From),
-    RemoteOp = {remote_op, Op, From, AckPid},
+    RemoteOp = {remote_op, Op, From, AckPid, JoinRef},
     [send_remote_op(Server, RemoteOp) || Server <- Servers],
     %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
