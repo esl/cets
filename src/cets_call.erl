@@ -8,6 +8,9 @@
 -export([async_operation/2]).
 -export([sync_operation/2]).
 -export([wait_response/2]).
+-export([send_leader_op/2]).
+
+-include_lib("kernel/include/logger.hrl").
 
 -type request_id() :: cets:request_id().
 -type op() :: cets:op().
@@ -57,20 +60,23 @@ async_operation(Server, Msg) ->
             Mon
     end.
 
--spec sync_operation(server_ref(), op()) -> ok.
+-spec sync_operation(server_ref(), op()) -> ok | Result :: term().
 sync_operation(Server, Msg) ->
     Mon = async_operation(Server, Msg),
     %% We monitor the local server until the response from all servers is collected.
     wait_response(Mon, infinity).
 
 %% This function must be called to receive the result of the multinode operation.
--spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
+-spec wait_response(request_id(), non_neg_integer() | infinity) -> ok | Result :: term().
 wait_response(Mon, Timeout) ->
     receive
         {'DOWN', Mon, process, _Pid, Reason} ->
             error({cets_down, Reason});
         {cets_reply, Mon, WaitInfo} ->
-            wait_for_updated(Mon, WaitInfo)
+            wait_for_updated(Mon, WaitInfo);
+        {cets_reply, Mon, WaitInfo, Result} ->
+            wait_for_updated(Mon, WaitInfo),
+            Result
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
         error(timeout)
@@ -78,13 +84,25 @@ wait_response(Mon, Timeout) ->
 
 %% Wait for response from the remote nodes that the operation is completed.
 %% remote_down is sent by the local server, if the remote server is down.
-wait_for_updated(Mon, {Servers, MonTab}) ->
+-spec wait_for_updated(reference(), cets:wait_info() | false) -> ok.
+wait_for_updated(Mon, {Servers, MonTabInfo}) ->
     try
         do_wait_for_updated(Mon, Servers)
     after
         erlang:demonitor(Mon, [flush]),
-        ets:delete(MonTab, Mon)
-    end.
+        delete_from_mon_tab(MonTabInfo, Mon)
+    end;
+wait_for_updated(Mon, false) ->
+    %% not replicated
+    erlang:demonitor(Mon, [flush]),
+    ok.
+
+%% Edgecase: special treatment if Server is on the remote node
+-spec delete_from_mon_tab(cets:local_or_remote_mon_tab(), reference()) -> ok.
+delete_from_mon_tab({remote, Node, MonTab}, Mon) ->
+    rpc:async_call(Node, ets, delete, [MonTab, Mon]);
+delete_from_mon_tab(MonTab, Mon) ->
+    ets:delete(MonTab, Mon).
 
 do_wait_for_updated(_Mon, []) ->
     ok;
@@ -110,3 +128,33 @@ where(Name) when is_atom(Name) -> whereis(Name);
 where({global, Name}) -> global:whereis_name(Name);
 where({local, Name}) -> whereis(Name);
 where({via, Module, Name}) -> Module:whereis_name(Name).
+
+%% Wait around 15 seconds before giving up
+%% (we don't count how much we spend calling the leader though)
+%% If fails - this means there are some major issues
+backoff_intervals() ->
+    [10, 50, 100, 500, 1000, 5000, 5000].
+
+%% Sends all requests to a single node in the cluster
+-spec send_leader_op(server_ref(), op()) -> term().
+send_leader_op(Server, Op) ->
+    send_leader_op(Server, Op, backoff_intervals()).
+
+send_leader_op(Server, Op, Backoff) ->
+    Leader = cets:get_leader(Server),
+    Res = cets_call:sync_operation(Leader, {leader_op, Op}),
+    case Res of
+        {error, wrong_leader} ->
+            ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),
+            %% This could happen if a new node joins the cluster.
+            %% So, a simple retry should help.
+            case Backoff of
+                [Milliseconds | NextBackoff] ->
+                    timer:sleep(Milliseconds),
+                    send_leader_op(Server, Op, NextBackoff);
+                [] ->
+                    error(send_leader_op_failed)
+            end;
+        _ ->
+            Res
+    end.

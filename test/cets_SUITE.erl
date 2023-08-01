@@ -18,8 +18,17 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
+        insert_new_works,
+        insert_new_works_when_leader_is_back,
+        insert_new_when_new_leader_has_joined,
+        insert_new_when_new_leader_has_joined_duplicate,
+        insert_new_when_inconsistent,
+        insert_new_is_retried_when_leader_is_reelected,
+        insert_new_fails_if_the_leader_dies,
+        insert_new_fails_if_the_local_server_is_dead,
         join_with_the_same_pid,
         test_multinode,
+        test_multinode_remote_insert,
         node_list_is_correct,
         test_multinode_auto_discovery,
         test_locally,
@@ -98,6 +107,149 @@ inserted_records_could_be_read_back_from_replicated_table(_Config) ->
     ok = cets_join:join(join_lock1_ins, #{}, Pid1, Pid2),
     cets:insert(ins1tab, {alice, 32}),
     [{alice, 32}] = ets:lookup(ins2tab, alice).
+
+insert_new_works(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab, #{}),
+    {ok, Pid2} = cets:start(newins2tab, #{}),
+    ok = cets_join:join(join_lock1_insnew, #{}, Pid1, Pid2),
+    true = cets:insert_new(Pid1, {alice, 32}),
+    %% Duplicate found
+    false = cets:insert_new(Pid1, {alice, 32}),
+    false = cets:insert_new(Pid1, {alice, 33}),
+    false = cets:insert_new(Pid2, {alice, 33}).
+
+insert_new_works_when_leader_is_back(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab_back, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back, #{}),
+    ok = cets_join:join(join_lock1_insnew_back, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    %% Highest Pid is the leader:
+    Pid2 = Leader,
+    cets:set_leader(Leader, false),
+    spawn(fun() ->
+        timer:sleep(100),
+        cets:set_leader(Leader, true)
+    end),
+    true = cets:insert_new(Pid1, {alice, 32}).
+
+insert_new_when_new_leader_has_joined(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_tab4a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_tab4b, #{}),
+    {ok, Pid3} = cets:start(T3 = insert_new_tab4c, #{}),
+    %% Join first network segment
+    ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid2),
+    %% Pause insert into the first segment
+    Leader = cets:get_leader(Pid1),
+    PauseMon = cets:pause(Leader),
+    spawn(fun() ->
+        timer:sleep(100),
+        ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
+        cets:unpause(Leader, PauseMon)
+    end),
+    %% Inserted by Pid3
+    true = cets:insert_new(Pid1, {alice, 32}),
+    Res = [{alice, 32}],
+    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+
+%% Checks that the handle_wrong_leader is called
+insert_new_when_new_leader_has_joined_duplicate(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_tab5a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_tab5b, #{}),
+    {ok, Pid3} = cets:start(T3 = insert_new_tab5c, #{}),
+    %% Join first network segment
+    ok = cets_join:join(join_lock1_insnew_back4, #{}, Pid1, Pid2),
+    %% Put record into the second network segment
+    true = cets:insert_new(Pid3, {alice, 33}),
+    %% Pause insert into the first segment
+    Leader = cets:get_leader(Pid1),
+    PauseMon = cets:pause(Leader),
+    spawn(fun() ->
+        timer:sleep(100),
+        ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
+        cets:unpause(Leader, PauseMon)
+    end),
+    %% Checked and ignored by Pid3
+    false = cets:insert_new(Pid1, {alice, 32}),
+    Res = [{alice, 33}],
+    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+
+%% Rare case when tables contain different data
+%% (the developer should try to avoid the manual removal of data if possible)
+insert_new_when_inconsistent(_Config) ->
+    {ok, Pid1} = cets:start(T1 = insert_new_lock6a, #{}),
+    {ok, Pid2} = cets:start(T2 = insert_new_lock6b, #{}),
+    ok = cets_join:join(insert_new_lock6, #{}, Pid1, Pid2),
+    true = cets:insert_new(Pid1, {alice, 33}),
+    true = cets:insert_new(Pid2, {bob, 40}),
+    %% Introduce inconsistency
+    ets:delete(T1, alice),
+    ets:delete(T2, bob),
+    false = cets:insert_new(Pid1, {alice, 55}),
+    true = cets:insert_new(Pid2, {bob, 66}),
+    [{bob, 40}] = cets:dump(T1),
+    [{alice, 33}, {bob, 66}] = cets:dump(T2).
+
+insert_new_is_retried_when_leader_is_reelected(_Config) ->
+    Me = self(),
+    F = fun(X) -> Me ! {wrong_leader_detected, X} end,
+    {ok, Pid1} = cets:start(newins1tab_back2, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back2, #{handle_wrong_leader => F}),
+    ok = cets_join:join(join_lock1_insnew_back2, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    %% Ask process to reject all the leader operations
+    cets:set_leader(Leader, false),
+    spawn(fun() ->
+        timer:sleep(100),
+        %% Fix the leader, so it can process our insert_new call
+        cets:set_leader(Leader, true)
+    end),
+    %% This function would block, because Leader process would reject the operation
+    %% Until we call cets:set_leader(Leader, true)
+    true = cets:insert_new(Pid1, {alice, 32}),
+    %% Check that we actually use retry logic
+    %% Check that handle_wrong_leader callback function is called at least once
+    receive
+        {wrong_leader_detected, Info} ->
+            ct:pal("wrong_leader_detected ~p", [Info])
+    after 5000 ->
+        ct:fail(wrong_leader_not_detected)
+    end,
+    %% Check that data is written (i.e. retry works)
+    {ok, [{alice, 32}]} = cets:remote_dump(Pid1),
+    {ok, [{alice, 32}]} = cets:remote_dump(Pid2).
+
+%% We could retry automatically, but in this case return value from insert_new
+%% could be incorrect.
+%% If you wanna make insert_new more robust:
+%% - handle cets_down exception
+%% - call insert_new one more time
+%% - read the data back using ets:lookup to ensure it is your record written
+insert_new_fails_if_the_leader_dies(_Config) ->
+    {ok, Pid1} = cets:start(newins1tab_back3, #{}),
+    {ok, Pid2} = cets:start(newins2tab_back3, #{}),
+    ok = cets_join:join(join_lock1_insnew_back3, #{}, Pid1, Pid2),
+    cets:pause(Pid2),
+    spawn(fun() ->
+        timer:sleep(100),
+        exit(Pid2, kill)
+    end),
+    try
+        cets:insert_new(Pid1, {alice, 32})
+    catch
+        error:{cets_down, killed} -> ok
+    end.
+
+insert_new_fails_if_the_local_server_is_dead(_Config) ->
+    %% Get a pid for a stopped process
+    {Pid, Mon} = spawn_monitor(fun() -> ok end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} -> ok
+    end,
+    try
+        cets:insert_new(Pid, {alice, 32})
+    catch
+        exit:{noproc, {gen_server, call, _}} -> ok
+    end.
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),
@@ -229,6 +381,18 @@ test_multinode(Config) ->
     delete_many(Node4, Tab, [a, n]),
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
     ok.
+
+test_multinode_remote_insert(Config) ->
+    Tab = rem_tab,
+    [Node2, Node3 | _] = proplists:get_value(nodes, Config),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    ok = join(Node2, Tab, Pid2, Pid3),
+    %% Ensure it is a remote node
+    true = node() =/= node(Pid2),
+    %% Insert without calling rpc module
+    cets:insert(Pid2, {a}),
+    [{a}] = dump(Node3, Tab).
 
 node_list_is_correct(Config) ->
     Node1 = node(),

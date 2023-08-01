@@ -22,6 +22,7 @@
     stop/1,
     insert/2,
     insert_many/2,
+    insert_new/2,
     delete/2,
     delete_many/2,
     delete_object/2,
@@ -34,6 +35,8 @@
     other_pids/1,
     pause/1,
     unpause/2,
+    get_leader/1,
+    set_leader/2,
     sync/1,
     ping/1,
     info/1,
@@ -57,12 +60,15 @@
     stop/1,
     insert/2,
     insert_many/2,
+    insert_new/2,
     delete/2,
     delete_many/2,
     delete_object/2,
     delete_objects/2,
     pause/1,
     unpause/2,
+    get_leader/1,
+    set_leader/2,
     sync/1,
     ping/1,
     info/1,
@@ -91,7 +97,9 @@
     | {delete_object, term()}
     | {insert_many, [tuple()]}
     | {delete_many, [term()]}
-    | {delete_objects, [term()]}.
+    | {delete_objects, [term()]}
+    | {insert_new, tuple()}
+    | {leader_op, op()}.
 -type from() :: {pid(), reference()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
@@ -101,6 +109,8 @@
     mon_tab := atom(),
     mon_pid := pid(),
     other_servers := [pid()],
+    leader := pid(),
+    is_leader := boolean(),
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()]
@@ -115,6 +125,8 @@
     | get_info
     | other_servers
     | {unpause, reference()}
+    | get_leader
+    | {set_leader, boolean()}
     | {send_dump, [pid()], [tuple()]}.
 
 -type info() :: #{
@@ -128,14 +140,22 @@
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
+-type handle_wrong_leader() :: fun((term()) -> ok).
 -type start_opts() :: #{
     type => ordered_set | bag,
     keypos => non_neg_integer(),
     handle_down => handle_down_fun(),
-    handle_conflict => handle_conflict_fun()
+    handle_conflict => handle_conflict_fun(),
+    handle_wrong_leader => handle_wrong_leader()
 }.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
+
+-type local_mon_tab() :: atom().
+-type remote_mon_tab() :: {remote, node(), local_mon_tab()}.
+-type local_or_remote_mon_tab() :: local_mon_tab() | remote_mon_tab().
+-type wait_info() :: {Servers :: [pid()], MonTabInfo :: local_or_remote_mon_tab()}.
+-export_type([wait_info/0, local_or_remote_mon_tab/0]).
 
 %% API functions
 
@@ -196,6 +216,18 @@ insert(Server, Rec) when is_tuple(Rec) ->
 insert_many(Server, Records) when is_list(Records) ->
     cets_call:sync_operation(Server, {insert_many, Records}).
 
+%% Tries to insert a new record.
+%% All inserts are sent to the leader node first.
+%% It is a slightly slower comparing to just insert, because
+%% extra messaging is required.
+-spec insert_new(server_ref(), tuple()) -> WasInserted :: boolean().
+insert_new(Server, Rec) when is_tuple(Rec) ->
+    Res = cets_call:send_leader_op(Server, {insert_new, Rec}),
+    handle_insert_new_result(Res).
+
+handle_insert_new_result(ok) -> true;
+handle_insert_new_result({error, rejected}) -> false.
+
 %% Removes an object with the key from all nodes in the cluster.
 %% Ideally, nodes should only remove data that they've inserted, not data from other node.
 -spec delete(server_ref(), term()) -> ok.
@@ -248,6 +280,13 @@ wait_response(Mon, Timeout) ->
 other_servers(Server) ->
     cets_call:long_call(Server, other_servers).
 
+-spec get_leader(server_ref()) -> pid().
+get_leader(Tab) when is_atom(Tab) ->
+    %% Optimization: replace call with ETS lookup
+    cets_metadata:get(Tab, leader);
+get_leader(Server) ->
+    gen_server:call(Server, get_leader).
+
 %% Get a list of other nodes in the cluster that are connected together.
 -spec other_nodes(server_ref()) -> [node()].
 other_nodes(Server) ->
@@ -265,6 +304,13 @@ pause(Server) ->
 -spec unpause(server_ref(), pause_monitor()) -> ok | {error, unknown_pause_monitor}.
 unpause(Server, PauseRef) ->
     cets_call:long_call(Server, {unpause, PauseRef}).
+
+%% Set is_leader field in the state.
+%% For debugging only.
+%% Setting in in the real life would break leader election logic.
+-spec set_leader(server_ref(), boolean()) -> ok.
+set_leader(Server, IsLeader) ->
+    cets_call:long_call(Server, {set_leader, IsLeader}).
 
 %% Waits till all pending operations are applied.
 -spec sync(server_ref()) -> ok.
@@ -290,12 +336,16 @@ init({Tab, Opts}) ->
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     _ = ets:new(MonTab, [public, named_table]),
+    cets_metadata:init(Tab),
+    cets_metadata:set(Tab, leader, self()),
     {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
         mon_tab => MonTab,
         mon_pid => MonPid,
         other_servers => [],
+        leader => self(),
+        is_leader => true,
         opts => Opts,
         backlog => [],
         pause_monitors => []
@@ -305,6 +355,8 @@ init({Tab, Opts}) ->
     {noreply, state()} | {reply, term(), state()}.
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
+handle_call(get_leader, _From, State = #{leader := Leader}) ->
+    {reply, Leader, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
@@ -328,6 +380,8 @@ handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     {reply, Mon, State#{pause_monitors := [Mon | Mons]}};
 handle_call({unpause, Ref}, _From, State) ->
     handle_unpause(Ref, State);
+handle_call({set_leader, IsLeader}, _From, State) ->
+    {reply, ok, State#{is_leader := IsLeader}};
 handle_call(get_info, _From, State) ->
     handle_get_info(State).
 
@@ -364,7 +418,7 @@ code_change(_OldVsn, State, _Extra) ->
 handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, State#{other_servers := Servers2}}.
+    {reply, ok, set_other_servers(Servers2, State)}.
 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -386,7 +440,7 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := Mon
             Servers2 = lists:delete(RemotePid, Servers),
             notify_remote_down(RemotePid, MonTab),
             call_user_handle_down(RemotePid, State),
-            {noreply, State#{other_servers := Servers2}};
+            {noreply, set_other_servers(Servers2, State)};
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -429,6 +483,17 @@ add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) -
     end;
 add_servers2(_SelfPid, [], _Servers) ->
     [].
+
+%% Sets other_servers field, chooses the leader
+set_other_servers(Servers, State = #{tab := Tab}) ->
+    %% Choose process with highest pid.
+    %% Uses total ordering of terms in Erlang
+    %% (so all nodes would choose the same leader).
+    %% The leader node would not receive that much extra load.
+    Leader = lists:max([self() | Servers]),
+    IsLeader = Leader =:= self(),
+    cets_metadata:set(Tab, leader, self()),
+    State#{leader := Leader, is_leader := IsLeader, other_servers := Servers}.
 
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
@@ -475,21 +540,55 @@ do_table_op({insert_many, Recs}, Tab) ->
 do_table_op({delete_many, Keys}, Tab) ->
     ets_delete_keys(Tab, Keys);
 do_table_op({delete_objects, Objects}, Tab) ->
-    ets_delete_objects(Tab, Objects).
+    ets_delete_objects(Tab, Objects);
+do_table_op({insert_new, Rec}, Tab) ->
+    ets:insert_new(Tab, Rec).
 
 %% Handle operation locally and replicate it across the cluster
+handle_op(From, {leader_op, Msg}, State) ->
+    handle_leader_op(From, Msg, State);
 handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
     do_op(Msg, State),
-    WaitInfo = replicate(From, Msg, State),
+    WaitInfo = replicate(Pid, From, Msg, State),
     Pid ! {cets_reply, Mon, WaitInfo},
     ok.
 
-replicate(From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
+handle_leader_op(From = {Mon, Pid}, Msg, State = #{is_leader := true}) ->
+    case do_op(Msg, State) of
+        %% Skip the replication - insert_new returns false.
+        false ->
+            Pid ! {cets_reply, Mon, false, {error, rejected}},
+            ok;
+        true ->
+            WaitInfo = replicate(Pid, From, Msg, State),
+            Pid ! {cets_reply, Mon, WaitInfo},
+            ok
+    end;
+handle_leader_op(From = {Mon, Pid}, Msg, State) ->
+    %% Reject operation - not a leader
+    Pid ! {cets_reply, Mon, false, {error, wrong_leader}},
+    handle_wrong_leader(From, Msg, State).
+
+handle_wrong_leader(From, Msg, _State = #{opts := #{handle_wrong_leader := F}}) ->
+    %% It is used for debugging/logging
+    %% Do not do anything heavy here
+    catch F(#{from => From, msg => Msg, server => self()}),
+    ok;
+handle_wrong_leader(_State, _From, _Msg) ->
+    ok.
+
+-spec replicate(pid(), {reference(), pid()}, op(), state()) -> wait_info().
+replicate(Pid, From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
     %% Reply would be routed directly to FromPid
     Msg2 = {remote_op, From, Msg},
     [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
     ets:insert(MonTab, From),
-    {Servers, MonTab}.
+    MonTabInfo =
+        case node(Pid) =:= node() of
+            true -> MonTab;
+            false -> {remote, node(), MonTab}
+        end,
+    {Servers, MonTabInfo}.
 
 apply_backlog(State = #{backlog := Backlog}) ->
     [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
