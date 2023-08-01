@@ -175,7 +175,7 @@
 %%   We recommend to define that function if keys could have conflicts.
 %%   This function would be called once for each conflicting key.
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
--spec start(table_name(), start_opts()) -> {ok, server_pid()}.
+-spec start(table_name(), start_opts()) -> gen_server:start_ret().
 start(Tab, Opts) when is_atom(Tab) ->
     case check_opts(Opts) of
         [] ->
