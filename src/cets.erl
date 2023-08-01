@@ -29,7 +29,7 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
-    send_dump/3,
+    send_dump/4,
     table_name/1,
     other_nodes/1,
     other_pids/1,
@@ -109,6 +109,7 @@
 -type state() :: #{
     tab := table_name(),
     ack_pid := cets_ack:ack_pid(),
+    join_ref := cets_join:join_ref(),
     %% Updated by set_other_servers/2 function only
     other_servers := [server_pid()],
     leader := server_pid(),
@@ -129,7 +130,7 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, [server_pid()], [tuple()]}.
+    | {send_dump, [server_pid()], cets_join:join_ref(), [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -137,6 +138,7 @@
     size := non_neg_integer(),
     memory := non_neg_integer(),
     ack_pid := cets_ack:ack_pid(),
+    join_ref := cets_join:cets_join(),
     opts := start_opts()
 }.
 
@@ -197,10 +199,10 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [server_pid()], [tuple()]) -> ok.
-send_dump(Server, NewPids, OurDump) ->
-    Info = #{msg => send_dump, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
+-spec send_dump(server_ref(), [server_pid()], cets_join:join_ref(), [tuple()]) -> ok.
+send_dump(Server, NewPids, JoinRef, OurDump) ->
+    Info = #{msg => send_dump, join_ref => JoinRef, count => length(OurDump)},
+    cets_call:long_call(Server, {send_dump, NewPids, JoinRef, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -332,6 +334,8 @@ init({Tab, Opts}) ->
         tab => Tab,
         ack_pid => AckPid,
         other_servers => [],
+        %% Initial join_ref is random
+        join_ref => make_ref(),
         leader => self(),
         is_leader => true,
         opts => Opts,
@@ -367,8 +371,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump, NewPids, Dump}, _From, State) ->
-    handle_send_dump(NewPids, Dump, State);
+handle_call({send_dump, NewPids, JoinRef, Dump}, _From, State) ->
+    handle_send_dump(NewPids, JoinRef, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -403,11 +407,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
--spec handle_send_dump([server_pid()], [tuple()], state()) -> {reply, ok, state()}.
-handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
+-spec handle_send_dump([server_pid()], cets_join:join_ref(), [tuple()], state()) -> {reply, ok, state()}.
+handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, set_other_servers(Servers2, State)}.
+    {reply, ok, set_other_servers(Servers2, State#{join_ref := JoinRef})}.
 
 -spec handle_down(reference(), pid(), state()) -> state().
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
@@ -595,6 +599,7 @@ handle_get_info(
         tab := Tab,
         other_servers := Servers,
         ack_pid := AckPid,
+        join_ref := JoinRef,
         opts := Opts
     }
 ) ->
@@ -604,6 +609,7 @@ handle_get_info(
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
+        join_ref => JoinRef,
         opts => Opts
     }.
 

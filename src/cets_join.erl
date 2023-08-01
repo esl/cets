@@ -5,6 +5,9 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type lock_key() :: term().
+-type join_ref() :: reference().
+
+-export_type([join_ref/0]).
 
 -ignore_xref([join/5]).
 
@@ -60,6 +63,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     end.
 
 join2(_Info, LocalPid, RemotePid, JoinOpts) ->
+    JoinRef = make_ref(),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
@@ -79,8 +83,8 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
-        RemF = fun(Pid) -> send_dump(Pid, LocPids, LocalDump2, JoinOpts) end,
-        LocF = fun(Pid) -> send_dump(Pid, RemPids, RemoteDump2, JoinOpts) end,
+        RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
+        LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
         lists:foreach(LocF, LocPids),
         lists:foreach(RemF, RemPids),
         ok
@@ -88,9 +92,9 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
     end.
 
-send_dump(Pid, Pids, Dump, JoinOpts) ->
+send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
     run_step({before_send_dump, Pid}, JoinOpts),
-    cets:send_dump(Pid, Pids, Dump).
+    cets:send_dump(Pid, Pids, JoinRef, Dump).
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),

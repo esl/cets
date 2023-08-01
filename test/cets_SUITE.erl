@@ -29,6 +29,7 @@ all() ->
         insert_new_fails_if_the_local_server_is_dead,
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
+        join_ref_is_same_after_join,
         join_fails_before_send_dump,
         test_multinode,
         test_multinode_remote_insert,
@@ -375,6 +376,13 @@ join_with_the_same_pid(_Config) ->
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
+
+join_ref_is_same_after_join(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    #{join_ref := JoinRef} = cets:info(Pid1),
+    #{join_ref := JoinRef} = cets:info(Pid2).
 
 join_fails_before_send_dump(Config) ->
     Me = self(),
