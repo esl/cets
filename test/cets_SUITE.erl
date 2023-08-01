@@ -29,6 +29,7 @@ all() ->
         insert_new_fails_if_the_local_server_is_dead,
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
+        join_fails_before_send_dump,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -74,11 +75,14 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(test_multinode_auto_discovery, Config) ->
+init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
     ct:make_priv_dir(),
-    Config;
-init_per_testcase(_, Config) ->
-    Config.
+    init_per_testcase_generic(Name, Config);
+init_per_testcase(Name, Config) ->
+    init_per_testcase_generic(Name, Config).
+
+init_per_testcase_generic(Name, Config) ->
+    [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -371,6 +375,39 @@ join_with_the_same_pid(_Config) ->
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
+
+join_fails_before_send_dump(Config) ->
+    Me = self(),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    cets:insert(Pid1, {1}),
+    cets:insert(Pid2, {2}),
+    F = fun
+        ({before_send_dump, P}) when Pid1 =:= P ->
+            Me ! before_send_dump_called_for_pid1;
+        ({before_send_dump, P}) when Pid2 =:= P ->
+            error(sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, sim_error, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    %% Ensure we sent dump to Pid1
+    receive_message(before_send_dump_called_for_pid1),
+    %% Not joined, some data exchanged
+    cets:sync(Pid1),
+    cets:sync(Pid2),
+    [] = cets:other_pids(Pid1),
+    [] = cets:other_pids(Pid2),
+    %% Pid1 applied new version of dump
+    %% Though, it got disconnected after
+    {ok, [{1}, {2}]} = cets:remote_dump(Pid1),
+    %% Pid2 rejected changes
+    {ok, [{2}]} = cets:remote_dump(Pid2),
+    receive_message({down_called, Pid1, Pid2}).
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -773,3 +810,17 @@ start_node(Sname) ->
     {ok, _Peer, Node} = peer:start(#{name => Sname}),
     ok = rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
+
+receive_message(M) ->
+    receive
+        M -> ok
+    after 5000 -> error({receive_message_timeout, M})
+    end.
+
+make_name(Config, Num) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num)).
+
+lock_name(Config) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_lock").
