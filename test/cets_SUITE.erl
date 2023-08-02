@@ -50,6 +50,7 @@ all() ->
         delete_request_many_from_bag,
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
+        table_name_works,
         info_contains_opts
     ].
 
@@ -626,6 +627,13 @@ insert_into_keypos_table(_Config) ->
     cets:insert(T, {rec, 2}),
     [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
     [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
+
+table_name_works(_Config) ->
+    T = tabnamecheck,
+    {ok, Pid} = cets:start(T, #{}),
+    {ok, T} = cets:table_name(T),
+    {ok, T} = cets:table_name(Pid),
+    #{table := T} = cets:info(Pid).
 
 info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
