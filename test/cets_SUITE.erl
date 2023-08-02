@@ -51,7 +51,12 @@ all() ->
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
         table_name_works,
-        info_contains_opts
+        info_contains_opts,
+        unknown_down_messageis_ignored,
+        unknown_messageis_ignored,
+        unknown_cast_messageis_ignored,
+        unknown_messageis_ignored_in_ack_process,
+        unknown_cast_messageis_ignored_in_ack_process
     ].
 
 init_per_suite(Config) ->
@@ -638,6 +643,40 @@ table_name_works(_Config) ->
 info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
+
+unknown_down_messageis_ignored(_Config) ->
+    {ok, Pid} = cets:start(rand_down_msg, #{}),
+    RandPid = spawn(fun() -> ok end),
+    Pid ! {'DOWN', make_ref(), process, RandPid, oops},
+    still_works(Pid).
+
+unknown_messageis_ignored(_Config) ->
+    {ok, Pid} = cets:start(unkn_msg, #{}),
+    Pid ! oops,
+    still_works(Pid).
+
+unknown_cast_messageis_ignored(_Config) ->
+    {ok, Pid} = cets:start(unkn_cast_msg, #{}),
+    gen_server:cast(Pid, oops),
+    still_works(Pid).
+
+unknown_messageis_ignored_in_ack_process(_Config) ->
+    {ok, Pid} = cets:start(ack_unkn_msg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    AckPid ! oops,
+    still_works(Pid).
+
+unknown_cast_messageis_ignored_in_ack_process(_Config) ->
+    {ok, Pid} = cets:start(ack_unkn_cast_msg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    gen_server:cast(AckPid, oops),
+    still_works(Pid).
+
+still_works(Pid) ->
+    pong = cets:ping(Pid),
+    %% The server works fine
+    ok = cets:insert(Pid, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).
