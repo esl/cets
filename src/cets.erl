@@ -459,7 +459,7 @@ add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
     ?LOG_INFO(#{what => join_to_the_same_pid_ignored}),
     add_servers2(SelfPid, OtherPids, Servers);
 add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
-    case has_remote_pid(RemotePid, Servers) of
+    case lists:member(RemotePid, Servers) of
         false ->
             erlang:monitor(process, RemotePid),
             [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
@@ -500,21 +500,11 @@ ets_delete_objects(Tab, [Object | Objects]) ->
 ets_delete_objects(_Tab, []) ->
     ok.
 
-has_remote_pid(RemotePid, Servers) ->
-    lists:member(RemotePid, Servers).
-
-reply_updated(From, AckPid) ->
-    cets_ack:ack(AckPid, From, self()).
-
--spec send_remote_op(pid(), remote_op()) -> noconnect | ok.
-send_remote_op(RemotePid, RemoteOp) ->
-    erlang:send(RemotePid, RemoteOp, [noconnect]).
-
 %% Handle operation from a remote node
 -spec handle_remote_op(op(), from(), pid(), state()) -> ok.
 handle_remote_op(Op, From, AckPid, State) ->
     do_op(Op, State),
-    reply_updated(From, AckPid).
+    cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
 -spec do_op(op(), state()) -> ok | boolean().
@@ -571,6 +561,10 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
     [send_remote_op(Server, RemoteOp) || Server <- Servers],
     %% AckPid would call gen_server:reply(From, ok) ones all the remote servers reply
     ok.
+
+-spec send_remote_op(pid(), remote_op()) -> noconnect | ok.
+send_remote_op(RemotePid, RemoteOp) ->
+    erlang:send(RemotePid, RemoteOp, [noconnect]).
 
 -spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
