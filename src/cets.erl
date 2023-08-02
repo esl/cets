@@ -338,7 +338,7 @@ init({Tab, Opts}) ->
     _ = ets:new(MonTab, [public, named_table]),
     cets_metadata:init(Tab),
     cets_metadata:set(Tab, leader, self()),
-    {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
+    {ok, MonPid} = cets_ack:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
         mon_tab => MonTab,
