@@ -27,11 +27,7 @@ long_call(Server, Msg) ->
 long_call(Server, Msg, Info) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
-            Info2 = Info#{
-                server => Server,
-                pid => Pid,
-                node => node(Pid)
-            },
+            Info2 = Info#{server => Server, pid => Pid, node => node(Pid)},
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
             cets_long:run_safely(Info2, F);
         undefined ->
