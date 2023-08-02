@@ -108,6 +108,7 @@
 -type state() :: #{
     tab := table_name(),
     ack_pid := pid(),
+    %% Updated by set_other_servers/2 function only
     other_servers := [pid()],
     leader := pid(),
     is_leader := boolean(),
@@ -189,9 +190,9 @@ dump(Tab) ->
 remote_dump(Server) ->
     cets_call:long_call(Server, remote_dump).
 
--spec table_name(server_ref()) -> table_name().
+-spec table_name(server_ref()) -> {ok, table_name()}.
 table_name(Tab) when is_atom(Tab) ->
-    Tab;
+    {ok, Tab};
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
@@ -265,14 +266,9 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), non_neg_integer() | infinity) -> {reply, ok} | {error, term()}.
+-spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()}.
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
-
-%% Get a list of other CETS processes that are handling this table.
--spec other_servers(server_ref()) -> [server_ref()].
-other_servers(Server) ->
-    cets_call:long_call(Server, other_servers).
 
 -spec get_leader(server_ref()) -> pid().
 get_leader(Tab) when is_atom(Tab) ->
@@ -289,7 +285,7 @@ other_nodes(Server) ->
 %% Get a list of other CETS processes that are handling this table.
 -spec other_pids(server_ref()) -> [pid()].
 other_pids(Server) ->
-    other_servers(Server).
+    cets_call:long_call(Server, other_servers).
 
 -spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
@@ -393,7 +389,7 @@ handle_info({remote_op, Op, From, AckPid}, State) ->
     handle_remote_op(Op, From, AckPid, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State);
+    {noreply, handle_down(Mon, Pid, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -406,11 +402,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
+-spec handle_send_dump([pid()], [tuple()], state()) -> {reply, ok, state()}.
 handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, set_other_servers(Servers2, State)}.
 
+-spec handle_down(reference(), pid(), state()) -> state().
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
@@ -419,19 +417,19 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
                 state => State,
                 paused_by_pid => Pid
             }),
-            {reply, ok, State2} = handle_unpause(Mon, State),
-            {noreply, State2};
+            handle_unpause2(Mon, Mons, State);
         false ->
-            handle_down2(Mon, Pid, State)
+            handle_down2(Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) ->
+-spec handle_down2(pid(), state()) -> state().
+handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) ->
     case lists:member(RemotePid, Servers) of
         true ->
-            Servers2 = lists:delete(RemotePid, Servers),
             cets_ack:send_remote_down(AckPid, RemotePid),
             call_user_handle_down(RemotePid, State),
-            {noreply, set_other_servers(Servers2, State)};
+            Servers2 = lists:delete(RemotePid, Servers),
+            set_other_servers(Servers2, State);
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -439,10 +437,11 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, ack_pid := Ack
                 remote_pid => RemotePid,
                 state => State
             }),
-            {noreply, State}
+            State
     end.
 
 %% Merge two lists of pids, create the missing monitors.
+-spec add_servers(Servers, Servers) -> Servers when Servers :: [pid()].
 add_servers(Pids, Servers) ->
     lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
 
@@ -466,6 +465,7 @@ add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 %% Sets other_servers field, chooses the leader
+-spec set_other_servers([pid()], state()) -> state().
 set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang
@@ -479,13 +479,16 @@ set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     cets_ack:set_servers(AckPid, Servers),
     State#{leader := Leader, is_leader := IsLeader, other_servers := Servers}.
 
+-spec pids_to_nodes([pid()]) -> [node()].
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
+-spec ets_delete_keys(table_name(), [term()]) -> ok.
 ets_delete_keys(Tab, Keys) ->
     [ets:delete(Tab, Key) || Key <- Keys],
     ok.
 
+-spec ets_delete_objects(table_name(), [tuple()]) -> ok.
 ets_delete_objects(Tab, Objects) ->
     [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
@@ -501,7 +504,7 @@ handle_remote_op(Op, From, AckPid, State) ->
 do_op(Op, #{tab := Tab}) ->
     do_table_op(Op, Tab).
 
--spec do_table_op(op(), atom()) -> ok | boolean().
+-spec do_table_op(op(), table_name()) -> ok | boolean().
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
@@ -563,7 +566,7 @@ apply_backlog(State = #{backlog := Backlog}) ->
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
--spec handle_unpause(reference(), state()) -> {reply, Reply, state()} when
+-spec handle_unpause(pause_monitor(), state()) -> {reply, Reply, state()} when
     Reply :: ok | {error, unknown_pause_monitor}.
 handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
@@ -573,7 +576,7 @@ handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
             {reply, {error, unknown_pause_monitor}, State}
     end.
 
--spec handle_unpause2(reference(), [reference()], state()) -> state().
+-spec handle_unpause2(pause_monitor(), [pause_monitor()], state()) -> state().
 handle_unpause2(Mon, Mons, State) ->
     erlang:demonitor(Mon, [flush]),
     Mons2 = lists:delete(Mon, Mons),
@@ -605,7 +608,7 @@ handle_get_info(
 
 %% Cleanup
 -spec call_user_handle_down(pid(), state()) -> ok.
-call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
+call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
             FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
@@ -621,7 +624,7 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     end.
 
 -spec handle_wrong_leader(op(), from(), state()) -> ok.
-handle_wrong_leader(Op, From, _State = #{opts := #{handle_wrong_leader := F}}) ->
+handle_wrong_leader(Op, From, #{opts := #{handle_wrong_leader := F}}) ->
     %% It is used for debugging/logging
     %% Do not do anything heavy here
     catch F(#{from => From, op => Op, server => self()}),
