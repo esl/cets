@@ -91,6 +91,7 @@
     | {global, term()}
     | {via, module(), term()}.
 -type request_id() :: reference().
+-type from() :: gen_server:from().
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
@@ -100,8 +101,8 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type remote_op() :: {remote_op, Op :: op(), From :: gen_server:from(), AckPid :: pid()}.
--type backlog_entry() :: {op(), gen_server:from()}.
+-type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: pid()}.
+-type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
@@ -351,7 +352,7 @@ init({Tab, Opts}) ->
         pause_monitors => []
     }}.
 
--spec handle_call(long_msg() | {op, op()}, gen_server:from(), state()) ->
+-spec handle_call(long_msg() | {op, op()}, from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
 handle_call({op, Op}, From, State = #{pause_monitors := []}) ->
     handle_op(Op, From, State),
@@ -511,7 +512,7 @@ send_remote_op(RemotePid, RemoteOp) ->
     erlang:send(RemotePid, RemoteOp, [noconnect]).
 
 %% Handle operation from a remote node
--spec handle_remote_op(op(), gen_server:from(), pid(), state()) -> ok.
+-spec handle_remote_op(op(), from(), pid(), state()) -> ok.
 handle_remote_op(Op, From, AckPid, State) ->
     do_op(Op, State),
     reply_updated(From, AckPid).
@@ -538,14 +539,14 @@ do_table_op({insert_new, Rec}, Tab) ->
     ets:insert_new(Tab, Rec).
 
 %% Handle operation locally and replicate it across the cluster
--spec handle_op(op(), gen_server:from(), state()) -> ok.
+-spec handle_op(op(), from(), state()) -> ok.
 handle_op({leader_op, Op}, From, State) ->
     handle_leader_op(Op, From, State);
 handle_op(Op, From, State) ->
     do_op(Op, State),
     replicate(Op, From, State).
 
--spec handle_leader_op(op(), gen_server:from(), state()) -> ok.
+-spec handle_leader_op(op(), from(), state()) -> ok.
 handle_leader_op(Op, From, State = #{is_leader := true}) ->
     case do_op(Op, State) of
         %% Skip the replication - insert_new returns false.
@@ -561,7 +562,7 @@ handle_leader_op(Op, From, State) ->
     %% Call an user defined callback to notify about the error
     handle_wrong_leader(Op, From, State).
 
--spec replicate(op(), gen_server:from(), state()) -> ok.
+-spec replicate(op(), from(), state()) -> ok.
 replicate(_Op, From, #{other_servers := []}) ->
     %% Skip replication
     gen_server:reply(From, ok);

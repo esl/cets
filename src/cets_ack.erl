@@ -22,20 +22,21 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type from() :: from().
 -type state() :: #{
-    gen_server:from() => [pid()]
+    from() => [pid()]
 }.
 
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
--spec add(pid(), gen_server:from(), [pid()]) -> ok.
+-spec add(pid(), from(), [pid()]) -> ok.
 add(AckPid, From, Servers) ->
     AckPid ! {add, From, Servers},
     ok.
 
 %% Called by a remote server after an operation is applied.
--spec ack(pid(), gen_server:from(), pid()) -> ok.
+-spec ack(pid(), from(), pid()) -> ok.
 ack(AckPid, From, RemotePid) ->
     %% nosuspend makes message sending unreliable
     erlang:send(AckPid, {ack, From, RemotePid}, [noconnect]),
@@ -86,7 +87,7 @@ handle_remote_down(RemotePid, State) ->
     end,
     maps:fold(F, State, State).
 
--spec handle_updated(gen_server:from(), pid(), state()) -> state().
+-spec handle_updated(from(), pid(), state()) -> state().
 handle_updated(From, RemotePid, State) ->
     case State of
         #{From := Servers} ->
@@ -96,7 +97,7 @@ handle_updated(From, RemotePid, State) ->
             State
     end.
 
--spec handle_updated(gen_server:from(), pid(), [pid(), ...], state()) -> state().
+-spec handle_updated(from(), pid(), [pid(), ...], state()) -> state().
 handle_updated(From, RemotePid, Servers, State) ->
     %% Removes the remote server from a waiting list
     case lists:delete(RemotePid, Servers) of
