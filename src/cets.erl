@@ -140,7 +140,7 @@
 
 -type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
--type handle_wrong_leader() :: fun((term()) -> ok).
+-type handle_wrong_leader() :: fun((#{from := from(), op := op(), server := pid()}) -> ok).
 -type start_opts() :: #{
     type => ordered_set | bag,
     keypos => non_neg_integer(),
@@ -150,12 +150,6 @@
 }.
 
 -export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
-
--type local_mon_tab() :: atom().
--type remote_mon_tab() :: {remote, node(), local_mon_tab()}.
--type local_or_remote_mon_tab() :: local_mon_tab() | remote_mon_tab().
--type wait_info() :: {Servers :: [pid()], MonTabInfo :: local_or_remote_mon_tab()}.
--export_type([wait_info/0, local_or_remote_mon_tab/0]).
 
 %% API functions
 
