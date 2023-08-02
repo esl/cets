@@ -41,6 +41,7 @@ all() ->
         ack_process_stops_correctly,
         ack_process_handles_unknown_remote_server,
         ack_process_handles_unknown_from,
+        ack_calling_add_when_server_list_is_empty_is_not_allowed,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -572,6 +573,21 @@ ack_process_handles_unknown_from(_Config) ->
     cets_ack:ack(AckPid, From, self()),
     %% Ack process still works fine
     {reply, ok} = cets:wait_response(R, 5000).
+
+ack_calling_add_when_server_list_is_empty_is_not_allowed(_Config) ->
+    {ok, Pid} = cets:start(add_fails, #{}),
+    Mon = monitor(process, Pid),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    FakeFrom = {self(), make_ref()},
+    cets_ack:add(AckPid, FakeFrom),
+    %% cets server would never send an add message in the single node configuration
+    %% (cets_ack is not used if there is only one node,
+    %% so cets module calls gen_server:reply and skips the replication)
+    receive
+        {'DOWN', Mon, process, Pid, Reason} ->
+            {unexpected_add_msg, _} = Reason
+    after 5000 -> ct:fail(timeout)
+    end.
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),

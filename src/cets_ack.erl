@@ -109,7 +109,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% Calling add when the server list is empty is not allowed
 %% (and CETS process checks for it when sending us a new task)
 handle_add(From, State = #{servers := [_ | _] = Servers}) ->
-    maps:put(From, Servers, State).
+    maps:put(From, Servers, State);
+handle_add(_, _) ->
+    error(unexpected_add_msg).
 
 -spec handle_remote_down(server_pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
@@ -138,8 +140,8 @@ handle_updated(From, RemotePid, Servers, State) ->
     %% Removes the remote server from a waiting list
     case lists:delete(RemotePid, Servers) of
         [] ->
-            %% Send reply to our client
-            %% confirming that the operation has finished
+            %% Send a reply to our client
+            %% confirming that his operation has been finished
             gen_server:reply(From, ok),
             %% Remove the task
             maps:remove(From, State);
