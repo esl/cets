@@ -28,7 +28,7 @@
 
 -type from() :: gen_server:from().
 -type state() :: #{
-    from() => [pid()]
+    from() => [pid(), ...]
 }.
 
 %% API functions

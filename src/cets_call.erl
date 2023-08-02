@@ -15,6 +15,7 @@
 -type op() :: cets:op().
 -type server_ref() :: cets:server_ref().
 -type long_msg() :: cets:long_msg().
+-type sync_operation_return() :: ok | {error, Reason :: term()}.
 
 %% Does gen_server:call with better error reporting.
 %% It would log a warning if the call takes too long.
@@ -44,7 +45,7 @@ long_call(Server, Msg, Info) ->
 async_operation(Server, Msg) ->
     gen_server:send_request(Server, {op, Msg}).
 
--spec sync_operation(server_ref(), op()) -> ok | Result :: term().
+-spec sync_operation(server_ref(), op()) -> sync_operation_return().
 sync_operation(Server, Msg) ->
     gen_server:call(Server, {op, Msg}, infinity).
 
@@ -62,13 +63,13 @@ backoff_intervals() ->
     [10, 50, 100, 500, 1000, 5000, 5000].
 
 %% Sends all requests to a single node in the cluster
--spec send_leader_op(server_ref(), op()) -> term().
+-spec send_leader_op(server_ref(), op()) -> sync_operation_return().
 send_leader_op(Server, Op) ->
     send_leader_op(Server, Op, backoff_intervals()).
 
 send_leader_op(Server, Op, Backoff) ->
     Leader = cets:get_leader(Server),
-    Res = cets_call:sync_operation(Leader, {leader_op, Op}),
+    Res = sync_operation(Leader, {leader_op, Op}),
     case Res of
         {error, wrong_leader} ->
             ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),

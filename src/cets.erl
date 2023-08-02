@@ -90,7 +90,7 @@
     | {local, atom()}
     | {global, term()}
     | {via, module(), term()}.
--type request_id() :: reference().
+-type request_id() :: gen_server:request_id().
 -type from() :: gen_server:from().
 -type op() ::
     {insert, tuple()}
@@ -390,7 +390,7 @@ handle_call({unpause, Ref}, _From, State) ->
 handle_call({set_leader, IsLeader}, _From, State) ->
     {reply, ok, State#{is_leader := IsLeader}};
 handle_call(get_info, _From, State) ->
-    handle_get_info(State).
+    {reply, handle_get_info(State), State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast(Msg, State) ->
@@ -596,26 +596,26 @@ handle_unpause2(Mon, Mons, State) ->
         end,
     {reply, ok, State3}.
 
--spec handle_get_info(state()) -> {reply, info(), state()}.
+-spec handle_get_info(state()) -> info().
 handle_get_info(
-    State = #{
+    #{
         tab := Tab,
         other_servers := Servers,
         ack_pid := AckPid,
         opts := Opts
     }
 ) ->
-    Info = #{
+    #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
         opts => Opts
-    },
-    {reply, Info, State}.
+    }.
 
 %% Cleanup
+-spec call_user_handle_down(pid(), state()) -> ok.
 call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
@@ -631,6 +631,7 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             ok
     end.
 
+-spec handle_wrong_leader(op(), from(), state()) -> ok.
 handle_wrong_leader(Op, From, _State = #{opts := #{handle_wrong_leader := F}}) ->
     %% It is used for debugging/logging
     %% Do not do anything heavy here
