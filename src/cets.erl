@@ -100,8 +100,8 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type from() :: {pid(), reference()}.
--type backlog_entry() :: {op(), from()}.
+-type remote_op() :: {remote_op, Op :: op(), From :: gen_server:from(), AckPid :: pid()}.
+-type backlog_entry() :: {op(), gen_server:from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
@@ -351,15 +351,15 @@ init({Tab, Opts}) ->
         pause_monitors => []
     }}.
 
--spec handle_call(term(), from(), state()) ->
+-spec handle_call(long_msg() | {op, op()}, gen_server:from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
-handle_call({op, Msg}, From, State = #{pause_monitors := []}) ->
-    handle_op(From, Msg, State),
+handle_call({op, Op}, From, State = #{pause_monitors := []}) ->
+    handle_op(Op, From, State),
     {noreply, State};
-handle_call({op, Msg}, From, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
-    %% Backlog is a list of pending operation, when our server is paused.
+handle_call({op, Op}, From, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
+    %% Backlog is a list of pending operations, when our server is paused.
     %% The list would be applied, once our server is unpaused.
-    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
+    {noreply, State#{backlog := [{Op, From} | Backlog]}};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
 handle_call(get_leader, _From, State = #{leader := Leader}) ->
@@ -398,8 +398,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, From, AckPid, Msg}, State) ->
-    handle_remote_op(From, Msg, AckPid, State),
+handle_info({remote_op, Op, From, AckPid}, State) ->
+    handle_remote_op(Op, From, AckPid, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
     handle_down(Mon, Pid, State);
@@ -506,18 +506,22 @@ has_remote_pid(RemotePid, Servers) ->
 reply_updated(From, AckPid) ->
     cets_ack:ack(AckPid, From, self()).
 
-send_to_remote(RemotePid, Msg) ->
-    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
+-spec send_remote_op(pid(), remote_op()) -> noconnect | ok.
+send_remote_op(RemotePid, RemoteOp) ->
+    erlang:send(RemotePid, RemoteOp, [noconnect]).
 
 %% Handle operation from a remote node
-handle_remote_op(From, Msg, AckPid, State) ->
-    do_op(Msg, State),
+-spec handle_remote_op(op(), gen_server:from(), pid(), state()) -> ok.
+handle_remote_op(Op, From, AckPid, State) ->
+    do_op(Op, State),
     reply_updated(From, AckPid).
 
 %% Apply operation for one local table only
-do_op(Msg, #{tab := Tab}) ->
-    do_table_op(Msg, Tab).
+-spec do_op(op(), state()) -> ok | boolean().
+do_op(Op, #{tab := Tab}) ->
+    do_table_op(Op, Tab).
 
+-spec do_table_op(op(), atom()) -> ok | boolean().
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
@@ -534,42 +538,49 @@ do_table_op({insert_new, Rec}, Tab) ->
     ets:insert_new(Tab, Rec).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op(From, {leader_op, Msg}, State) ->
-    handle_leader_op(From, Msg, State);
-handle_op(From, Msg, State) ->
-    do_op(Msg, State),
-    replicate(From, Msg, State).
+-spec handle_op(op(), gen_server:from(), state()) -> ok.
+handle_op({leader_op, Op}, From, State) ->
+    handle_leader_op(Op, From, State);
+handle_op(Op, From, State) ->
+    do_op(Op, State),
+    replicate(Op, From, State).
 
-handle_leader_op(From, Msg, State = #{is_leader := true}) ->
-    case do_op(Msg, State) of
+-spec handle_leader_op(op(), gen_server:from(), state()) -> ok.
+handle_leader_op(Op, From, State = #{is_leader := true}) ->
+    case do_op(Op, State) of
         %% Skip the replication - insert_new returns false.
         false ->
             gen_server:reply(From, {error, rejected}),
             ok;
         true ->
-            replicate(From, Msg, State)
+            replicate(Op, From, State)
     end;
-handle_leader_op(From, Msg, State) ->
+handle_leader_op(Op, From, State) ->
     %% Reject operation - not a leader
     gen_server:reply(From, {error, wrong_leader}),
     %% Call an user defined callback to notify about the error
-    handle_wrong_leader(From, Msg, State).
+    handle_wrong_leader(Op, From, State).
 
-replicate(From, _Msg, #{other_servers := []}) ->
+-spec replicate(op(), gen_server:from(), state()) -> ok.
+replicate(_Op, From, #{other_servers := []}) ->
     %% Skip replication
     gen_server:reply(From, ok);
-replicate(From, Msg, #{ack_pid := AckPid, other_servers := Servers}) ->
+replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
     cets_ack:add(AckPid, From, Servers),
-    [send_to_remote(Server, {remote_op, From, AckPid, Msg}) || Server <- Servers],
+    RemoteOp = {remote_op, Op, From, AckPid},
+    [send_remote_op(Server, RemoteOp) || Server <- Servers],
     %% AckPid would call gen_server:reply(From, ok) ones all the remote servers reply
     ok.
 
+-spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
-    [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
+    [handle_op(Op, From, State) || {Op, From} <- lists:reverse(Backlog)],
     State#{backlog := []}.
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
+-spec handle_unpause(reference(), state()) -> {reply, Reply, state()} when
+    Reply :: ok | {error, unknown_pause_monitor}.
 handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
@@ -626,12 +637,12 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
             ok
     end.
 
-handle_wrong_leader(From, Msg, _State = #{opts := #{handle_wrong_leader := F}}) ->
+handle_wrong_leader(Op, From, _State = #{opts := #{handle_wrong_leader := F}}) ->
     %% It is used for debugging/logging
     %% Do not do anything heavy here
-    catch F(#{from => From, msg => Msg, server => self()}),
+    catch F(#{from => From, op => Op, server => self()}),
     ok;
-handle_wrong_leader(_State, _From, _Msg) ->
+handle_wrong_leader(_Op, _From, _State) ->
     ok.
 
 -type start_error() :: bag_with_conflict_handler.
