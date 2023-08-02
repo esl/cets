@@ -28,9 +28,9 @@ long_call(Server, Msg, Info) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
             Info2 = Info#{
-                remote_server => Server,
-                remote_pid => Pid,
-                remote_node => node(Pid)
+                server => Server,
+                pid => Pid,
+                node => node(Pid)
             },
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
             cets_long:run_safely(Info2, F);
@@ -42,12 +42,12 @@ long_call(Server, Msg, Info) ->
 %% Returns immediately.
 %% You can wait for response from all nodes by calling wait_response/2.
 -spec async_operation(server_ref(), op()) -> request_id().
-async_operation(Server, Msg) ->
-    gen_server:send_request(Server, {op, Msg}).
+async_operation(Server, Op) ->
+    gen_server:send_request(Server, {op, Op}).
 
 -spec sync_operation(server_ref(), op()) -> sync_operation_return().
-sync_operation(Server, Msg) ->
-    gen_server:call(Server, {op, Msg}, infinity).
+sync_operation(Server, Op) ->
+    gen_server:call(Server, {op, Op}, infinity).
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;

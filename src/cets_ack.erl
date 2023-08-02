@@ -60,8 +60,8 @@ send_remote_down(AckPid, RemotePid) ->
 
 -spec init(atom()) -> {ok, state()}.
 init(_) ->
-    State = #{},
-    {ok, State}.
+    %% We store pending query registrations directly in the state map
+    {ok, #{}}.
 
 -spec handle_call(term(), _From, state()) -> {reply, state()}.
 handle_call(Msg, From, State) ->
