@@ -30,7 +30,7 @@
 -type from() :: gen_server:from().
 -type state() :: #{
     servers := [pid()],
-    %% We store pending query registrations directly in the state map
+    %% We store tasks directly in the state map
     from() => [pid(), ...]
 }.
 
@@ -41,12 +41,13 @@ start_link(Tab) ->
     Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
-%% Sets a list of servers to be used for newly added operations
+%% Sets a list of servers to be used for newly added tasks
 -spec set_servers(pid(), [pid()]) -> ok.
 set_servers(AckPid, Servers) ->
     gen_server:cast(AckPid, {set_servers, Servers}),
     ok.
 
+%% Adds a new task to wait replies
 -spec add(pid(), from()) -> ok.
 add(AckPid, From) ->
     AckPid ! {add, From},
@@ -101,15 +102,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal functions
 
-handle_add(From, State = #{servers := Servers}) ->
+%% Calling add when the server list is empty is not allowed
+%% (and CETS process checks for it when sending us a new task)
+handle_add(From, State = #{servers := [_ | _] = Servers}) ->
     maps:put(From, Servers, State).
 
 -spec handle_remote_down(pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
-    %% Call handle_updated for all pending operations
+    %% Call handle_updated for all pending tasks
     F = fun
         (Key, _Value, State2) when is_atom(Key) ->
-            %% Ignore servers key
+            %% Ignore keys that are not used for tasks (i.e. servers key)
             State2;
         (From, Servers, State2) ->
             handle_updated(From, RemotePid, Servers, State2)
@@ -134,6 +137,7 @@ handle_updated(From, RemotePid, Servers, State) ->
             %% Send reply to our client
             %% confirming that the operation has finished
             gen_server:reply(From, ok),
+            %% Remove the task
             maps:remove(From, State);
         Servers2 ->
             %% Set an updated waiting list
