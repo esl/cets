@@ -482,16 +482,12 @@ set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
-ets_delete_keys(Tab, [Key | Keys]) ->
-    ets:delete(Tab, Key),
-    ets_delete_keys(Tab, Keys);
-ets_delete_keys(_Tab, []) ->
+ets_delete_keys(Tab, Keys) ->
+    [ets:delete(Tab, Key) || Key <- Keys],
     ok.
 
-ets_delete_objects(Tab, [Object | Objects]) ->
-    ets:delete_object(Tab, Object),
-    ets_delete_objects(Tab, Objects);
-ets_delete_objects(_Tab, []) ->
+ets_delete_objects(Tab, Objects) ->
+    [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
 
 %% Handle operation from a remote node
