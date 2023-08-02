@@ -6,7 +6,13 @@
 -module(cets_ack).
 -behaviour(gen_server).
 
--export([start_link/2]).
+-export([
+    start_link/1,
+    add/3,
+    ack/3,
+    send_remote_down/2
+]).
+
 -export([
     init/1,
     handle_call/3,
@@ -18,26 +24,37 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--type timer_ref() :: reference().
 -type state() :: #{
-    mon_tab := atom(),
-    interval := non_neg_integer(),
-    timer_ref := timer_ref()
+    gen_server:from() => [pid()]
 }.
 
-start_link(Name, MonTab) ->
-    gen_server:start_link({local, Name}, ?MODULE, MonTab, []).
+start_link(Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [], []).
+
+-spec add(pid(), gen_server:from(), [pid()]) -> ok.
+add(AckPid, From, Servers) ->
+    AckPid ! {add, From, Servers},
+    ok.
+
+%% Called by a remote server after an operation is applied.
+-spec ack(pid(), gen_server:from(), pid()) -> ok.
+ack(AckPid, From, RemotePid) ->
+    %% nosuspend makes message sending unreliable
+    erlang:send(AckPid, {ack, From, RemotePid}, [noconnect]),
+    ok.
+
+%% Calls ack(AckPid, From, RemotePid) for all locally tracked From entries
+-spec send_remote_down(pid(), pid()) -> ok.
+send_remote_down(AckPid, RemotePid) ->
+    AckPid ! {cets_remote_down, RemotePid},
+    ok.
 
 -spec init(atom()) -> {ok, state()}.
-init(MonTab) ->
-    Interval = 30000,
-    State = #{
-        mon_tab => MonTab,
-        interval => Interval,
-        timer_ref => start_timer(Interval)
-    },
+init(_) ->
+    State = #{},
     {ok, State}.
 
+-spec handle_call(term(), _From, state()) -> {reply, state()}.
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -46,8 +63,13 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
-handle_info(check, State) ->
-    {noreply, handle_check(State)};
+-spec handle_info(term(), state()) -> {noreply, state()}.
+handle_info({ack, From, RemotePid}, State) ->
+    {noreply, handle_updated(From, RemotePid, State)};
+handle_info({add, From, Servers}, State) ->
+    {noreply, maps:put(From, Servers, State)};
+handle_info({cets_remote_down, RemotePid}, State) ->
+    {noreply, handle_remote_down(RemotePid, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -58,34 +80,22 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
--spec schedule_check(state()) -> state().
-schedule_check(State = #{interval := Interval, timer_ref := OldRef}) ->
-    %% Match result to prevent the Dialyzer warning
-    _ = erlang:cancel_timer(OldRef),
-    flush_all_checks(),
-    State#{timer_ref := start_timer(Interval)}.
+-spec handle_remote_down(pid(), state()) -> state().
+handle_remote_down(RemotePid, State) ->
+    %% Call handle_updated for all pending operations
+    F = fun(From, Servers, Acc) -> handle_updated(From, RemotePid, Acc, Servers) end,
+    maps:fold(F, State, State).
 
-flush_all_checks() ->
-    receive
-        check -> flush_all_checks()
-    after 0 -> ok
+-spec handle_updated(gen_server:from(), pid(), state()) -> state().
+handle_updated(From, RemotePid, State) ->
+    Servers = maps:get(From, State, []),
+    handle_updated(From, RemotePid, State, Servers).
+
+handle_updated(From, RemotePid, State, Servers) ->
+    case lists:delete(RemotePid, Servers) of
+        [] ->
+            gen_server:reply(From, ok),
+            maps:remove(From, State);
+        Servers2 ->
+            State#{From := Servers2}
     end.
-
-start_timer(Interval) ->
-    erlang:send_after(Interval, self(), check).
-
--spec handle_check(state()) -> state().
-handle_check(State = #{mon_tab := MonTab}) ->
-    check_loop(ets:tab2list(MonTab), MonTab),
-    schedule_check(State).
-
-check_loop([{Mon, Pid} | List], MonTab) ->
-    case is_process_alive(Pid) of
-        false ->
-            ets:delete(MonTab, Mon);
-        true ->
-            ok
-    end,
-    check_loop(List, MonTab);
-check_loop([], _MonTab) ->
-    ok.

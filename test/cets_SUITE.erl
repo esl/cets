@@ -37,8 +37,9 @@ all() ->
         pause_multiple_times,
         unpause_twice,
         write_returns_if_remote_server_crashes,
-        mon_cleaner_works,
-        mon_cleaner_stops_correctly,
+        ack_process_stops_correctly,
+        ack_process_handles_unknown_remote_server,
+        ack_process_handles_unknown_from,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -236,7 +237,7 @@ insert_new_fails_if_the_leader_dies(_Config) ->
     try
         cets:insert_new(Pid1, {alice, 32})
     catch
-        error:{cets_down, killed} -> ok
+        exit:{killed, _} -> ok
     end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
@@ -506,45 +507,45 @@ write_returns_if_remote_server_crashes(_Config) ->
     exit(Pid2, oops),
     ok = cets:wait_response(R, 5000).
 
-mon_cleaner_works(_Config) ->
-    {ok, Pid1} = cets:start(c3, #{}),
-    %% Suspend, so to avoid unexpected check
-    sys:suspend(c3_mon),
-    %% Two cases to check: an alive process and a dead process
-    R = cets:insert_request(c3, {2}),
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There is one monitor
-    [_] = ets:tab2list(c3_mon),
-    {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    after 5000 -> ct:fail(timeout)
-    end,
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There are two monitors
-    [_, _] = ets:tab2list(c3_mon),
-    %% Force check
-    sys:resume(c3_mon),
-    c3_mon ! check,
-    %% Ensure, that check is finished
-    sys:get_state(c3_mon),
-    %% A monitor for a dead process is removed
-    [_] = ets:tab2list(c3_mon),
-    %% The monitor is finally removed once wait_response returns
-    ok = cets:wait_response(R, 5000),
-    [] = ets:tab2list(c3_mon).
-
-mon_cleaner_stops_correctly(_Config) ->
-    {ok, Pid} = cets:start(cleaner_stops, #{}),
+ack_process_stops_correctly(_Config) ->
+    {ok, Pid} = cets:start(ack_stops, #{}),
     #{ack_pid := AckPid} = cets:info(Pid),
-    MonMon = monitor(process, AckPid),
+    AckMon = monitor(process, AckPid),
     cets:stop(Pid),
     receive
-        {'DOWN', MonMon, process, AckPid, normal} -> ok
+        {'DOWN', AckMon, process, AckPid, normal} -> ok
     after 5000 -> ct:fail(timeout)
     end.
+
+ack_process_handles_unknown_remote_server(_Config) ->
+    {ok, Pid1} = cets:start(ack_unkn1, #{}),
+    {ok, Pid2} = cets:start(ack_unkn2, #{}),
+    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    [Pid2] = cets:other_pids(Pid1),
+    RandomPid = spawn(fun() -> ok end),
+    %% Request returns immediately,
+    %% we actually need to send a ping to ensure it has been processed locally
+    R = cets:insert_request(Pid1, {1}),
+    pong = cets:ping(Pid1),
+    %% Extract From value
+    [{From, [Pid2]}] = maps:to_list(sys:get_state(AckPid)),
+    cets_ack:ack(AckPid, From, RandomPid),
+    sys:resume(Pid2),
+    %% Ack process still works fine
+    ok = cets:wait_response(R, 5000).
+
+ack_process_handles_unknown_from(_Config) ->
+    {ok, Pid1} = cets:start(ack_unkn_from1, #{}),
+    {ok, Pid2} = cets:start(ack_unkn_from2, #{}),
+    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    R = cets:insert_request(Pid1, {1}),
+    From = {self(), make_ref()},
+    cets_ack:ack(AckPid, From, self()),
+    %% Ack process still works fine
+    ok = cets:wait_response(R, 5000).
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),
