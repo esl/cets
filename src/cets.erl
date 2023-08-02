@@ -84,8 +84,9 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type server_pid() :: pid().
 -type server_ref() ::
-    pid()
+    server_pid()
     | atom()
     | {local, atom()}
     | {global, term()}
@@ -101,16 +102,16 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: pid()}.
+-type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: cets_ack:ack_pid()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
     tab := table_name(),
-    ack_pid := pid(),
+    ack_pid := cets_ack:ack_pid(),
     %% Updated by set_other_servers/2 function only
-    other_servers := [pid()],
-    leader := pid(),
+    other_servers := [server_pid()],
+    leader := server_pid(),
     is_leader := boolean(),
     opts := start_opts(),
     backlog := [backlog_entry()],
@@ -128,20 +129,20 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, [pid()], [tuple()]}.
+    | {send_dump, [server_pid()], [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    ack_pid := pid(),
+    ack_pid := cets_ack:ack_pid(),
     opts := start_opts()
 }.
 
--type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
+-type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
--type handle_wrong_leader() :: fun((#{from := from(), op := op(), server := pid()}) -> ok).
+-type handle_wrong_leader() :: fun((#{from := from(), op := op(), server := server_pid()}) -> ok).
 -type start_opts() :: #{
     type => ordered_set | bag,
     keypos => non_neg_integer(),
@@ -150,7 +151,7 @@
     handle_wrong_leader => handle_wrong_leader()
 }.
 
--export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
+-export_type([request_id/0, op/0, server_pid/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
 %% API functions
 
@@ -169,7 +170,7 @@
 %%   We recommend to define that function if keys could have conflicts.
 %%   This function would be called once for each conflicting key.
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
--spec start(table_name(), start_opts()) -> {ok, pid()}.
+-spec start(table_name(), start_opts()) -> {ok, server_pid()}.
 start(Tab, Opts) when is_atom(Tab) ->
     case check_opts(Opts) of
         [] ->
@@ -196,7 +197,7 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [pid()], [tuple()]) -> ok.
+-spec send_dump(server_ref(), [server_pid()], [tuple()]) -> ok.
 send_dump(Server, NewPids, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
@@ -270,7 +271,7 @@ delete_objects_request(Server, Objects) ->
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
 
--spec get_leader(server_ref()) -> pid().
+-spec get_leader(server_ref()) -> server_pid().
 get_leader(Tab) when is_atom(Tab) ->
     %% Optimization: replace call with ETS lookup
     cets_metadata:get(Tab, leader);
@@ -283,7 +284,7 @@ other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
 %% Get a list of other CETS processes that are handling this table.
--spec other_pids(server_ref()) -> [pid()].
+-spec other_pids(server_ref()) -> [server_pid()].
 other_pids(Server) ->
     cets_call:long_call(Server, other_servers).
 
@@ -402,7 +403,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
--spec handle_send_dump([pid()], [tuple()], state()) -> {reply, ok, state()}.
+-spec handle_send_dump([server_pid()], [tuple()], state()) -> {reply, ok, state()}.
 handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
@@ -441,7 +442,7 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
     end.
 
 %% Merge two lists of pids, create the missing monitors.
--spec add_servers(Servers, Servers) -> Servers when Servers :: [pid()].
+-spec add_servers(Servers, Servers) -> Servers when Servers :: [server_pid()].
 add_servers(Pids, Servers) ->
     lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
 
@@ -465,7 +466,7 @@ add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 %% Sets other_servers field, chooses the leader
--spec set_other_servers([pid()], state()) -> state().
+-spec set_other_servers([server_pid()], state()) -> state().
 set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang
@@ -494,7 +495,7 @@ ets_delete_objects(Tab, Objects) ->
     ok.
 
 %% Handle operation from a remote node
--spec handle_remote_op(op(), from(), pid(), state()) -> ok.
+-spec handle_remote_op(op(), from(), cets_ack:ack_pid(), state()) -> ok.
 handle_remote_op(Op, From, AckPid, State) ->
     do_op(Op, State),
     cets_ack:ack(AckPid, From, self()).
@@ -555,7 +556,7 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
     %% AckPid would call gen_server:reply(From, ok) ones all the remote servers reply
     ok.
 
--spec send_remote_op(pid(), remote_op()) -> noconnect | ok.
+-spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.
 send_remote_op(RemotePid, RemoteOp) ->
     erlang:send(RemotePid, RemoteOp, [noconnect]).
 
@@ -607,7 +608,7 @@ handle_get_info(
     }.
 
 %% Cleanup
--spec call_user_handle_down(pid(), state()) -> ok.
+-spec call_user_handle_down(server_pid(), state()) -> ok.
 call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->

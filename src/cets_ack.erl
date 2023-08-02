@@ -27,41 +27,45 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type ack_pid() :: pid().
+-type server_pid() :: cets:server_pid().
 -type from() :: gen_server:from().
 -type state() :: #{
-    servers := [pid()],
+    servers := [server_pid()],
     %% We store tasks directly in the state map
-    from() => [pid(), ...]
+    from() => [server_pid(), ...]
 }.
+
+-export_type([ack_pid/0]).
 
 %% API functions
 
--spec start_link(cets:table_name()) -> {ok, pid()}.
+-spec start_link(cets:table_name()) -> {ok, ack_pid()}.
 start_link(Tab) ->
     Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
 %% Sets a list of servers to be used for newly added tasks
--spec set_servers(pid(), [pid()]) -> ok.
+-spec set_servers(ack_pid(), [server_pid()]) -> ok.
 set_servers(AckPid, Servers) ->
     gen_server:cast(AckPid, {set_servers, Servers}),
     ok.
 
 %% Adds a new task to wait replies
--spec add(pid(), from()) -> ok.
+-spec add(ack_pid(), from()) -> ok.
 add(AckPid, From) ->
     AckPid ! {add, From},
     ok.
 
 %% Called by a remote server after an operation is applied.
--spec ack(pid(), from(), pid()) -> ok.
+-spec ack(ack_pid(), from(), server_pid()) -> ok.
 ack(AckPid, From, RemotePid) ->
     %% nosuspend makes message sending unreliable
     erlang:send(AckPid, {ack, From, RemotePid}, [noconnect]),
     ok.
 
 %% Calls ack(AckPid, From, RemotePid) for all locally tracked From entries
--spec send_remote_down(pid(), pid()) -> ok.
+-spec send_remote_down(ack_pid(), server_pid()) -> ok.
 send_remote_down(AckPid, RemotePid) ->
     AckPid ! {cets_remote_down, RemotePid},
     ok.
@@ -107,7 +111,7 @@ code_change(_OldVsn, State, _Extra) ->
 handle_add(From, State = #{servers := [_ | _] = Servers}) ->
     maps:put(From, Servers, State).
 
--spec handle_remote_down(pid(), state()) -> state().
+-spec handle_remote_down(server_pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
     %% Call handle_updated for all pending tasks
     F = fun
@@ -119,7 +123,7 @@ handle_remote_down(RemotePid, State) ->
     end,
     maps:fold(F, State, State).
 
--spec handle_updated(from(), pid(), state()) -> state().
+-spec handle_updated(from(), server_pid(), state()) -> state().
 handle_updated(From, RemotePid, State) ->
     case State of
         #{From := Servers} ->
@@ -129,7 +133,7 @@ handle_updated(From, RemotePid, State) ->
             State
     end.
 
--spec handle_updated(from(), pid(), [pid(), ...], state()) -> state().
+-spec handle_updated(from(), server_pid(), [server_pid(), ...], state()) -> state().
 handle_updated(From, RemotePid, Servers, State) ->
     %% Removes the remote server from a waiting list
     case lists:delete(RemotePid, Servers) of
