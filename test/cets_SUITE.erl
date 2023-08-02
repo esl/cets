@@ -34,6 +34,8 @@ all() ->
         join_fails_before_send_dump_and_there_are_pending_remote_ops,
         send_dump_fails_during_join_because_receiver_exits,
         join_fails_in_check_fully_connected,
+        join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
+        join_fails_because_pids_do_not_match_for_nodes_in_segment,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -504,6 +506,30 @@ join_fails_in_check_fully_connected(Config) ->
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(before_check_fully_connected_called).
 
+join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    %% But for some reason Pid3 has a different join_ref
+    %% (probably could happen if it still haven't checked other nodes after a join)
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    set_join_ref(Pid3, make_ref()),
+    {error, {error, check_same_join_ref_failed, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    %% But for some reason Pid3 has a different other_nodes list
+    %% (probably could happen if it still haven't checked other nodes after a join)
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    set_other_servers(Pid3, []),
+    {error, {error, check_fully_connected_failed, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
 test_multinode(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
@@ -924,3 +950,11 @@ count_remote_ops_in_the_message_box(Pid) ->
     {messages, Messages} = erlang:process_info(Pid, messages),
     Ops = [M || M <- Messages, element(1, M) =:= remote_op],
     length(Ops).
+
+set_join_ref(Pid, JoinRef) ->
+    sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
+
+set_other_servers(Pid, Servers) ->
+    sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
+        State#{other_servers := Servers}
+    end).
