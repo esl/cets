@@ -538,11 +538,11 @@ mon_cleaner_works(_Config) ->
 
 mon_cleaner_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(cleaner_stops, #{}),
-    #{mon_pid := MonPid} = cets:info(Pid),
-    MonMon = monitor(process, MonPid),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    MonMon = monitor(process, AckPid),
     cets:stop(Pid),
     receive
-        {'DOWN', MonMon, process, MonPid, normal} -> ok
+        {'DOWN', MonMon, process, AckPid, normal} -> ok
     after 5000 -> ct:fail(timeout)
     end.
 

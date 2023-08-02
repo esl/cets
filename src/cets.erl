@@ -107,7 +107,7 @@
 -type state() :: #{
     tab := table_name(),
     mon_tab := atom(),
-    mon_pid := pid(),
+    ack_pid := pid(),
     other_servers := [pid()],
     leader := pid(),
     is_leader := boolean(),
@@ -134,7 +134,7 @@
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    mon_pid := pid(),
+    ack_pid := pid(),
     opts := start_opts()
 }.
 
@@ -338,11 +338,11 @@ init({Tab, Opts}) ->
     _ = ets:new(MonTab, [public, named_table]),
     cets_metadata:init(Tab),
     cets_metadata:set(Tab, leader, self()),
-    {ok, MonPid} = cets_ack:start_link(MonTab, MonTab),
+    {ok, AckPid} = cets_ack:start_link(MonTab, MonTab),
     {ok, #{
         tab => Tab,
         mon_tab => MonTab,
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         other_servers => [],
         leader => self(),
         is_leader => true,
@@ -407,8 +407,8 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
-terminate(_Reason, _State = #{mon_pid := MonPid}) ->
-    ok = gen_server:stop(MonPid).
+terminate(_Reason, _State = #{ack_pid := AckPid}) ->
+    ok = gen_server:stop(AckPid).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -622,7 +622,7 @@ handle_get_info(
     State = #{
         tab := Tab,
         other_servers := Servers,
-        mon_pid := MonPid,
+        ack_pid := AckPid,
         opts := Opts
     }
 ) ->
@@ -631,7 +631,7 @@ handle_get_info(
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         opts => Opts
     },
     {reply, Info, State}.
