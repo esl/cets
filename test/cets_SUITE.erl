@@ -57,7 +57,9 @@ all() ->
         unknown_cast_message_is_ignored,
         unknown_message_is_ignored_in_ack_process,
         unknown_cast_message_is_ignored_in_ack_process,
-        unknown_call_returns_error_from_ack_process
+        unknown_call_returns_error_from_ack_process,
+        code_change_returns_ok,
+        code_change_returns_ok_for_ack
     ].
 
 init_per_suite(Config) ->
@@ -645,6 +647,8 @@ info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
 
+%% Cases to improve code coverage
+
 unknown_down_message_is_ignored(_Config) ->
     {ok, Pid} = cets:start(rand_down_msg, #{}),
     RandPid = spawn(fun() -> ok end),
@@ -678,6 +682,20 @@ unknown_call_returns_error_from_ack_process(_Config) ->
     #{ack_pid := AckPid} = cets:info(Pid),
     {error, unexpected_call} = gen_server:call(AckPid, oops),
     still_works(Pid).
+
+code_change_returns_ok(_Config) ->
+    {ok, Pid} = cets:start(ack_code_chg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    sys:suspend(AckPid),
+    ok = sys:change_code(AckPid, cets, v2, []),
+    sys:resume(AckPid).
+
+code_change_returns_ok_for_ack(_Config) ->
+    {ok, Pid} = cets:start(code_chg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    sys:suspend(AckPid),
+    ok = sys:change_code(AckPid, cets_ack, v2, []),
+    sys:resume(AckPid).
 
 still_works(Pid) ->
     pong = cets:ping(Pid),
