@@ -36,6 +36,7 @@ all() ->
         join_fails_in_check_fully_connected,
         join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
         join_fails_because_pids_do_not_match_for_nodes_in_segment,
+        remote_ops_are_ignored_if_join_ref_does_not_match,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -529,6 +530,18 @@ join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
     set_other_servers(Pid3, []),
     {error, {error, check_fully_connected_failed, _}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    #{join_ref := JoinRef} = cets:info(Pid1),
+    set_join_ref(Pid1, make_ref()),
+    cets:insert(Pid2, {1}),
+    %% fix and check again
+    set_join_ref(Pid1, JoinRef),
+    cets:insert(Pid2, {2}),
+    {ok, [{2}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),

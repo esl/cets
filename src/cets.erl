@@ -514,6 +514,7 @@ handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
         join_ref => JoinRef,
         msg => Msg
     }),
+    %% We still need to reply to the remote process so it could stop waiting
     cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
