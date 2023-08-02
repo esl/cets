@@ -9,7 +9,8 @@
 %% API functions
 -export([
     start_link/1,
-    add/3,
+    set_servers/2,
+    add/2,
     ack/3,
     send_remote_down/2
 ]).
@@ -28,6 +29,8 @@
 
 -type from() :: gen_server:from().
 -type state() :: #{
+    servers := [pid()],
+    %% We store pending query registrations directly in the state map
     from() => [pid(), ...]
 }.
 
@@ -38,9 +41,15 @@ start_link(Tab) ->
     Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
--spec add(pid(), from(), [pid()]) -> ok.
-add(AckPid, From, Servers) ->
-    AckPid ! {add, From, Servers},
+%% Sets a list of servers to be used for newly added operations
+-spec set_servers(pid(), [pid()]) -> ok.
+set_servers(AckPid, Servers) ->
+    gen_server:cast(AckPid, {set_servers, Servers}),
+    ok.
+
+-spec add(pid(), from()) -> ok.
+add(AckPid, From) ->
+    AckPid ! {add, From},
     ok.
 
 %% Called by a remote server after an operation is applied.
@@ -60,14 +69,15 @@ send_remote_down(AckPid, RemotePid) ->
 
 -spec init(atom()) -> {ok, state()}.
 init(_) ->
-    %% We store pending query registrations directly in the state map
-    {ok, #{}}.
+    {ok, #{servers => []}}.
 
 -spec handle_call(term(), _From, state()) -> {reply, state()}.
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
 
+handle_cast({set_servers, Servers}, State) ->
+    {noreply, State#{servers := Servers}};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
@@ -75,8 +85,8 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({ack, From, RemotePid}, State) ->
     {noreply, handle_updated(From, RemotePid, State)};
-handle_info({add, From, Servers}, State) ->
-    {noreply, maps:put(From, Servers, State)};
+handle_info({add, From}, State) ->
+    {noreply, handle_add(From, State)};
 handle_info({cets_remote_down, RemotePid}, State) ->
     {noreply, handle_remote_down(RemotePid, State)};
 handle_info(Msg, State) ->
@@ -91,11 +101,18 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal functions
 
+handle_add(From, State = #{servers := Servers}) ->
+    maps:put(From, Servers, State).
+
 -spec handle_remote_down(pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
     %% Call handle_updated for all pending operations
-    F = fun(From, Servers, State2) ->
-        handle_updated(From, RemotePid, Servers, State2)
+    F = fun
+        (Key, _Value, State2) when is_atom(Key) ->
+            %% Ignore servers key
+            State2;
+        (From, Servers, State2) ->
+            handle_updated(From, RemotePid, Servers, State2)
     end,
     maps:fold(F, State, State).
 

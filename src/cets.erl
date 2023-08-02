@@ -472,7 +472,7 @@ add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 %% Sets other_servers field, chooses the leader
-set_other_servers(Servers, State = #{tab := Tab}) ->
+set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang
     %% (so all nodes would choose the same leader).
@@ -480,6 +480,9 @@ set_other_servers(Servers, State = #{tab := Tab}) ->
     Leader = lists:max([self() | Servers]),
     IsLeader = Leader =:= self(),
     cets_metadata:set(Tab, leader, self()),
+    %% Ask the ack process to use this list of servers as the source of replies
+    %% for all new cets_ack:add/2 calls
+    cets_ack:set_servers(AckPid, Servers),
     State#{leader := Leader, is_leader := IsLeader, other_servers := Servers}.
 
 pids_to_nodes(Pids) ->
@@ -553,7 +556,7 @@ replicate(_Op, From, #{other_servers := []}) ->
     %% Skip replication
     gen_server:reply(From, ok);
 replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
-    cets_ack:add(AckPid, From, Servers),
+    cets_ack:add(AckPid, From),
     RemoteOp = {remote_op, Op, From, AckPid},
     [send_remote_op(Server, RemoteOp) || Server <- Servers],
     %% AckPid would call gen_server:reply(From, ok) ones all the remote servers reply

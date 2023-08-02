@@ -530,7 +530,7 @@ ack_process_handles_unknown_remote_server(_Config) ->
     R = cets:insert_request(Pid1, {1}),
     pong = cets:ping(Pid1),
     %% Extract From value
-    [{From, [Pid2]}] = maps:to_list(sys:get_state(AckPid)),
+    [{servers, _}, {From, [Pid2]}] = maps:to_list(sys:get_state(AckPid)),
     cets_ack:ack(AckPid, From, RandomPid),
     sys:resume(Pid2),
     %% Ack process still works fine
