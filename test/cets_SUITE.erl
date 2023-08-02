@@ -19,6 +19,7 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
         insert_new_works,
+        insert_new_works_with_table_name,
         insert_new_works_when_leader_is_back,
         insert_new_when_new_leader_has_joined,
         insert_new_when_new_leader_has_joined_duplicate,
@@ -26,6 +27,7 @@ all() ->
         insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
         insert_new_fails_if_the_local_server_is_dead,
+        leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
         test_multinode,
         test_multinode_remote_insert,
@@ -129,6 +131,13 @@ insert_new_works(_Config) ->
     false = cets:insert_new(Pid1, {alice, 32}),
     false = cets:insert_new(Pid1, {alice, 33}),
     false = cets:insert_new(Pid2, {alice, 33}).
+
+insert_new_works_with_table_name(_Config) ->
+    {ok, Pid1} = cets:start(T1 = tabinsnew1, #{}),
+    {ok, Pid2} = cets:start(T2 = tabinsnew2, #{}),
+    ok = cets_join:join(join_lock1_insnew2, #{}, Pid1, Pid2),
+    true = cets:insert_new(T1, {alice, 32}),
+    false = cets:insert_new(T2, {alice, 32}).
 
 insert_new_works_when_leader_is_back(_Config) ->
     {ok, Pid1} = cets:start(newins1tab_back, #{}),
@@ -262,6 +271,15 @@ insert_new_fails_if_the_local_server_is_dead(_Config) ->
     catch
         exit:{noproc, {gen_server, call, _}} -> ok
     end.
+
+leader_is_the_same_in_metadata_after_join(_Config) ->
+    {ok, Pid1} = cets:start(T1 = check_lead1, #{}),
+    {ok, Pid2} = cets:start(T2 = check_lead2, #{}),
+    ok = cets_join:join(check_lead_lock, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    Leader = cets:get_leader(Pid2),
+    Leader = cets_metadata:get(T1, leader),
+    Leader = cets_metadata:get(T2, leader).
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),

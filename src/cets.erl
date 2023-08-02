@@ -474,7 +474,7 @@ set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% The leader node would not receive that much extra load.
     Leader = lists:max([self() | Servers]),
     IsLeader = Leader =:= self(),
-    cets_metadata:set(Tab, leader, self()),
+    cets_metadata:set(Tab, leader, Leader),
     %% Ask the ack process to use this list of servers as the source of replies
     %% for all new cets_ack:add/2 calls
     cets_ack:set_servers(AckPid, Servers),
@@ -539,9 +539,9 @@ handle_leader_op(Op, From, State = #{is_leader := true}) ->
         true ->
             replicate(Op, From, State)
     end;
-handle_leader_op(Op, From, State) ->
+handle_leader_op(Op, From, State = #{leader := Leader}) ->
     %% Reject operation - not a leader
-    gen_server:reply(From, {error, wrong_leader}),
+    gen_server:reply(From, {error, {wrong_leader, Leader}}),
     %% Call an user defined callback to notify about the error
     handle_wrong_leader(Op, From, State).
 

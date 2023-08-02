@@ -67,8 +67,14 @@ send_leader_op(Server, Op, Backoff) ->
     Leader = cets:get_leader(Server),
     Res = sync_operation(Leader, {leader_op, Op}),
     case Res of
-        {error, wrong_leader} ->
-            ?LOG_WARNING(#{what => wrong_leader, server => Server, operation => Op}),
+        {error, {wrong_leader, ExpectedLeader}} ->
+            ?LOG_WARNING(#{
+                what => wrong_leader,
+                server => Server,
+                operation => Op,
+                called_leader => Leader,
+                expected_leader => ExpectedLeader
+            }),
             %% This could happen if a new node joins the cluster.
             %% So, a simple retry should help.
             case Backoff of
