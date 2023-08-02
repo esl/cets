@@ -271,12 +271,9 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
+-spec wait_response(request_id(), non_neg_integer() | infinity) -> {reply, ok} | {error, term()}.
 wait_response(Mon, Timeout) ->
-    case gen_server:wait_response(Mon, Timeout) of
-        {reply, ok} -> ok;
-        Other -> error(Other)
-    end.
+    gen_server:wait_response(Mon, Timeout).
 
 %% Get a list of other CETS processes that are handling this table.
 -spec other_servers(server_ref()) -> [server_ref()].

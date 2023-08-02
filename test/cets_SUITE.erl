@@ -469,7 +469,7 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     R4 = cets:delete_many_request(T, [5, 4]),
     [] = lists:sort(cets:dump(T)),
     ok = cets:unpause(Pid, PauseMon),
-    [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
+    [{reply, ok} = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
 
 pause_multiple_times(_Config) ->
@@ -487,8 +487,8 @@ pause_multiple_times(_Config) ->
     [] = cets:dump(T),
     ok = cets:unpause(Pid, PauseMon2),
     pong = cets:ping(Pid),
-    cets:wait_response(Ref1, 5000),
-    cets:wait_response(Ref2, 5000),
+    {reply, ok} = cets:wait_response(Ref1, 5000),
+    {reply, ok} = cets:wait_response(Ref2, 5000),
     [{1}, {2}] = lists:sort(cets:dump(T)).
 
 unpause_twice(_Config) ->
@@ -505,7 +505,7 @@ write_returns_if_remote_server_crashes(_Config) ->
     sys:suspend(Pid2),
     R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
-    ok = cets:wait_response(R, 5000).
+    {reply, ok} = cets:wait_response(R, 5000).
 
 ack_process_stops_correctly(_Config) ->
     {ok, Pid} = cets:start(ack_stops, #{}),
@@ -534,7 +534,7 @@ ack_process_handles_unknown_remote_server(_Config) ->
     cets_ack:ack(AckPid, From, RandomPid),
     sys:resume(Pid2),
     %% Ack process still works fine
-    ok = cets:wait_response(R, 5000).
+    {reply, ok} = cets:wait_response(R, 5000).
 
 ack_process_handles_unknown_from(_Config) ->
     {ok, Pid1} = cets:start(ack_unkn_from1, #{}),
@@ -545,7 +545,7 @@ ack_process_handles_unknown_from(_Config) ->
     From = {self(), make_ref()},
     cets_ack:ack(AckPid, From, self()),
     %% Ack process still works fine
-    ok = cets:wait_response(R, 5000).
+    {reply, ok} = cets:wait_response(R, 5000).
 
 sync_using_name_works(_Config) ->
     {ok, _Pid1} = cets:start(c4, #{}),
@@ -554,7 +554,7 @@ sync_using_name_works(_Config) ->
 insert_many_request(_Config) ->
     {ok, Pid} = cets:start(c5, #{}),
     R = cets:insert_many_request(Pid, [{a}, {b}]),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{a}, {b}] = ets:tab2list(c5).
 
 insert_into_bag(_Config) ->
@@ -584,7 +584,7 @@ delete_request_from_bag(_Config) ->
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     R = cets:delete_object_request(T, {1, 2}),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{1, 1}] = cets:dump(T).
 
 delete_request_many_from_bag(_Config) ->
@@ -592,7 +592,7 @@ delete_request_many_from_bag(_Config) ->
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
     R = cets:delete_objects_request(T, [{1, 1}, {1, 3}]),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{1, 2}] = cets:dump(T).
 
 insert_into_bag_is_replicated(_Config) ->
