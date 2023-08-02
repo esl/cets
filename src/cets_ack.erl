@@ -1,9 +1,12 @@
+%% CETS Ack Helper Process
+%%
 %% Contains a list of processes, that are waiting for writes to finish.
 %% Collects acks from nodes in the cluster.
 %% When one of the remote nodes go down, the server stops waiting for acks from it.
 -module(cets_ack).
 -behaviour(gen_server).
 
+%% API functions
 -export([
     start_link/1,
     add/3,
@@ -11,6 +14,7 @@
     send_remote_down/2
 ]).
 
+%% gen_server callbacks
 -export([
     init/1,
     handle_call/3,
@@ -22,12 +26,16 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--type from() :: from().
+-type from() :: gen_server:from().
 -type state() :: #{
     from() => [pid()]
 }.
 
-start_link(Name) ->
+%% API functions
+
+-spec start_link(cets:table_name()) -> {ok, pid()}.
+start_link(Tab) ->
+    Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
 -spec add(pid(), from(), [pid()]) -> ok.
@@ -47,6 +55,8 @@ ack(AckPid, From, RemotePid) ->
 send_remote_down(AckPid, RemotePid) ->
     AckPid ! {cets_remote_down, RemotePid},
     ok.
+
+%% gen_server callbacks
 
 -spec init(atom()) -> {ok, state()}.
 init(_) ->
@@ -78,6 +88,8 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%% Internal functions
 
 -spec handle_remote_down(pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->

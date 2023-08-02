@@ -339,8 +339,7 @@ init({Tab, Opts}) ->
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
     cets_metadata:init(Tab),
     cets_metadata:set(Tab, leader, self()),
-    AckName = list_to_atom(atom_to_list(Tab) ++ "_ack"),
-    {ok, AckPid} = cets_ack:start_link(AckName),
+    {ok, AckPid} = cets_ack:start_link(Tab),
     {ok, #{
         tab => Tab,
         ack_pid => AckPid,
