@@ -568,23 +568,22 @@ apply_backlog(State = #{backlog := Backlog}) ->
 handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            handle_unpause2(Mon, Mons, State);
+            {reply, ok, handle_unpause2(Mon, Mons, State)};
         false ->
             {reply, {error, unknown_pause_monitor}, State}
     end.
 
+-spec handle_unpause2(reference(), [reference()], state()) -> state().
 handle_unpause2(Mon, Mons, State) ->
     erlang:demonitor(Mon, [flush]),
     Mons2 = lists:delete(Mon, Mons),
     State2 = State#{pause_monitors := Mons2},
-    State3 =
-        case Mons2 of
-            [] ->
-                apply_backlog(State2);
-            _ ->
-                State2
-        end,
-    {reply, ok, State3}.
+    case Mons2 of
+        [] ->
+            apply_backlog(State2);
+        _ ->
+            State2
+    end.
 
 -spec handle_get_info(state()) -> info().
 handle_get_info(
