@@ -36,6 +36,7 @@ all() ->
         events_are_applied_in_the_correct_order_after_unpause,
         pause_multiple_times,
         unpause_twice,
+        unpause_if_pause_owner_crashes,
         write_returns_if_remote_server_crashes,
         ack_process_stops_correctly,
         ack_process_handles_unknown_remote_server,
@@ -497,6 +498,22 @@ unpause_twice(_Config) ->
     PauseMon = cets:pause(Pid),
     ok = cets:unpause(Pid, PauseMon),
     {error, unknown_pause_monitor} = cets:unpause(Pid, PauseMon).
+
+unpause_if_pause_owner_crashes(_Config) ->
+    Me = self(),
+    T = pause_crashed,
+    {ok, Pid} = cets:start(T, #{}),
+    spawn_monitor(fun() ->
+        cets:pause(Pid),
+        Me ! pause_called,
+        error(wow)
+    end),
+    receive
+        pause_called -> ok
+    after 5000 -> ct:fail(timeout)
+    end,
+    %% Check that the server is unpaused
+    ok = cets:insert(Pid, {1}).
 
 write_returns_if_remote_server_crashes(_Config) ->
     {ok, Pid1} = cets:start(c1, #{}),
