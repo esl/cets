@@ -81,19 +81,31 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_remote_down(pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
     %% Call handle_updated for all pending operations
-    F = fun(From, Servers, Acc) -> handle_updated(From, RemotePid, Acc, Servers) end,
+    F = fun(From, Servers, State2) ->
+        handle_updated(From, RemotePid, Servers, State2)
+    end,
     maps:fold(F, State, State).
 
 -spec handle_updated(gen_server:from(), pid(), state()) -> state().
 handle_updated(From, RemotePid, State) ->
-    Servers = maps:get(From, State, []),
-    handle_updated(From, RemotePid, State, Servers).
+    case State of
+        #{From := Servers} ->
+            handle_updated(From, RemotePid, Servers, State);
+        _ ->
+            %% Ignore unknown From
+            State
+    end.
 
-handle_updated(From, RemotePid, State, Servers) ->
+-spec handle_updated(gen_server:from(), pid(), [pid(), ...], state()) -> state().
+handle_updated(From, RemotePid, Servers, State) ->
+    %% Removes the remote server from a waiting list
     case lists:delete(RemotePid, Servers) of
         [] ->
+            %% Send reply to our client
+            %% confirming that the operation has finished
             gen_server:reply(From, ok),
             maps:remove(From, State);
         Servers2 ->
+            %% Set an updated waiting list
             State#{From := Servers2}
     end.
