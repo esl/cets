@@ -7,6 +7,14 @@
 -type lock_key() :: term().
 -type join_ref() :: reference().
 
+-type step() ::
+    before_check_fully_connected
+    | before_unpause
+    | {before_send_dump, cets:server_pid()}.
+
+-type step_handler() :: fun((step()) -> ok).
+-type join_opts() :: #{step_handler => step_handler()}.
+
 -export_type([join_ref/0]).
 
 -ignore_xref([join/5]).
@@ -14,11 +22,12 @@
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
--spec join(lock_key(), cets_long:log_info(), pid(), pid()) -> ok | {error, term()}.
+-spec join(lock_key(), cets_long:log_info(), cets:server_pid(), cets:server_pid()) ->
+    ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) ->
     join(LockKey, Info, LocalPid, RemotePid, #{}).
 
--spec join(lock_key(), cets_long:log_info(), pid(), pid(), #{}) -> ok | {error, term()}.
+-spec join(lock_key(), cets_long:log_info(), pid(), pid(), join_opts()) -> ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid, JoinOpts) when is_pid(LocalPid), is_pid(RemotePid) ->
     Info2 = Info#{
         local_pid => LocalPid,
@@ -198,6 +207,7 @@ pid_to_join_ref(Pid) ->
     #{join_ref := JoinRef} = cets:info(Pid),
     JoinRef.
 
+-spec run_step(step(), join_opts()) -> ok.
 run_step(Step, #{step_handler := F}) ->
     F(Step);
 run_step(_Step, _Opts) ->
