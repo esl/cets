@@ -289,7 +289,7 @@ other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
 %% Get a list of other CETS processes that are handling this table.
--spec other_pids(server_ref()) -> [server_pid()] | {error, term()}.
+-spec other_pids(server_ref()) -> [server_pid()].
 other_pids(Server) ->
     cets_call:long_call(Server, other_servers).
 
@@ -670,7 +670,8 @@ call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
                 remote_pid => RemotePid,
                 remote_node => node(RemotePid)
             },
-            cets_long:run_safely(Info, FF);
+            %% Errors would be logged inside run_tracked
+            catch cets_long:run_tracked(Info, FF);
         _ ->
             ok
     end.

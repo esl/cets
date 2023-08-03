@@ -38,7 +38,15 @@ join(LockKey, Info, LocalPid, RemotePid, JoinOpts) when is_pid(LocalPid), is_pid
         remote_node => node(RemotePid)
     },
     F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid, JoinOpts) end,
-    cets_long:run_safely(Info2#{long_task_name => join}, F).
+    try
+        cets_long:run_tracked(Info2#{long_task_name => join}, F)
+    catch
+        error:Reason:_ ->
+            {error, Reason};
+        %% Exits are thrown by gen_server:call API
+        exit:Reason:_ ->
+            {error, Reason}
+    end.
 
 join1(LockKey, Info, LocalPid, RemotePid, JoinOpts) ->
     OtherPids = cets:other_pids(LocalPid),
@@ -110,12 +118,14 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         ok
     after
         run_step(before_unpause, JoinOpts),
-        lists:foreach(fun({Pid, Ref}) -> cets:unpause(Pid, Ref) end, Paused)
+        %% If unpause fails, there would be log messages
+        lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
     end.
 
 send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
     run_step({before_send_dump, Pid}, JoinOpts),
-    cets:send_dump(Pid, Pids, JoinRef, Dump).
+    %% Error reporting would be done by cets_long:call_tracked
+    catch cets:send_dump(Pid, Pids, JoinRef, Dump).
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),
@@ -167,12 +177,7 @@ apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) 
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
 
 get_pids(Pid) ->
-    case cets:other_pids(Pid) of
-        Pids when is_list(Pids) ->
-            [Pid | Pids];
-        Other ->
-            error({get_other_pids_failed, Pid, Other})
-    end.
+    [Pid | cets:other_pids(Pid)].
 
 %% Checks that other_pids lists match for all nodes
 %% If they are not matching - the node removal process could be in progress

@@ -402,7 +402,7 @@ join_fails_because_server_process_not_found(Config) ->
         (_) ->
             ok
     end,
-    {error, {error, _, _}} =
+    {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
@@ -414,7 +414,7 @@ join_fails_because_server_process_not_found_before_get_pids(Config) ->
         (_) ->
             ok
     end,
-    {error, {error, {get_other_pids_failed, Pid1, _}, _}} =
+    {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
 
 join_fails_before_send_dump(Config) ->
@@ -434,7 +434,7 @@ join_fails_before_send_dump(Config) ->
         (_) ->
             ok
     end,
-    {error, {error, sim_error, _}} =
+    {error, sim_error} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
@@ -470,7 +470,7 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
         (_) ->
             ok
     end,
-    {error, {error, sim_error2, _}} =
+    {error, sim_error2} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
@@ -530,7 +530,7 @@ join_fails_in_check_fully_connected(Config) ->
         (_) ->
             ok
     end,
-    {error, {error, check_fully_connected_failed, _}} =
+    {error, check_fully_connected_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
     receive_message(before_check_fully_connected_called).
 
@@ -543,7 +543,7 @@ join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
     %% (probably could happen if it still haven't checked other nodes after a join)
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     set_join_ref(Pid3, make_ref()),
-    {error, {error, check_same_join_ref_failed, _}} =
+    {error, check_same_join_ref_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
 join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
@@ -555,7 +555,7 @@ join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
     %% (probably could happen if it still haven't checked other nodes after a join)
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     set_other_servers(Pid3, []),
-    {error, {error, check_fully_connected_failed, _}} =
+    {error, check_fully_connected_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
 remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->

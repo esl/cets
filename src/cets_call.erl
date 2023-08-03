@@ -29,9 +29,9 @@ long_call(Server, Msg, Info) ->
         Pid when is_pid(Pid) ->
             Info2 = Info#{server => Server, pid => Pid, node => node(Pid)},
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
-            cets_long:run_safely(Info2, F);
+            cets_long:run_tracked(Info2, F);
         undefined ->
-            {error, pid_not_found}
+            error({pid_not_found, Server})
     end.
 
 %% Contacts the local server to broadcast multinode operation.

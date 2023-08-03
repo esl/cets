@@ -1,6 +1,6 @@
 %% Helper to log long running operations.
 -module(cets_long).
--export([run_spawn/2, run_safely/2]).
+-export([run_spawn/2, run_tracked/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -8,29 +8,40 @@
 -type log_info() :: map().
 -type task_result() :: term().
 -type task_fun() :: fun(() -> task_result()).
--type reason() :: {Class :: atom(), Reason :: term(), Stacktrace :: list()}.
 -export_type([log_info/0]).
 
 %% Spawn a new process to do some memory-intensive task
 %% This allows to reduce GC on the parent process
 %% Wait for function to finish
 %% Handles errors
-%% Returns result from the function or crashes
+%% Returns result from the function or crashes (i.e. forwards the error)
 -spec run_spawn(log_info(), task_fun()) -> task_result().
 run_spawn(Info, F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-        Res = cets_long:run_safely(Info, F),
-        Pid ! {result, Ref, Res}
+        try run_tracked(Info, F) of
+            Res ->
+                Pid ! {result, Ref, Res}
+        catch
+            Class:Reason:Stacktrace ->
+                Pid ! {forward_error, Ref, {Class, Reason, Stacktrace}}
+        end
     end),
     receive
         {result, Ref, Res} ->
-            Res
+            Res;
+        {forward_error, Ref, {Class, Reason, Stacktrace}} ->
+            erlang:raise(Class, Reason, Stacktrace)
     end.
 
--spec run_safely(log_info(), task_fun()) -> task_result() | {error, reason()}.
-run_safely(Info, Fun) ->
+%% Run function Fun.
+%% Logs errors.
+%% Logs if function execution takes too long.
+%% Does not catches the errors - the caller would have to catch
+%% if they want to prevent an error.
+-spec run_tracked(log_info(), task_fun()) -> task_result().
+run_tracked(Info, Fun) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
     ?LOG_INFO(Info#{what => long_task_started}),
@@ -45,7 +56,7 @@ run_safely(Info, Fun) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            {error, {Class, Reason, Stacktrace}}
+            erlang:raise(Class, Reason, Stacktrace)
     after
         Diff = diff(Start),
         ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
