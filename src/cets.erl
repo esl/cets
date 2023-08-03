@@ -93,6 +93,8 @@
     | {via, module(), term()}.
 -type request_id() :: gen_server:request_id().
 -type from() :: gen_server:from().
+-type join_ref() :: cets_join:join_ref().
+-type ack_pid() :: cets_ack:ack_pid().
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
@@ -102,14 +104,15 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: cets_ack:ack_pid(), JoinRef :: cets_join:join_ref()}.
+-type remote_op() ::
+    {remote_op, Op :: op(), From :: from(), AckPid :: ack_pid(), JoinRef :: join_ref()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
     tab := table_name(),
-    ack_pid := cets_ack:ack_pid(),
-    join_ref := cets_join:join_ref(),
+    ack_pid := ack_pid(),
+    join_ref := join_ref(),
     %% Updated by set_other_servers/2 function only
     other_servers := [server_pid()],
     leader := server_pid(),
@@ -130,15 +133,15 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, [server_pid()], cets_join:join_ref(), [tuple()]}.
+    | {send_dump, [server_pid()], join_ref(), [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    ack_pid := cets_ack:ack_pid(),
-    join_ref := cets_join:cets_join(),
+    ack_pid := ack_pid(),
+    join_ref := join_ref(),
     opts := start_opts()
 }.
 
@@ -199,7 +202,7 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [server_pid()], cets_join:join_ref(), [tuple()]) -> ok.
+-spec send_dump(server_ref(), [server_pid()], join_ref(), [tuple()]) -> ok.
 send_dump(Server, NewPids, JoinRef, OurDump) ->
     Info = #{msg => send_dump, join_ref => JoinRef, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, NewPids, JoinRef, OurDump}, Info).
@@ -286,7 +289,7 @@ other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
 %% Get a list of other CETS processes that are handling this table.
--spec other_pids(server_ref()) -> [server_pid()].
+-spec other_pids(server_ref()) -> [server_pid()] | {error, term()}.
 other_pids(Server) ->
     cets_call:long_call(Server, other_servers).
 
@@ -394,7 +397,7 @@ handle_info({remote_op, Op, From, AckPid, JoinRef}, State) ->
     handle_remote_op(Op, From, AckPid, JoinRef, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State);
+    {noreply, handle_down(Mon, Pid, State)};
 handle_info({check_server, FromPid, JoinRef}, State) ->
     handle_check_server(FromPid, JoinRef, State),
     {noreply, State};
@@ -410,7 +413,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
--spec handle_send_dump([server_pid()], cets_join:join_ref(), [tuple()], state()) -> {reply, ok, state()}.
+-spec handle_send_dump([server_pid()], join_ref(), [tuple()], state()) -> {reply, ok, state()}.
 handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
@@ -502,7 +505,7 @@ ets_delete_objects(Tab, Objects) ->
     ok.
 
 %% Handle operation from a remote node
--spec handle_remote_op(op(), from(), cets_ack:ack_pid(), cets_join:join_ref(), state()) -> ok.
+-spec handle_remote_op(op(), from(), ack_pid(), join_ref(), state()) -> ok.
 handle_remote_op(Op, From, AckPid, JoinRef, State = #{join_ref := JoinRef}) ->
     do_op(Op, State),
     cets_ack:ack(AckPid, From, self());
@@ -512,7 +515,7 @@ handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
         from => From,
         remote_join_ref => RemoteJoinRef,
         join_ref => JoinRef,
-        msg => Msg
+        op => Op
     }),
     %% We still need to reply to the remote process so it could stop waiting
     cets_ack:ack(AckPid, From, self()).
