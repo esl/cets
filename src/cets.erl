@@ -667,14 +667,17 @@ handle_get_info(
     #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
-        size => assert_integer(ets:info(Tab, size)),
-        memory => assert_integer(ets:info(Tab, memory)),
+        size => returns_non_neg_integer(ets:info(Tab, size)),
+        memory => returns_non_neg_integer(ets:info(Tab, memory)),
         ack_pid => AckPid,
         join_ref => JoinRef,
         opts => Opts
     }.
 
-assert_integer(X) when is_integer(X) -> X.
+%% We are sure that the ETS table exists when running handle_get_info
+%% But gradualizer does not know that, so let us tell it with the spec
+-spec returns_non_neg_integer(any()) -> non_neg_integer().
+returns_non_neg_integer(X) -> X.
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
