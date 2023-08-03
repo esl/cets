@@ -68,13 +68,14 @@ send_leader_op(Server, Op, Backoff) ->
     Res = sync_operation(Leader, {leader_op, Op}),
     case Res of
         {error, {wrong_leader, ExpectedLeader}} ->
-            ?LOG_WARNING(#{
+            Log = #{
                 what => wrong_leader,
                 server => Server,
                 operation => Op,
                 called_leader => Leader,
                 expected_leader => ExpectedLeader
-            }),
+            },
+            ?LOG_WARNING(Log),
             %% This could happen if a new node joins the cluster.
             %% So, a simple retry should help.
             case Backoff of

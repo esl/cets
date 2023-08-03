@@ -50,12 +50,13 @@ run_tracked(Info, Fun) ->
         Fun()
     catch
         Class:Reason:Stacktrace ->
-            ?LOG_ERROR(Info#{
+            Log = Info#{
                 what => long_task_failed,
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
-            }),
+            },
+            ?LOG_ERROR(Log),
             erlang:raise(Class, Reason, Stacktrace)
     after
         Diff = diff(Start),

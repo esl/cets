@@ -23,11 +23,12 @@ init(Opts) ->
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
-            ?LOG_ERROR(#{
+            Log = #{
                 what => discovery_failed,
                 filename => Filename,
                 reason => Reason
-            }),
+            },
+            ?LOG_ERROR(Log),
             {{error, Reason}, State};
         {ok, Text} ->
             Lines = binary:split(Text, [<<"\r">>, <<"\n">>, <<" ">>], [global]),

@@ -187,11 +187,12 @@ check_fully_connected(Pids) ->
         true ->
             check_same_join_ref(Pids);
         false ->
-            ?LOG_ERROR(#{
+            Log = #{
                 what => check_fully_connected_failed,
                 expected_pids => Pids,
                 server_lists => Lists
-            }),
+            },
+            ?LOG_ERROR(Log),
             error(check_fully_connected_failed)
     end.
 
@@ -207,10 +208,11 @@ check_same_join_ref(Pids) ->
         [_] ->
             ok;
         _ ->
-            ?LOG_ERROR(#{
+            Log = #{
                 what => check_same_join_ref_failed,
                 refs => lists:zip(Pids, Refs)
-            }),
+            },
+            ?LOG_ERROR(Log),
             error(check_same_join_ref_failed)
     end.
 
