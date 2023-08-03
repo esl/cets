@@ -30,6 +30,8 @@ all() ->
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
         join_ref_is_same_after_join,
+        join_fails_because_server_process_not_found,
+        join_fails_because_server_process_not_found_before_get_pids,
         join_fails_before_send_dump,
         join_fails_before_send_dump_and_there_are_pending_remote_ops,
         send_dump_fails_during_join_because_receiver_exits,
@@ -390,6 +392,30 @@ join_ref_is_same_after_join(Config) ->
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
     #{join_ref := JoinRef} = cets:info(Pid1),
     #{join_ref := JoinRef} = cets:info(Pid2).
+
+join_fails_because_server_process_not_found(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (join_start) ->
+            exit(Pid1, sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, _, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
+
+join_fails_because_server_process_not_found_before_get_pids(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (before_get_pids) ->
+            exit(Pid1, sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {error, {get_other_pids_failed, Pid1, _}, _}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
 
 join_fails_before_send_dump(Config) ->
     Me = self(),

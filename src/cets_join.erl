@@ -10,6 +10,7 @@
 -type step() ::
     join_start
     | before_retry
+    | before_get_pids
     | before_check_fully_connected
     | before_unpause
     | {before_send_dump, cets:server_pid()}.
@@ -81,6 +82,7 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
     #{opts := Opts} = cets:info(LocalPid),
+    run_step(before_get_pids, JoinOpts),
     LocPids = get_pids(LocalPid),
     RemPids = get_pids(RemotePid),
     run_step(before_check_fully_connected, JoinOpts),
