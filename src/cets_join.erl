@@ -8,7 +8,9 @@
 -type join_ref() :: reference().
 
 -type step() ::
-    before_check_fully_connected
+    join_start
+    | before_retry
+    | before_check_fully_connected
     | before_unpause
     | {before_send_dump, cets:server_pid()}.
 
@@ -65,6 +67,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     Retries = 1,
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
+            run_step(before_retry, JoinOpts),
             ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
@@ -72,6 +75,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     end.
 
 join2(_Info, LocalPid, RemotePid, JoinOpts) ->
+    run_step(join_start, JoinOpts),
     JoinRef = make_ref(),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names

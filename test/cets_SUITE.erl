@@ -37,6 +37,7 @@ all() ->
         join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
         join_fails_because_pids_do_not_match_for_nodes_in_segment,
         remote_ops_are_ignored_if_join_ref_does_not_match,
+        join_retried_if_lock_is_busy,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -542,6 +543,33 @@ remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
     set_join_ref(Pid1, JoinRef),
     cets:insert(Pid2, {2}),
     {ok, [{2}]} = cets:remote_dump(Pid1).
+
+join_retried_if_lock_is_busy(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    Lock = lock_name(Config),
+    SleepyF = fun
+        (join_start) ->
+            Me ! join_start,
+            timer:sleep(infinity);
+        (_) ->
+            ok
+    end,
+    F = fun
+        (before_retry) -> Me ! before_retry;
+        (_) -> ok
+    end,
+    %% Get the lock in a separate process
+    spawn_link(fun() ->
+        cets_join:join(Lock, #{}, Pid1, Pid2, #{step_handler => SleepyF})
+    end),
+    receive_message(join_start),
+    %% We actually would not return from cets_join:join unless we get the lock
+    spawn_link(fun() ->
+        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{step_handler => F})
+    end),
+    receive_message(before_retry).
 
 test_multinode(Config) ->
     Node1 = node(),
