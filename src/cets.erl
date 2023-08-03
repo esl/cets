@@ -272,7 +272,9 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()}.
+-type response_return() ::
+    timeout | {error, term()} | {reply, term()}.
+-spec wait_response(request_id(), timeout()) -> response_return().
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
 
@@ -579,9 +581,10 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers, join_ref := J
     %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
 
--spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.
+-spec send_remote_op(server_pid(), remote_op()) -> ok.
 send_remote_op(RemotePid, RemoteOp) ->
-    erlang:send(RemotePid, RemoteOp, [noconnect]).
+    erlang:send(RemotePid, RemoteOp, [noconnect]),
+    ok.
 
 -spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
@@ -655,12 +658,14 @@ handle_get_info(
     #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
-        size => ets:info(Tab, size),
-        memory => ets:info(Tab, memory),
+        size => assert_integer(ets:info(Tab, size)),
+        memory => assert_integer(ets:info(Tab, memory)),
         ack_pid => AckPid,
         join_ref => JoinRef,
         opts => Opts
     }.
+
+assert_integer(X) when is_integer(X) -> X.
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
@@ -675,7 +680,8 @@ call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
                 remote_node => node(RemotePid)
             },
             %% Errors would be logged inside run_tracked
-            catch cets_long:run_tracked(Info, FF);
+            catch cets_long:run_tracked(Info, FF),
+            ok;
         _ ->
             ok
     end.
