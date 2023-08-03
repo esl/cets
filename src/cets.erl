@@ -553,7 +553,7 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
     cets_ack:add(AckPid, From),
     RemoteOp = {remote_op, Op, From, AckPid},
     [send_remote_op(Server, RemoteOp) || Server <- Servers],
-    %% AckPid would call gen_server:reply(From, ok) ones all the remote servers reply
+    %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
 
 -spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.

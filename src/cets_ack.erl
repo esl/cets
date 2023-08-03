@@ -2,7 +2,7 @@
 %%
 %% Contains a list of processes, that are waiting for writes to finish.
 %% Collects acks from nodes in the cluster.
-%% When one of the remote nodes go down, the server stops waiting for acks from it.
+%% When one of the remote nodes goes down, the server stops waiting for acks from it.
 -module(cets_ack).
 -behaviour(gen_server).
 
@@ -51,7 +51,7 @@ set_servers(AckPid, Servers) ->
     gen_server:cast(AckPid, {set_servers, Servers}),
     ok.
 
-%% Adds a new task to wait replies
+%% Adds a new task to wait for replies
 -spec add(ack_pid(), from()) -> ok.
 add(AckPid, From) ->
     AckPid ! {add, From},
@@ -60,7 +60,7 @@ add(AckPid, From) ->
 %% Called by a remote server after an operation is applied.
 -spec ack(ack_pid(), from(), server_pid()) -> ok.
 ack(AckPid, From, RemotePid) ->
-    %% nosuspend makes message sending unreliable
+    %% nosuspend is not used, because it would make message sending unreliable
     erlang:send(AckPid, {ack, From, RemotePid}, [noconnect]),
     ok.
 
