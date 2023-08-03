@@ -87,10 +87,7 @@
 -type server_pid() :: pid().
 -type server_ref() ::
     server_pid()
-    | atom()
-    | {local, atom()}
-    | {global, term()}
-    | {via, module(), term()}.
+    | atom().
 -type request_id() :: gen_server:request_id().
 -type from() :: gen_server:from().
 -type join_ref() :: cets_join:join_ref().
@@ -667,17 +664,18 @@ handle_get_info(
     #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
-        size => returns_non_neg_integer(ets:info(Tab, size)),
-        memory => returns_non_neg_integer(ets:info(Tab, memory)),
+        size => assert_type_non_neg_integer(ets:info(Tab, size)),
+        memory => assert_type_non_neg_integer(ets:info(Tab, memory)),
         ack_pid => AckPid,
         join_ref => JoinRef,
         opts => Opts
     }.
 
-%% We are sure that the ETS table exists when running handle_get_info
-%% But gradualizer does not know that, so let us tell it with the spec
--spec returns_non_neg_integer(any()) -> non_neg_integer().
-returns_non_neg_integer(X) -> X.
+%% Assert for gradualizer
+%% ets:info would not return undefined in handle_get_info, because the table exists.
+-compile({inline, [assert_type_non_neg_integer/1]}).
+-spec assert_type_non_neg_integer(any()) -> non_neg_integer().
+assert_type_non_neg_integer(X) -> X.
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
