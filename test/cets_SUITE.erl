@@ -38,8 +38,10 @@ all() ->
         join_fails_in_check_fully_connected,
         join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
         join_fails_because_pids_do_not_match_for_nodes_in_segment,
+        join_fails_because_servers_overlap,
         remote_ops_are_ignored_if_join_ref_does_not_match,
         join_retried_if_lock_is_busy,
+        send_dump_contains_already_added_servers,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -382,7 +384,7 @@ join_with_the_same_pid(_Config) ->
     %% Just insert something into a table to check later the size
     cets:insert(joinsame, {1, 1}),
     link(Pid),
-    ok = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
+    {error, join_with_the_same_pid} = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
@@ -559,6 +561,15 @@ join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
     {error, check_fully_connected_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
+join_fails_because_servers_overlap(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    set_other_servers(Pid1, [Pid3]),
+    set_other_servers(Pid2, [Pid3]),
+    {error, check_do_not_overlap_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
 remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
@@ -597,6 +608,17 @@ join_retried_if_lock_is_busy(Config) ->
         ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{step_handler => F})
     end),
     receive_message(before_retry).
+
+send_dump_contains_already_added_servers(Config) ->
+    %% Check that even if we have already added server in send_dump, nothing crashes
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    PauseRef = cets:pause(Pid1),
+    %% That should be called by cets_join module
+    cets:send_dump(Pid1, [Pid2], make_ref(), [{1}]),
+    cets:unpause(Pid1, PauseRef),
+    {ok, [{1}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),

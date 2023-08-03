@@ -6,6 +6,7 @@
 
 -type lock_key() :: term().
 -type join_ref() :: reference().
+-type server_pid() :: cets:server_pid().
 
 -type step() ::
     join_start
@@ -13,7 +14,7 @@
     | before_get_pids
     | before_check_fully_connected
     | before_unpause
-    | {before_send_dump, cets:server_pid()}.
+    | {before_send_dump, server_pid()}.
 
 -type step_handler() :: fun((step()) -> ok).
 -type join_opts() :: #{step_handler => step_handler()}.
@@ -25,12 +26,14 @@
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
--spec join(lock_key(), cets_long:log_info(), cets:server_pid(), cets:server_pid()) ->
+-spec join(lock_key(), cets_long:log_info(), server_pid(), server_pid()) ->
     ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) ->
     join(LockKey, Info, LocalPid, RemotePid, #{}).
 
 -spec join(lock_key(), cets_long:log_info(), pid(), pid(), join_opts()) -> ok | {error, term()}.
+join(_LockKey, _Info, Pid, Pid, _JoinOpts) when is_pid(Pid) ->
+    {error, join_with_the_same_pid};
 join(LockKey, Info, LocalPid, RemotePid, JoinOpts) when is_pid(LocalPid), is_pid(RemotePid) ->
     Info2 = Info#{
         local_pid => LocalPid,
@@ -93,6 +96,7 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
     run_step(before_get_pids, JoinOpts),
     LocPids = get_pids(LocalPid),
     RemPids = get_pids(RemotePid),
+    check_do_not_overlap(LocPids, RemPids),
     run_step(before_check_fully_connected, JoinOpts),
     check_fully_connected(LocPids),
     check_fully_connected(RemPids),
@@ -179,8 +183,27 @@ apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) 
 get_pids(Pid) ->
     [Pid | cets:other_pids(Pid)].
 
+-spec check_do_not_overlap([server_pid()], [server_pid()]) -> ok.
+check_do_not_overlap(LocPids, RemPids) ->
+    LocSet = ordsets:from_list(LocPids),
+    RemSet = ordsets:from_list(RemPids),
+    case ordsets:intersection(LocSet, RemSet) of
+        [] ->
+            ok;
+        Overlap ->
+            Log = #{
+                what => check_do_not_overlap_failed,
+                local_servers => LocPids,
+                remote_servers => RemPids,
+                overlapped_servers => Overlap
+            },
+            ?LOG_ERROR(Log),
+            error(check_do_not_overlap_failed)
+    end.
+
 %% Checks that other_pids lists match for all nodes
 %% If they are not matching - the node removal process could be in progress
+-spec check_fully_connected([server_pid()]) -> ok.
 check_fully_connected(Pids) ->
     Lists = [get_pids(Pid) || Pid <- Pids],
     case are_fully_connected_lists([Pids | Lists]) of

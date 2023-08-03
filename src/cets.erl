@@ -456,27 +456,26 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
 %% Merge two lists of pids, create the missing monitors.
 -spec add_servers(Servers, Servers) -> Servers when Servers :: [server_pid()].
 add_servers(Pids, Servers) ->
-    lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
-
-add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
-    ?LOG_INFO(#{what => join_to_the_same_pid_ignored}),
-    add_servers2(SelfPid, OtherPids, Servers);
-add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
-    case lists:member(RemotePid, Servers) of
-        false ->
-            erlang:monitor(process, RemotePid),
-            [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
-        true ->
+    %% Ignore ourself in the list
+    %% Also filter out already added servers
+    OtherServers = lists:delete(self(), lists:usort(Pids)),
+    NewServers = ordsets:subtract(OtherServers, Servers),
+    case ordsets:intersection(OtherServers, Servers) of
+        [] ->
+            ok;
+        Overlap ->
+            %% Should not happen (cets_join checks for it)
+            %% Still log it, if that happens
             Log = #{
                 what => already_added,
-                remote_pid => RemotePid,
-                remote_node => node(RemotePid)
+                already_added_servers => Overlap,
+                pids => Pids,
+                servers => Servers
             },
-            ?LOG_INFO(Log),
-            add_servers2(SelfPid, OtherPids, Servers)
-    end;
-add_servers2(_SelfPid, [], _Servers) ->
-    [].
+            ?LOG_ERROR(Log)
+    end,
+    [erlang:monitor(process, Pid) || Pid <- NewServers],
+    ordsets:union(NewServers, Servers).
 
 %% Sets other_servers field, chooses the leader
 -spec set_other_servers([server_pid()], state()) -> state().
