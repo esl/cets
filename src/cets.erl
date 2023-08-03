@@ -87,7 +87,10 @@
 -type server_pid() :: pid().
 -type server_ref() ::
     server_pid()
-    | atom().
+    | atom()
+    | {local, atom()}
+    | {global, term()}
+    | {via, module(), term()}.
 -type request_id() :: gen_server:request_id().
 -type from() :: gen_server:from().
 -type join_ref() :: cets_join:join_ref().

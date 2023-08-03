@@ -51,9 +51,13 @@ sync_operation(Server, Op) ->
 maybe_sync_operation(Server, Op) ->
     gen_server:call(Server, {op, Op}, infinity).
 
+%% From gen.erl
 -spec where(server_ref()) -> pid() | undefined | port().
 where(Pid) when is_pid(Pid) -> Pid;
-where(Name) when is_atom(Name) -> whereis(Name).
+where(Name) when is_atom(Name) -> whereis(Name);
+where({global, Name}) -> global:whereis_name(Name);
+where({local, Name}) -> whereis(Name);
+where({via, Module, Name}) -> Module:whereis_name(Name).
 
 %% Wait around 15 seconds before giving up
 %% (we don't count how much we spend calling the leader though)
