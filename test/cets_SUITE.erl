@@ -73,7 +73,8 @@ all() ->
         unknown_cast_message_is_ignored_in_ack_process,
         unknown_call_returns_error_from_ack_process,
         code_change_returns_ok,
-        code_change_returns_ok_for_ack
+        code_change_returns_ok_for_ack,
+        run_spawn_forwards_errors
     ].
 
 init_per_suite(Config) ->
@@ -955,6 +956,15 @@ code_change_returns_ok_for_ack(_Config) ->
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets_ack, v2, []),
     sys:resume(AckPid).
+
+run_spawn_forwards_errors(_Config) ->
+    matched =
+        try
+            cets_long:run_spawn(#{}, fun() -> error(oops) end)
+        catch
+            error:oops ->
+                matched
+        end.
 
 still_works(Pid) ->
     pong = cets:ping(Pid),
