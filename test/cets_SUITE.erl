@@ -76,7 +76,8 @@ all() ->
         unknown_call_returns_error_from_ack_process,
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
-        run_spawn_forwards_errors
+        run_spawn_forwards_errors,
+        long_call_to_unknown_name_returns_pid_not_found
     ].
 
 init_per_suite(Config) ->
@@ -278,11 +279,7 @@ insert_new_fails_if_the_leader_dies(_Config) ->
     end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
-    %% Get a pid for a stopped process
-    {Pid, Mon} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    end,
+    Pid = stopped_pid(),
     try
         cets:insert_new(Pid, {alice, 32})
     catch
@@ -988,6 +985,9 @@ run_spawn_forwards_errors(_Config) ->
                 matched
         end.
 
+long_call_to_unknown_name_returns_pid_not_found(_Config) ->
+    {error, pid_not_found} = cets_call:long_call(unknown_name_please, test).
+
 still_works(Pid) ->
     pong = cets:ping(Pid),
     %% The server works fine
@@ -1057,3 +1057,10 @@ set_other_servers(Pid, Servers) ->
     sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
         State#{other_servers := Servers}
     end).
+
+stopped_pid() ->
+    %% Get a pid for a stopped process
+    {Pid, Mon} = spawn_monitor(fun() -> ok end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} -> ok
+    end.
