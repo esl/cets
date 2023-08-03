@@ -76,7 +76,7 @@ send_remote_down(AckPid, RemotePid) ->
 init(_) ->
     {ok, #{servers => []}}.
 
--spec handle_call(term(), _From, state()) -> {reply, state()}.
+-spec handle_call(term(), _From, state()) -> {reply, {error, unexpected_call}, state()}.
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
