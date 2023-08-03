@@ -664,18 +664,18 @@ handle_get_info(
     #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
-        size => assert_type_non_neg_integer(ets:info(Tab, size)),
-        memory => assert_type_non_neg_integer(ets:info(Tab, memory)),
+        size => non_neg_integer(ets:info(Tab, size)),
+        memory => non_neg_integer(ets:info(Tab, memory)),
         ack_pid => AckPid,
         join_ref => JoinRef,
         opts => Opts
     }.
 
-%% Assert for gradualizer
-%% ets:info would not return undefined in handle_get_info, because the table exists.
--compile({inline, [assert_type_non_neg_integer/1]}).
--spec assert_type_non_neg_integer(any()) -> non_neg_integer().
-assert_type_non_neg_integer(X) -> X.
+%% Tell gradualizer the correct type.
+%% ets:info/2 could not return undefined,
+%% because we know that the table is running.
+-spec non_neg_integer(any()) -> non_neg_integer().
+non_neg_integer(X) -> X.
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
