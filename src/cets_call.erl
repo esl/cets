@@ -53,10 +53,7 @@ maybe_sync_operation(Server, Op) ->
 
 -spec where(server_ref()) -> pid() | undefined.
 where(Pid) when is_pid(Pid) -> Pid;
-where(Name) when is_atom(Name) -> pid_or_undefined(whereis(Name));
-where({global, Name}) -> global:whereis_name(Name);
-where({local, Name}) -> pid_or_undefined(whereis(Name));
-where({via, Module, Name}) -> Module:whereis_name(Name).
+where(Name) when is_atom(Name) -> pid_or_undefined(whereis(Name)).
 
 %% whereis/1 could return Port, so ignore Ports (makes Gradualizer happy)
 pid_or_undefined(undefined) -> undefined;
