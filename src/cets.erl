@@ -279,7 +279,16 @@ wait_response(Mon, Timeout) ->
 -spec get_leader(server_ref()) -> server_pid().
 get_leader(Tab) when is_atom(Tab) ->
     %% Optimization: replace call with ETS lookup
-    cets_metadata:get(Tab, leader);
+    try
+        cets_metadata:get(Tab, leader)
+    catch
+        error:badarg ->
+            %% Failed to get from metadata,
+            %% Retry by calling the server process.
+            %% Most likely would fail too, but we want the same error format
+            %% when calling get_leader using either atom() or pid()
+            gen_server:call(Tab, get_leader)
+    end;
 get_leader(Server) ->
     gen_server:call(Server, get_leader).
 
