@@ -19,6 +19,7 @@ all() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
         insert_new_works,
+        insert_new_works_with_table_name,
         insert_new_works_when_leader_is_back,
         insert_new_when_new_leader_has_joined,
         insert_new_when_new_leader_has_joined_duplicate,
@@ -26,6 +27,7 @@ all() ->
         insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
         insert_new_fails_if_the_local_server_is_dead,
+        leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
         test_multinode,
         test_multinode_remote_insert,
@@ -36,9 +38,12 @@ all() ->
         events_are_applied_in_the_correct_order_after_unpause,
         pause_multiple_times,
         unpause_twice,
+        unpause_if_pause_owner_crashes,
         write_returns_if_remote_server_crashes,
-        mon_cleaner_works,
-        mon_cleaner_stops_correctly,
+        ack_process_stops_correctly,
+        ack_process_handles_unknown_remote_server,
+        ack_process_handles_unknown_from,
+        ack_calling_add_when_server_list_is_empty_is_not_allowed,
         sync_using_name_works,
         insert_many_request,
         insert_into_bag,
@@ -48,7 +53,16 @@ all() ->
         delete_request_many_from_bag,
         insert_into_bag_is_replicated,
         insert_into_keypos_table,
-        info_contains_opts
+        table_name_works,
+        info_contains_opts,
+        unknown_down_message_is_ignored,
+        unknown_message_is_ignored,
+        unknown_cast_message_is_ignored,
+        unknown_message_is_ignored_in_ack_process,
+        unknown_cast_message_is_ignored_in_ack_process,
+        unknown_call_returns_error_from_ack_process,
+        code_change_returns_ok,
+        code_change_returns_ok_for_ack
     ].
 
 init_per_suite(Config) ->
@@ -117,6 +131,13 @@ insert_new_works(_Config) ->
     false = cets:insert_new(Pid1, {alice, 32}),
     false = cets:insert_new(Pid1, {alice, 33}),
     false = cets:insert_new(Pid2, {alice, 33}).
+
+insert_new_works_with_table_name(_Config) ->
+    {ok, Pid1} = cets:start(T1 = tabinsnew1, #{}),
+    {ok, Pid2} = cets:start(T2 = tabinsnew2, #{}),
+    ok = cets_join:join(join_lock1_insnew2, #{}, Pid1, Pid2),
+    true = cets:insert_new(T1, {alice, 32}),
+    false = cets:insert_new(T2, {alice, 32}).
 
 insert_new_works_when_leader_is_back(_Config) ->
     {ok, Pid1} = cets:start(newins1tab_back, #{}),
@@ -236,7 +257,7 @@ insert_new_fails_if_the_leader_dies(_Config) ->
     try
         cets:insert_new(Pid1, {alice, 32})
     catch
-        error:{cets_down, killed} -> ok
+        exit:{killed, _} -> ok
     end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
@@ -250,6 +271,15 @@ insert_new_fails_if_the_local_server_is_dead(_Config) ->
     catch
         exit:{noproc, {gen_server, call, _}} -> ok
     end.
+
+leader_is_the_same_in_metadata_after_join(_Config) ->
+    {ok, Pid1} = cets:start(T1 = check_lead1, #{}),
+    {ok, Pid2} = cets:start(T2 = check_lead2, #{}),
+    ok = cets_join:join(check_lead_lock, #{}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    Leader = cets:get_leader(Pid2),
+    Leader = cets_metadata:get(T1, leader),
+    Leader = cets_metadata:get(T2, leader).
 
 join_works_with_existing_data(_Config) ->
     {ok, Pid1} = cets:start(ex1tab, #{}),
@@ -468,7 +498,7 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     R4 = cets:delete_many_request(T, [5, 4]),
     [] = lists:sort(cets:dump(T)),
     ok = cets:unpause(Pid, PauseMon),
-    [ok = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
+    [{reply, ok} = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
 
 pause_multiple_times(_Config) ->
@@ -486,8 +516,8 @@ pause_multiple_times(_Config) ->
     [] = cets:dump(T),
     ok = cets:unpause(Pid, PauseMon2),
     pong = cets:ping(Pid),
-    cets:wait_response(Ref1, 5000),
-    cets:wait_response(Ref2, 5000),
+    {reply, ok} = cets:wait_response(Ref1, 5000),
+    {reply, ok} = cets:wait_response(Ref2, 5000),
     [{1}, {2}] = lists:sort(cets:dump(T)).
 
 unpause_twice(_Config) ->
@@ -497,6 +527,22 @@ unpause_twice(_Config) ->
     ok = cets:unpause(Pid, PauseMon),
     {error, unknown_pause_monitor} = cets:unpause(Pid, PauseMon).
 
+unpause_if_pause_owner_crashes(_Config) ->
+    Me = self(),
+    T = pause_crashed,
+    {ok, Pid} = cets:start(T, #{}),
+    spawn_monitor(fun() ->
+        cets:pause(Pid),
+        Me ! pause_called,
+        error(wow)
+    end),
+    receive
+        pause_called -> ok
+    after 5000 -> ct:fail(timeout)
+    end,
+    %% Check that the server is unpaused
+    ok = cets:insert(Pid, {1}).
+
 write_returns_if_remote_server_crashes(_Config) ->
     {ok, Pid1} = cets:start(c1, #{}),
     {ok, Pid2} = cets:start(c2, #{}),
@@ -504,45 +550,60 @@ write_returns_if_remote_server_crashes(_Config) ->
     sys:suspend(Pid2),
     R = cets:insert_request(c1, {1}),
     exit(Pid2, oops),
-    ok = cets:wait_response(R, 5000).
+    {reply, ok} = cets:wait_response(R, 5000).
 
-mon_cleaner_works(_Config) ->
-    {ok, Pid1} = cets:start(c3, #{}),
-    %% Suspend, so to avoid unexpected check
-    sys:suspend(c3_mon),
-    %% Two cases to check: an alive process and a dead process
-    R = cets:insert_request(c3, {2}),
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There is one monitor
-    [_] = ets:tab2list(c3_mon),
-    {Pid, Mon} = spawn_monitor(fun() -> cets:insert_request(c3, {1}) end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    after 5000 -> ct:fail(timeout)
-    end,
-    %% Ensure insert_request reaches the server
-    cets:ping(Pid1),
-    %% There are two monitors
-    [_, _] = ets:tab2list(c3_mon),
-    %% Force check
-    sys:resume(c3_mon),
-    c3_mon ! check,
-    %% Ensure, that check is finished
-    sys:get_state(c3_mon),
-    %% A monitor for a dead process is removed
-    [_] = ets:tab2list(c3_mon),
-    %% The monitor is finally removed once wait_response returns
-    ok = cets:wait_response(R, 5000),
-    [] = ets:tab2list(c3_mon).
-
-mon_cleaner_stops_correctly(_Config) ->
-    {ok, Pid} = cets:start(cleaner_stops, #{}),
-    #{mon_pid := MonPid} = cets:info(Pid),
-    MonMon = monitor(process, MonPid),
+ack_process_stops_correctly(_Config) ->
+    {ok, Pid} = cets:start(ack_stops, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    AckMon = monitor(process, AckPid),
     cets:stop(Pid),
     receive
-        {'DOWN', MonMon, process, MonPid, normal} -> ok
+        {'DOWN', AckMon, process, AckPid, normal} -> ok
+    after 5000 -> ct:fail(timeout)
+    end.
+
+ack_process_handles_unknown_remote_server(_Config) ->
+    {ok, Pid1} = cets:start(ack_unkn1, #{}),
+    {ok, Pid2} = cets:start(ack_unkn2, #{}),
+    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    [Pid2] = cets:other_pids(Pid1),
+    RandomPid = spawn(fun() -> ok end),
+    %% Request returns immediately,
+    %% we actually need to send a ping to ensure it has been processed locally
+    R = cets:insert_request(Pid1, {1}),
+    pong = cets:ping(Pid1),
+    %% Extract From value
+    [{servers, _}, {From, [Pid2]}] = maps:to_list(sys:get_state(AckPid)),
+    cets_ack:ack(AckPid, From, RandomPid),
+    sys:resume(Pid2),
+    %% Ack process still works fine
+    {reply, ok} = cets:wait_response(R, 5000).
+
+ack_process_handles_unknown_from(_Config) ->
+    {ok, Pid1} = cets:start(ack_unkn_from1, #{}),
+    {ok, Pid2} = cets:start(ack_unkn_from2, #{}),
+    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+    #{ack_pid := AckPid} = cets:info(Pid1),
+    R = cets:insert_request(Pid1, {1}),
+    From = {self(), make_ref()},
+    cets_ack:ack(AckPid, From, self()),
+    %% Ack process still works fine
+    {reply, ok} = cets:wait_response(R, 5000).
+
+ack_calling_add_when_server_list_is_empty_is_not_allowed(_Config) ->
+    {ok, Pid} = cets:start(add_fails, #{}),
+    Mon = monitor(process, Pid),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    FakeFrom = {self(), make_ref()},
+    cets_ack:add(AckPid, FakeFrom),
+    %% cets server would never send an add message in the single node configuration
+    %% (cets_ack is not used if there is only one node,
+    %% so cets module calls gen_server:reply and skips the replication)
+    receive
+        {'DOWN', Mon, process, Pid, Reason} ->
+            {unexpected_add_msg, _} = Reason
     after 5000 -> ct:fail(timeout)
     end.
 
@@ -553,7 +614,7 @@ sync_using_name_works(_Config) ->
 insert_many_request(_Config) ->
     {ok, Pid} = cets:start(c5, #{}),
     R = cets:insert_many_request(Pid, [{a}, {b}]),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{a}, {b}] = ets:tab2list(c5).
 
 insert_into_bag(_Config) ->
@@ -583,7 +644,7 @@ delete_request_from_bag(_Config) ->
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     R = cets:delete_object_request(T, {1, 2}),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{1, 1}] = cets:dump(T).
 
 delete_request_many_from_bag(_Config) ->
@@ -591,7 +652,7 @@ delete_request_many_from_bag(_Config) ->
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
     R = cets:delete_objects_request(T, [{1, 1}, {1, 3}]),
-    ok = cets:wait_response(R, 5000),
+    {reply, ok} = cets:wait_response(R, 5000),
     [{1, 2}] = cets:dump(T).
 
 insert_into_bag_is_replicated(_Config) ->
@@ -609,9 +670,72 @@ insert_into_keypos_table(_Config) ->
     [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
     [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
 
+table_name_works(_Config) ->
+    T = tabnamecheck,
+    {ok, Pid} = cets:start(T, #{}),
+    {ok, T} = cets:table_name(T),
+    {ok, T} = cets:table_name(Pid),
+    #{table := T} = cets:info(Pid).
+
 info_contains_opts(_Config) ->
     {ok, Pid} = cets:start(info_contains_opts, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
+
+%% Cases to improve code coverage
+
+unknown_down_message_is_ignored(_Config) ->
+    {ok, Pid} = cets:start(rand_down_msg, #{}),
+    RandPid = spawn(fun() -> ok end),
+    Pid ! {'DOWN', make_ref(), process, RandPid, oops},
+    still_works(Pid).
+
+unknown_message_is_ignored(_Config) ->
+    {ok, Pid} = cets:start(unkn_msg, #{}),
+    Pid ! oops,
+    still_works(Pid).
+
+unknown_cast_message_is_ignored(_Config) ->
+    {ok, Pid} = cets:start(unkn_cast_msg, #{}),
+    gen_server:cast(Pid, oops),
+    still_works(Pid).
+
+unknown_message_is_ignored_in_ack_process(_Config) ->
+    {ok, Pid} = cets:start(ack_unkn_msg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    AckPid ! oops,
+    still_works(Pid).
+
+unknown_cast_message_is_ignored_in_ack_process(_Config) ->
+    {ok, Pid} = cets:start(ack_unkn_cast_msg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    gen_server:cast(AckPid, oops),
+    still_works(Pid).
+
+unknown_call_returns_error_from_ack_process(_Config) ->
+    {ok, Pid} = cets:start(ack_unkn_call_msg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    {error, unexpected_call} = gen_server:call(AckPid, oops),
+    still_works(Pid).
+
+code_change_returns_ok(_Config) ->
+    {ok, Pid} = cets:start(ack_code_chg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    sys:suspend(AckPid),
+    ok = sys:change_code(AckPid, cets, v2, []),
+    sys:resume(AckPid).
+
+code_change_returns_ok_for_ack(_Config) ->
+    {ok, Pid} = cets:start(code_chg, #{}),
+    #{ack_pid := AckPid} = cets:info(Pid),
+    sys:suspend(AckPid),
+    ok = sys:change_code(AckPid, cets_ack, v2, []),
+    sys:resume(AckPid).
+
+still_works(Pid) ->
+    pong = cets:ping(Pid),
+    %% The server works fine
+    ok = cets:insert(Pid, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid).
 
 start(Node, Tab) ->
     rpc(Node, cets, start, [Tab, #{}]).

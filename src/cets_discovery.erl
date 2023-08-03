@@ -61,7 +61,7 @@ start_common(F, Opts) ->
 add_table(Server, Table) ->
     gen_server:call(Server, {add_table, Table}).
 
--spec get_tables(server()) -> [cets:table_name()].
+-spec get_tables(server()) -> {ok, [cets:table_name()]}.
 get_tables(Server) ->
     gen_server:call(Server, get_tables).
 

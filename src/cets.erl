@@ -84,13 +84,15 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type server_pid() :: pid().
 -type server_ref() ::
-    pid()
+    server_pid()
     | atom()
     | {local, atom()}
     | {global, term()}
     | {via, module(), term()}.
--type request_id() :: reference().
+-type request_id() :: gen_server:request_id().
+-type from() :: gen_server:from().
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
@@ -100,16 +102,16 @@
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
     | {leader_op, op()}.
--type from() :: {pid(), reference()}.
+-type remote_op() :: {remote_op, Op :: op(), From :: from(), AckPid :: cets_ack:ack_pid()}.
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type state() :: #{
     tab := table_name(),
-    mon_tab := atom(),
-    mon_pid := pid(),
-    other_servers := [pid()],
-    leader := pid(),
+    ack_pid := cets_ack:ack_pid(),
+    %% Updated by set_other_servers/2 function only
+    other_servers := [server_pid()],
+    leader := server_pid(),
     is_leader := boolean(),
     opts := start_opts(),
     backlog := [backlog_entry()],
@@ -127,20 +129,20 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, [pid()], [tuple()]}.
+    | {send_dump, [server_pid()], [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
     nodes := [node()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
-    mon_pid := pid(),
+    ack_pid := cets_ack:ack_pid(),
     opts := start_opts()
 }.
 
--type handle_down_fun() :: fun((#{remote_pid := pid(), table := table_name()}) -> ok).
+-type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
--type handle_wrong_leader() :: fun((term()) -> ok).
+-type handle_wrong_leader() :: fun((#{from := from(), op := op(), server := server_pid()}) -> ok).
 -type start_opts() :: #{
     type => ordered_set | bag,
     keypos => non_neg_integer(),
@@ -149,13 +151,7 @@
     handle_wrong_leader => handle_wrong_leader()
 }.
 
--export_type([request_id/0, op/0, server_ref/0, long_msg/0, info/0, table_name/0]).
-
--type local_mon_tab() :: atom().
--type remote_mon_tab() :: {remote, node(), local_mon_tab()}.
--type local_or_remote_mon_tab() :: local_mon_tab() | remote_mon_tab().
--type wait_info() :: {Servers :: [pid()], MonTabInfo :: local_or_remote_mon_tab()}.
--export_type([wait_info/0, local_or_remote_mon_tab/0]).
+-export_type([request_id/0, op/0, server_pid/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
 %% API functions
 
@@ -174,7 +170,7 @@
 %%   We recommend to define that function if keys could have conflicts.
 %%   This function would be called once for each conflicting key.
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
--spec start(table_name(), start_opts()) -> {ok, pid()}.
+-spec start(table_name(), start_opts()) -> {ok, server_pid()}.
 start(Tab, Opts) when is_atom(Tab) ->
     case check_opts(Opts) of
         [] ->
@@ -195,13 +191,13 @@ dump(Tab) ->
 remote_dump(Server) ->
     cets_call:long_call(Server, remote_dump).
 
--spec table_name(server_ref()) -> table_name().
+-spec table_name(server_ref()) -> {ok, table_name()}.
 table_name(Tab) when is_atom(Tab) ->
-    Tab;
+    {ok, Tab};
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [pid()], [tuple()]) -> ok.
+-spec send_dump(server_ref(), [server_pid()], [tuple()]) -> ok.
 send_dump(Server, NewPids, OurDump) ->
     Info = #{msg => send_dump, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, NewPids, OurDump}, Info).
@@ -271,16 +267,11 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), non_neg_integer() | infinity) -> ok.
+-spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()}.
 wait_response(Mon, Timeout) ->
-    cets_call:wait_response(Mon, Timeout).
+    gen_server:wait_response(Mon, Timeout).
 
-%% Get a list of other CETS processes that are handling this table.
--spec other_servers(server_ref()) -> [server_ref()].
-other_servers(Server) ->
-    cets_call:long_call(Server, other_servers).
-
--spec get_leader(server_ref()) -> pid().
+-spec get_leader(server_ref()) -> server_pid().
 get_leader(Tab) when is_atom(Tab) ->
     %% Optimization: replace call with ETS lookup
     cets_metadata:get(Tab, leader);
@@ -293,9 +284,9 @@ other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
 %% Get a list of other CETS processes that are handling this table.
--spec other_pids(server_ref()) -> [pid()].
+-spec other_pids(server_ref()) -> [server_pid()].
 other_pids(Server) ->
-    other_servers(Server).
+    cets_call:long_call(Server, other_servers).
 
 -spec pause(server_ref()) -> pause_monitor().
 pause(Server) ->
@@ -330,19 +321,16 @@ info(Server) ->
 -spec init({table_name(), start_opts()}) -> {ok, state()}.
 init({Tab, Opts}) ->
     process_flag(message_queue_data, off_heap),
-    MonTab = list_to_atom(atom_to_list(Tab) ++ "_mon"),
     Type = maps:get(type, Opts, ordered_set),
     KeyPos = maps:get(keypos, Opts, 1),
     %% Match result to prevent the Dialyzer warning
     _ = ets:new(Tab, [Type, named_table, public, {keypos, KeyPos}]),
-    _ = ets:new(MonTab, [public, named_table]),
     cets_metadata:init(Tab),
     cets_metadata:set(Tab, leader, self()),
-    {ok, MonPid} = cets_mon_cleaner:start_link(MonTab, MonTab),
+    {ok, AckPid} = cets_ack:start_link(Tab),
     {ok, #{
         tab => Tab,
-        mon_tab => MonTab,
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         other_servers => [],
         leader => self(),
         is_leader => true,
@@ -351,8 +339,15 @@ init({Tab, Opts}) ->
         pause_monitors => []
     }}.
 
--spec handle_call(term(), from(), state()) ->
+-spec handle_call(long_msg() | {op, op()}, from(), state()) ->
     {noreply, state()} | {reply, term(), state()}.
+handle_call({op, Op}, From, State = #{pause_monitors := []}) ->
+    handle_op(Op, From, State),
+    {noreply, State};
+handle_call({op, Op}, From, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
+    %% Backlog is a list of pending operations, when our server is paused.
+    %% The list would be applied, once our server is unpaused.
+    {noreply, State#{backlog := [{Op, From} | Backlog]}};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
 handle_call(get_leader, _From, State = #{leader := Leader}) ->
@@ -383,43 +378,38 @@ handle_call({unpause, Ref}, _From, State) ->
 handle_call({set_leader, IsLeader}, _From, State) ->
     {reply, ok, State#{is_leader := IsLeader}};
 handle_call(get_info, _From, State) ->
-    handle_get_info(State).
+    {reply, handle_get_info(State), State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
-handle_cast({op, From, Msg}, State = #{pause_monitors := []}) ->
-    handle_op(From, Msg, State),
-    {noreply, State};
-handle_cast({op, From, Msg}, State = #{pause_monitors := [_ | _], backlog := Backlog}) ->
-    %% Backlog is a list of pending operation, when our server is paused.
-    %% The list would be applied, once our server is unpaused.
-    {noreply, State#{backlog := [{Msg, From} | Backlog]}};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
-handle_info({remote_op, From, Msg}, State) ->
-    handle_remote_op(From, Msg, State),
+handle_info({remote_op, Op, From, AckPid}, State) ->
+    handle_remote_op(Op, From, AckPid, State),
     {noreply, State};
 handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    handle_down(Mon, Pid, State);
+    {noreply, handle_down(Mon, Pid, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
-terminate(_Reason, _State = #{mon_pid := MonPid}) ->
-    ok = gen_server:stop(MonPid).
+terminate(_Reason, _State = #{ack_pid := AckPid}) ->
+    ok = gen_server:stop(AckPid).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% Internal logic
 
+-spec handle_send_dump([server_pid()], [tuple()], state()) -> {reply, ok, state()}.
 handle_send_dump(NewPids, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, set_other_servers(Servers2, State)}.
 
+-spec handle_down(reference(), pid(), state()) -> state().
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
@@ -428,19 +418,19 @@ handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
                 state => State,
                 paused_by_pid => Pid
             }),
-            {reply, ok, State2} = handle_unpause(Mon, State),
-            {noreply, State2};
+            handle_unpause2(Mon, Mons, State);
         false ->
-            handle_down2(Mon, Pid, State)
+            handle_down2(Pid, State)
     end.
 
-handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := MonTab}) ->
+-spec handle_down2(pid(), state()) -> state().
+handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) ->
     case lists:member(RemotePid, Servers) of
         true ->
-            Servers2 = lists:delete(RemotePid, Servers),
-            notify_remote_down(RemotePid, MonTab),
+            cets_ack:send_remote_down(AckPid, RemotePid),
             call_user_handle_down(RemotePid, State),
-            {noreply, set_other_servers(Servers2, State)};
+            Servers2 = lists:delete(RemotePid, Servers),
+            set_other_servers(Servers2, State);
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -448,20 +438,11 @@ handle_down2(_Mon, RemotePid, State = #{other_servers := Servers, mon_tab := Mon
                 remote_pid => RemotePid,
                 state => State
             }),
-            {noreply, State}
+            State
     end.
 
-notify_remote_down(RemotePid, MonTab) ->
-    List = ets:tab2list(MonTab),
-    notify_remote_down_loop(RemotePid, List).
-
-notify_remote_down_loop(RemotePid, [{Mon, Pid} | List]) ->
-    Pid ! {remote_down, Mon, RemotePid},
-    notify_remote_down_loop(RemotePid, List);
-notify_remote_down_loop(_RemotePid, []) ->
-    ok.
-
 %% Merge two lists of pids, create the missing monitors.
+-spec add_servers(Servers, Servers) -> Servers when Servers :: [server_pid()].
 add_servers(Pids, Servers) ->
     lists:sort(add_servers2(self(), Pids, Servers) ++ Servers).
 
@@ -469,7 +450,7 @@ add_servers2(SelfPid, [SelfPid | OtherPids], Servers) ->
     ?LOG_INFO(#{what => join_to_the_same_pid_ignored}),
     add_servers2(SelfPid, OtherPids, Servers);
 add_servers2(SelfPid, [RemotePid | OtherPids], Servers) when is_pid(RemotePid) ->
-    case has_remote_pid(RemotePid, Servers) of
+    case lists:member(RemotePid, Servers) of
         false ->
             erlang:monitor(process, RemotePid),
             [RemotePid | add_servers2(SelfPid, OtherPids, Servers)];
@@ -485,50 +466,46 @@ add_servers2(_SelfPid, [], _Servers) ->
     [].
 
 %% Sets other_servers field, chooses the leader
-set_other_servers(Servers, State = #{tab := Tab}) ->
+-spec set_other_servers([server_pid()], state()) -> state().
+set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang
     %% (so all nodes would choose the same leader).
     %% The leader node would not receive that much extra load.
     Leader = lists:max([self() | Servers]),
     IsLeader = Leader =:= self(),
-    cets_metadata:set(Tab, leader, self()),
+    cets_metadata:set(Tab, leader, Leader),
+    %% Ask the ack process to use this list of servers as the source of replies
+    %% for all new cets_ack:add/2 calls
+    cets_ack:set_servers(AckPid, Servers),
     State#{leader := Leader, is_leader := IsLeader, other_servers := Servers}.
 
+-spec pids_to_nodes([pid()]) -> [node()].
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
-ets_delete_keys(Tab, [Key | Keys]) ->
-    ets:delete(Tab, Key),
-    ets_delete_keys(Tab, Keys);
-ets_delete_keys(_Tab, []) ->
+-spec ets_delete_keys(table_name(), [term()]) -> ok.
+ets_delete_keys(Tab, Keys) ->
+    [ets:delete(Tab, Key) || Key <- Keys],
     ok.
 
-ets_delete_objects(Tab, [Object | Objects]) ->
-    ets:delete_object(Tab, Object),
-    ets_delete_objects(Tab, Objects);
-ets_delete_objects(_Tab, []) ->
+-spec ets_delete_objects(table_name(), [tuple()]) -> ok.
+ets_delete_objects(Tab, Objects) ->
+    [ets:delete_object(Tab, Object) || Object <- Objects],
     ok.
-
-has_remote_pid(RemotePid, Servers) ->
-    lists:member(RemotePid, Servers).
-
-reply_updated({Mon, Pid}) ->
-    %% We really don't wanna block this process
-    erlang:send(Pid, {updated, Mon, self()}, [noconnect, nosuspend]).
-
-send_to_remote(RemotePid, Msg) ->
-    erlang:send(RemotePid, Msg, [noconnect, nosuspend]).
 
 %% Handle operation from a remote node
-handle_remote_op(From, Msg, State) ->
-    do_op(Msg, State),
-    reply_updated(From).
+-spec handle_remote_op(op(), from(), cets_ack:ack_pid(), state()) -> ok.
+handle_remote_op(Op, From, AckPid, State) ->
+    do_op(Op, State),
+    cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
-do_op(Msg, #{tab := Tab}) ->
-    do_table_op(Msg, Tab).
+-spec do_op(op(), state()) -> ok | boolean().
+do_op(Op, #{tab := Tab}) ->
+    do_table_op(Op, Tab).
 
+-spec do_table_op(op(), table_name()) -> ok | boolean().
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
@@ -545,99 +522,94 @@ do_table_op({insert_new, Rec}, Tab) ->
     ets:insert_new(Tab, Rec).
 
 %% Handle operation locally and replicate it across the cluster
-handle_op(From, {leader_op, Msg}, State) ->
-    handle_leader_op(From, Msg, State);
-handle_op(From = {Mon, Pid}, Msg, State) when is_pid(Pid) ->
-    do_op(Msg, State),
-    WaitInfo = replicate(Pid, From, Msg, State),
-    Pid ! {cets_reply, Mon, WaitInfo},
-    ok.
+-spec handle_op(op(), from(), state()) -> ok.
+handle_op({leader_op, Op}, From, State) ->
+    handle_leader_op(Op, From, State);
+handle_op(Op, From, State) ->
+    do_op(Op, State),
+    replicate(Op, From, State).
 
-handle_leader_op(From = {Mon, Pid}, Msg, State = #{is_leader := true}) ->
-    case do_op(Msg, State) of
+-spec handle_leader_op(op(), from(), state()) -> ok.
+handle_leader_op(Op, From, State = #{is_leader := true}) ->
+    case do_op(Op, State) of
         %% Skip the replication - insert_new returns false.
         false ->
-            Pid ! {cets_reply, Mon, false, {error, rejected}},
+            gen_server:reply(From, {error, rejected}),
             ok;
         true ->
-            WaitInfo = replicate(Pid, From, Msg, State),
-            Pid ! {cets_reply, Mon, WaitInfo},
-            ok
+            replicate(Op, From, State)
     end;
-handle_leader_op(From = {Mon, Pid}, Msg, State) ->
+handle_leader_op(Op, From, State = #{leader := Leader}) ->
     %% Reject operation - not a leader
-    Pid ! {cets_reply, Mon, false, {error, wrong_leader}},
-    handle_wrong_leader(From, Msg, State).
+    gen_server:reply(From, {error, {wrong_leader, Leader}}),
+    %% Call an user defined callback to notify about the error
+    handle_wrong_leader(Op, From, State).
 
-handle_wrong_leader(From, Msg, _State = #{opts := #{handle_wrong_leader := F}}) ->
-    %% It is used for debugging/logging
-    %% Do not do anything heavy here
-    catch F(#{from => From, msg => Msg, server => self()}),
-    ok;
-handle_wrong_leader(_State, _From, _Msg) ->
+-spec replicate(op(), from(), state()) -> ok.
+replicate(_Op, From, #{other_servers := []}) ->
+    %% Skip replication
+    gen_server:reply(From, ok);
+replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers}) ->
+    cets_ack:add(AckPid, From),
+    RemoteOp = {remote_op, Op, From, AckPid},
+    [send_remote_op(Server, RemoteOp) || Server <- Servers],
+    %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
 
--spec replicate(pid(), {reference(), pid()}, op(), state()) -> wait_info().
-replicate(Pid, From, Msg, #{mon_tab := MonTab, other_servers := Servers}) ->
-    %% Reply would be routed directly to FromPid
-    Msg2 = {remote_op, From, Msg},
-    [send_to_remote(RemotePid, Msg2) || RemotePid <- Servers],
-    ets:insert(MonTab, From),
-    MonTabInfo =
-        case node(Pid) =:= node() of
-            true -> MonTab;
-            false -> {remote, node(), MonTab}
-        end,
-    {Servers, MonTabInfo}.
+-spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.
+send_remote_op(RemotePid, RemoteOp) ->
+    erlang:send(RemotePid, RemoteOp, [noconnect]).
 
+-spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
-    [handle_op(From, Msg, State) || {Msg, From} <- lists:reverse(Backlog)],
+    [handle_op(Op, From, State) || {Op, From} <- lists:reverse(Backlog)],
     State#{backlog := []}.
 
 %% We support multiple pauses
 %% Only when all pause requests are unpaused we continue
+-spec handle_unpause(pause_monitor(), state()) -> {reply, Reply, state()} when
+    Reply :: ok | {error, unknown_pause_monitor}.
 handle_unpause(Mon, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            handle_unpause2(Mon, Mons, State);
+            {reply, ok, handle_unpause2(Mon, Mons, State)};
         false ->
             {reply, {error, unknown_pause_monitor}, State}
     end.
 
+-spec handle_unpause2(pause_monitor(), [pause_monitor()], state()) -> state().
 handle_unpause2(Mon, Mons, State) ->
     erlang:demonitor(Mon, [flush]),
     Mons2 = lists:delete(Mon, Mons),
     State2 = State#{pause_monitors := Mons2},
-    State3 =
-        case Mons2 of
-            [] ->
-                apply_backlog(State2);
-            _ ->
-                State2
-        end,
-    {reply, ok, State3}.
+    case Mons2 of
+        [] ->
+            apply_backlog(State2);
+        _ ->
+            State2
+    end.
 
--spec handle_get_info(state()) -> {reply, info(), state()}.
+-spec handle_get_info(state()) -> info().
 handle_get_info(
-    State = #{
+    #{
         tab := Tab,
         other_servers := Servers,
-        mon_pid := MonPid,
+        ack_pid := AckPid,
         opts := Opts
     }
 ) ->
-    Info = #{
+    #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
-        mon_pid => MonPid,
+        ack_pid => AckPid,
         opts => Opts
-    },
-    {reply, Info, State}.
+    }.
 
 %% Cleanup
-call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
+-spec call_user_handle_down(server_pid(), state()) -> ok.
+call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
     case Opts of
         #{handle_down := F} ->
             FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
@@ -651,6 +623,15 @@ call_user_handle_down(RemotePid, _State = #{tab := Tab, opts := Opts}) ->
         _ ->
             ok
     end.
+
+-spec handle_wrong_leader(op(), from(), state()) -> ok.
+handle_wrong_leader(Op, From, #{opts := #{handle_wrong_leader := F}}) ->
+    %% It is used for debugging/logging
+    %% Do not do anything heavy here
+    catch F(#{from => From, op => Op, server => self()}),
+    ok;
+handle_wrong_leader(_Op, _From, _State) ->
+    ok.
 
 -type start_error() :: bag_with_conflict_handler.
 -spec check_opts(start_opts()) -> [start_error()].
