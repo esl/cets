@@ -18,6 +18,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Get deps and compile
+      run: make pre_test
     - name: Run tests
       run: make cover_test
     - name: Upload coverage reports to Codecov

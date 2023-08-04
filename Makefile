@@ -16,6 +16,10 @@ dial:
 grad:
 	rebar3 as grad gradualizer
 
+# Separate task to make output on CI more pretty
+pre_test:
+	rebar3 as test compile
+
 cover_test:
 	rebar3 as test ct --sname=ct1 --cover
 	rebar3 as test codecov analyze
