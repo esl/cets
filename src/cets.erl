@@ -155,6 +155,8 @@
     handle_conflict => handle_conflict_fun(),
     handle_wrong_leader => handle_wrong_leader()
 }.
+-type response_return() ::
+    timeout | {error, term()} | {reply, term()}.
 
 -export_type([request_id/0, op/0, server_pid/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
@@ -272,8 +274,6 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--type response_return() ::
-    timeout | {error, term()} | {reply, term()}.
 -spec wait_response(request_id(), timeout()) -> response_return().
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
@@ -708,8 +708,7 @@ handle_wrong_leader(Op, From, #{opts := #{handle_wrong_leader := F}}) ->
 handle_wrong_leader(_Op, _From, _State) ->
     ok.
 
--type start_error() :: bag_with_conflict_handler.
--spec check_opts(start_opts()) -> [start_error()].
+-spec check_opts(start_opts()) -> [bag_with_conflict_handler].
 check_opts(#{handle_conflict := _, type := bag}) ->
     [bag_with_conflict_handler];
 check_opts(_) ->
