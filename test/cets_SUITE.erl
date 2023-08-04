@@ -1,83 +1,46 @@
 -module(cets_SUITE).
+
 -include_lib("common_test/include/ct.hrl").
 
 -compile([export_all, nowarn_export_all]).
 
 all() ->
-    [
-        inserted_records_could_be_read_back,
-        insert_many_with_one_record,
-        insert_many_with_two_records,
-        delete_works,
-        delete_many_works,
-        join_works,
-        inserted_records_could_be_read_back_from_replicated_table,
-        join_works_with_existing_data,
-        join_works_with_existing_data_with_conflicts,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
-        bag_with_conflict_handler_not_allowed,
-        insert_new_works,
-        insert_new_works_with_table_name,
-        insert_new_works_when_leader_is_back,
-        insert_new_when_new_leader_has_joined,
-        insert_new_when_new_leader_has_joined_duplicate,
-        insert_new_when_inconsistent,
-        insert_new_is_retried_when_leader_is_reelected,
-        insert_new_fails_if_the_leader_dies,
-        insert_new_fails_if_the_local_server_is_dead,
-        leader_is_the_same_in_metadata_after_join,
-        join_with_the_same_pid,
-        join_ref_is_same_after_join,
-        join_fails_because_server_process_not_found,
-        join_fails_because_server_process_not_found_before_get_pids,
-        join_fails_before_send_dump,
-        join_fails_before_send_dump_and_there_are_pending_remote_ops,
-        send_dump_fails_during_join_because_receiver_exits,
-        join_fails_in_check_fully_connected,
-        join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
-        join_fails_because_pids_do_not_match_for_nodes_in_segment,
-        join_fails_because_servers_overlap,
-        remote_ops_are_ignored_if_join_ref_does_not_match,
-        join_retried_if_lock_is_busy,
-        send_dump_contains_already_added_servers,
-        test_multinode,
-        test_multinode_remote_insert,
-        node_list_is_correct,
-        test_multinode_auto_discovery,
-        test_locally,
-        handle_down_is_called,
-        events_are_applied_in_the_correct_order_after_unpause,
-        pause_multiple_times,
-        unpause_twice,
-        unpause_if_pause_owner_crashes,
-        write_returns_if_remote_server_crashes,
-        ack_process_stops_correctly,
-        ack_process_handles_unknown_remote_server,
-        ack_process_handles_unknown_from,
-        ack_calling_add_when_server_list_is_empty_is_not_allowed,
-        sync_using_name_works,
-        insert_many_request,
-        insert_into_bag,
-        delete_from_bag,
-        delete_many_from_bag,
-        delete_request_from_bag,
-        delete_request_many_from_bag,
-        insert_into_bag_is_replicated,
-        insert_into_keypos_table,
-        table_name_works,
-        info_contains_opts,
-        unknown_down_message_is_ignored,
-        unknown_message_is_ignored,
-        unknown_cast_message_is_ignored,
-        unknown_message_is_ignored_in_ack_process,
-        unknown_cast_message_is_ignored_in_ack_process,
-        unknown_call_returns_error_from_ack_process,
-        code_change_returns_ok,
-        code_change_returns_ok_for_ack,
-        run_spawn_forwards_errors
-    ].
+    [inserted_records_could_be_read_back, insert_many_with_one_record,
+     insert_many_with_two_records, delete_works, delete_many_works, join_works,
+     inserted_records_could_be_read_back_from_replicated_table, join_works_with_existing_data,
+     join_works_with_existing_data_with_conflicts,
+     join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
+     join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
+     join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
+     bag_with_conflict_handler_not_allowed, insert_new_works, insert_new_works_with_table_name,
+     insert_new_works_when_leader_is_back, insert_new_when_new_leader_has_joined,
+     insert_new_when_new_leader_has_joined_duplicate, insert_new_when_inconsistent,
+     insert_new_is_retried_when_leader_is_reelected, insert_new_fails_if_the_leader_dies,
+     insert_new_fails_if_the_local_server_is_dead, leader_is_the_same_in_metadata_after_join,
+     join_with_the_same_pid, join_ref_is_same_after_join,
+     join_fails_because_server_process_not_found,
+     join_fails_because_server_process_not_found_before_get_pids, join_fails_before_send_dump,
+     join_fails_before_send_dump_and_there_are_pending_remote_ops,
+     send_dump_fails_during_join_because_receiver_exits, join_fails_in_check_fully_connected,
+     join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
+     join_fails_because_pids_do_not_match_for_nodes_in_segment,
+     join_fails_because_servers_overlap, remote_ops_are_ignored_if_join_ref_does_not_match,
+     join_retried_if_lock_is_busy, send_dump_contains_already_added_servers, test_multinode,
+     test_multinode_remote_insert, node_list_is_correct, test_multinode_auto_discovery,
+     test_locally, handle_down_is_called,
+     events_are_applied_in_the_correct_order_after_unpause, pause_multiple_times,
+     unpause_twice, unpause_if_pause_owner_crashes, write_returns_if_remote_server_crashes,
+     ack_process_stops_correctly, ack_process_handles_unknown_remote_server,
+     ack_process_handles_unknown_from,
+     ack_calling_add_when_server_list_is_empty_is_not_allowed, sync_using_name_works,
+     insert_many_request, insert_into_bag, delete_from_bag, delete_many_from_bag,
+     delete_request_from_bag, delete_request_many_from_bag, insert_into_bag_is_replicated,
+     insert_into_keypos_table, table_name_works, info_contains_opts,
+     unknown_down_message_is_ignored, unknown_message_is_ignored,
+     unknown_cast_message_is_ignored, unknown_message_is_ignored_in_ack_process,
+     unknown_cast_message_is_ignored_in_ack_process,
+     unknown_call_returns_error_from_ack_process, code_change_returns_ok,
+     code_change_returns_ok_for_ack, run_spawn_forwards_errors].
 
 init_per_suite(Config) ->
     Node2 = start_node(ct2),
@@ -165,9 +128,9 @@ insert_new_works_when_leader_is_back(_Config) ->
     Pid2 = Leader,
     cets:set_leader(Leader, false),
     spawn(fun() ->
-        timer:sleep(100),
-        cets:set_leader(Leader, true)
-    end),
+             timer:sleep(100),
+             cets:set_leader(Leader, true)
+          end),
     true = cets:insert_new(Pid1, {alice, 32}).
 
 insert_new_when_new_leader_has_joined(_Config) ->
@@ -180,10 +143,10 @@ insert_new_when_new_leader_has_joined(_Config) ->
     Leader = cets:get_leader(Pid1),
     PauseMon = cets:pause(Leader),
     spawn(fun() ->
-        timer:sleep(100),
-        ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
-        cets:unpause(Leader, PauseMon)
-    end),
+             timer:sleep(100),
+             ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
+             cets:unpause(Leader, PauseMon)
+          end),
     %% Inserted by Pid3
     true = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 32}],
@@ -202,10 +165,10 @@ insert_new_when_new_leader_has_joined_duplicate(_Config) ->
     Leader = cets:get_leader(Pid1),
     PauseMon = cets:pause(Leader),
     spawn(fun() ->
-        timer:sleep(100),
-        ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
-        cets:unpause(Leader, PauseMon)
-    end),
+             timer:sleep(100),
+             ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
+             cets:unpause(Leader, PauseMon)
+          end),
     %% Checked and ignored by Pid3
     false = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 33}],
@@ -237,10 +200,10 @@ insert_new_is_retried_when_leader_is_reelected(_Config) ->
     %% Ask process to reject all the leader operations
     cets:set_leader(Leader, false),
     spawn(fun() ->
-        timer:sleep(100),
-        %% Fix the leader, so it can process our insert_new call
-        cets:set_leader(Leader, true)
-    end),
+             timer:sleep(100),
+             %% Fix the leader, so it can process our insert_new call
+             cets:set_leader(Leader, true)
+          end),
     %% This function would block, because Leader process would reject the operation
     %% Until we call cets:set_leader(Leader, true)
     true = cets:insert_new(Pid1, {alice, 32}),
@@ -268,25 +231,28 @@ insert_new_fails_if_the_leader_dies(_Config) ->
     ok = cets_join:join(join_lock1_insnew_back3, #{}, Pid1, Pid2),
     cets:pause(Pid2),
     spawn(fun() ->
-        timer:sleep(100),
-        exit(Pid2, kill)
-    end),
+             timer:sleep(100),
+             exit(Pid2, kill)
+          end),
     try
         cets:insert_new(Pid1, {alice, 32})
     catch
-        exit:{killed, _} -> ok
+        exit:{killed, _} ->
+            ok
     end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
     %% Get a pid for a stopped process
     {Pid, Mon} = spawn_monitor(fun() -> ok end),
     receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
+        {'DOWN', Mon, process, Pid, _Reason} ->
+            ok
     end,
     try
         cets:insert_new(Pid, {alice, 32})
     catch
-        exit:{noproc, {gen_server, call, _}} -> ok
+        exit:{noproc, {gen_server, call, _}} ->
+            ok
     end.
 
 leader_is_the_same_in_metadata_after_join(_Config) ->
@@ -356,8 +322,14 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_ke
     Opts = #{handle_conflict => fun resolve_user_conflict/2, keypos => 2},
     {ok, Pid1} = cets:start(T1 = keypos2_tab1, Opts),
     {ok, Pid2} = cets:start(T2 = keypos2_tab2, Opts),
-    cets:insert(T1, #user{name = alice, age = 30, updated = erlang:system_time()}),
-    cets:insert(T2, #user{name = alice, age = 25, updated = erlang:system_time()}),
+    cets:insert(T1,
+                #user{name = alice,
+                      age = 30,
+                      updated = erlang:system_time()}),
+    cets:insert(T2,
+                #user{name = alice,
+                      age = 25,
+                      updated = erlang:system_time()}),
     %% Join will copy and merge existing tables
     ok = cets_join:join(keypos2_lock, #{}, Pid1, Pid2),
     %% Last inserted record is in the table
@@ -365,9 +337,8 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_ke
     [#user{age = 25}] = ets:lookup(T2, alice).
 
 %% Keep record with highest timestamp
-resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2}) when
-    TS1 > TS2
-->
+resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2})
+    when TS1 > TS2 ->
     U1;
 resolve_user_conflict(_U1, U2) ->
     U2.
@@ -399,44 +370,41 @@ join_ref_is_same_after_join(Config) ->
 join_fails_because_server_process_not_found(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    F = fun
-        (join_start) ->
-            exit(Pid1, sim_error);
-        (_) ->
-            ok
-    end,
+    F = fun (join_start) ->
+                exit(Pid1, sim_error);
+            (_) ->
+                ok
+        end,
     {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    F = fun
-        (before_get_pids) ->
-            exit(Pid1, sim_error);
-        (_) ->
-            ok
-    end,
+    F = fun (before_get_pids) ->
+                exit(Pid1, sim_error);
+            (_) ->
+                ok
+        end,
     {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_before_send_dump(Config) ->
     Me = self(),
-    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
-        Me ! {down_called, self(), RemotePid}
-    end,
+    DownFn =
+        fun(#{remote_pid := RemotePid, table := _Tab}) -> Me ! {down_called, self(), RemotePid}
+        end,
     {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
     cets:insert(Pid1, {1}),
     cets:insert(Pid2, {2}),
-    F = fun
-        ({before_send_dump, P}) when Pid1 =:= P ->
-            Me ! before_send_dump_called_for_pid1;
-        ({before_send_dump, P}) when Pid2 =:= P ->
-            error(sim_error);
-        (_) ->
-            ok
-    end,
+    F = fun ({before_send_dump, P}) when Pid1 =:= P ->
+                Me ! before_send_dump_called_for_pid1;
+            ({before_send_dump, P}) when Pid2 =:= P ->
+                error(sim_error);
+            (_) ->
+                ok
+        end,
     {error, sim_error} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     %% Ensure we sent dump to Pid1
@@ -458,21 +426,20 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
     Me = self(),
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    F = fun
-        ({before_send_dump, P}) when Pid1 =:= P ->
-            Me ! before_send_dump_called_for_pid1;
-        ({before_send_dump, P}) when Pid2 =:= P ->
-            sys:suspend(Pid2),
-            error(sim_error);
-        (before_unpause) ->
-            %% Crash in before_unpause, otherwise cets_join will block in cets:unpause/2
-            %% (because Pid2 is suspended).
-            %% Servers would be unpaused automatically though, because cets_join process exits
-            %% (i.e. cets:unpause/2 call is totally optional)
-            error(sim_error2);
-        (_) ->
-            ok
-    end,
+    F = fun ({before_send_dump, P}) when Pid1 =:= P ->
+                Me ! before_send_dump_called_for_pid1;
+            ({before_send_dump, P}) when Pid2 =:= P ->
+                sys:suspend(Pid2),
+                error(sim_error);
+            (before_unpause) ->
+                %% Crash in before_unpause, otherwise cets_join will block in cets:unpause/2
+                %% (because Pid2 is suspended).
+                %% Servers would be unpaused automatically though, because cets_join process exits
+                %% (i.e. cets:unpause/2 call is totally optional)
+                error(sim_error2);
+            (_) ->
+                ok
+        end,
     {error, sim_error2} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     %% Ensure we sent dump to Pid1
@@ -488,23 +455,22 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
 
 send_dump_fails_during_join_because_receiver_exits(Config) ->
     Me = self(),
-    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
-        Me ! {down_called, self(), RemotePid}
-    end,
+    DownFn =
+        fun(#{remote_pid := RemotePid, table := _Tab}) -> Me ! {down_called, self(), RemotePid}
+        end,
     {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
-    F = fun
-        ({before_send_dump, P}) when P =:= Pid1 ->
-            %% Kill Pid2 process.
-            %% It does not crash the join process.
-            %% Pid1 would receive a dump with Pid2 in the server list.
-            exit(Pid2, sim_error),
-            %% Ensure Pid1 got DOWN message from Pid2 already
-            pong = cets:ping(Pid1),
-            Me ! before_send_dump_called;
-        (_) ->
-            ok
-    end,
+    F = fun ({before_send_dump, P}) when P =:= Pid1 ->
+                %% Kill Pid2 process.
+                %% It does not crash the join process.
+                %% Pid1 would receive a dump with Pid2 in the server list.
+                exit(Pid2, sim_error),
+                %% Ensure Pid1 got DOWN message from Pid2 already
+                pong = cets:ping(Pid1),
+                Me ! before_send_dump_called;
+            (_) ->
+                ok
+        end,
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     receive_message(before_send_dump_called),
     pong = cets:ping(Pid1),
@@ -522,17 +488,16 @@ join_fails_in_check_fully_connected(Config) ->
     %% Pid2 and Pid3 are connected
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     [Pid3] = cets:other_pids(Pid2),
-    F = fun
-        (before_check_fully_connected) ->
-            %% Ask Pid2 to remove Pid3 from the list
-            Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
-            %% Ensure Pid2 did the cleaning
-            pong = cets:ping(Pid2),
-            [] = cets:other_pids(Pid2),
-            Me ! before_check_fully_connected_called;
-        (_) ->
-            ok
-    end,
+    F = fun (before_check_fully_connected) ->
+                %% Ask Pid2 to remove Pid3 from the list
+                Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
+                %% Ensure Pid2 did the cleaning
+                pong = cets:ping(Pid2),
+                [] = cets:other_pids(Pid2),
+                Me ! before_check_fully_connected_called;
+            (_) ->
+                ok
+        end,
     {error, check_fully_connected_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     receive_message(before_check_fully_connected_called).
@@ -587,26 +552,26 @@ join_retried_if_lock_is_busy(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
     {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
     Lock = lock_name(Config),
-    SleepyF = fun
-        (join_start) ->
-            Me ! join_start,
-            timer:sleep(infinity);
-        (_) ->
-            ok
-    end,
-    F = fun
-        (before_retry) -> Me ! before_retry;
-        (_) -> ok
-    end,
+    SleepyF =
+        fun (join_start) ->
+                Me ! join_start,
+                timer:sleep(infinity);
+            (_) ->
+                ok
+        end,
+    F = fun (before_retry) ->
+                Me ! before_retry;
+            (_) ->
+                ok
+        end,
     %% Get the lock in a separate process
     spawn_link(fun() ->
-        cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
-    end),
+                  cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
+               end),
     receive_message(join_start),
     %% We actually would not return from cets_join:join unless we get the lock
-    spawn_link(fun() ->
-        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    end),
+    spawn_link(fun() -> ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
+               end),
     receive_message(before_retry).
 
 send_dump_contains_already_added_servers(Config) ->
@@ -641,13 +606,14 @@ test_multinode(Config) ->
     [{a}, {b}, {c}, {d}] = dump(Node2, Tab),
     insert(Node1, Tab, {f}),
     insert(Node4, Tab, {e}),
-    Same = fun(X) ->
-        X = dump(Node1, Tab),
-        X = dump(Node2, Tab),
-        X = dump(Node3, Tab),
-        X = dump(Node4, Tab),
-        ok
-    end,
+    Same =
+        fun(X) ->
+           X = dump(Node1, Tab),
+           X = dump(Node2, Tab),
+           X = dump(Node3, Tab),
+           X = dump(Node4, Tab),
+           ok
+        end,
     Same([{a}, {b}, {c}, {d}, {e}, {f}]),
     delete(Node1, Tab, e),
     Same([{a}, {b}, {c}, {d}, {f}]),
@@ -703,7 +669,10 @@ test_multinode_auto_discovery(Config) ->
     %% Waits for the first check
     sys:get_state(Disco),
     [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}] =
+    [#{memory := _,
+       nodes := [Node1, Node2],
+       size := 0,
+       table := tab2}] =
         cets_discovery:info(Disco),
     ok.
 
@@ -719,16 +688,16 @@ test_locally(_Config) ->
 
 handle_down_is_called(_Config) ->
     Parent = self(),
-    DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) ->
-        Parent ! down_called
-    end,
+    DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) -> Parent ! down_called end,
     {ok, Pid1} = cets:start(d1, #{handle_down => DownFn}),
     {ok, Pid2} = cets:start(d2, #{}),
     ok = cets_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
     exit(Pid2, oops),
     receive
-        down_called -> ok
-    after 5000 -> ct:fail(timeout)
+        down_called ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
     end.
 
 events_are_applied_in_the_correct_order_after_unpause(_Config) ->
@@ -744,10 +713,14 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     cets:insert_request(T, {5}),
     R3 = cets:insert_request(T, [{6}, {7}]),
     R4 = cets:delete_many_request(T, [5, 4]),
-    [] = lists:sort(cets:dump(T)),
+    [] =
+        lists:sort(
+            cets:dump(T)),
     ok = cets:unpause(Pid, PauseMon),
     [{reply, ok} = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
-    [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
+    [{2}, {3}, {6}, {7}] =
+        lists:sort(
+            cets:dump(T)).
 
 pause_multiple_times(_Config) ->
     T = t5,
@@ -766,7 +739,9 @@ pause_multiple_times(_Config) ->
     pong = cets:ping(Pid),
     {reply, ok} = cets:wait_response(Ref1, 5000),
     {reply, ok} = cets:wait_response(Ref2, 5000),
-    [{1}, {2}] = lists:sort(cets:dump(T)).
+    [{1}, {2}] =
+        lists:sort(
+            cets:dump(T)).
 
 unpause_twice(_Config) ->
     T = t6,
@@ -780,13 +755,15 @@ unpause_if_pause_owner_crashes(_Config) ->
     T = pause_crashed,
     {ok, Pid} = cets:start(T, #{}),
     spawn_monitor(fun() ->
-        cets:pause(Pid),
-        Me ! pause_called,
-        error(wow)
-    end),
+                     cets:pause(Pid),
+                     Me ! pause_called,
+                     error(wow)
+                  end),
     receive
-        pause_called -> ok
-    after 5000 -> ct:fail(timeout)
+        pause_called ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
     end,
     %% Check that the server is unpaused
     ok = cets:insert(Pid, {1}).
@@ -806,8 +783,10 @@ ack_process_stops_correctly(_Config) ->
     AckMon = monitor(process, AckPid),
     cets:stop(Pid),
     receive
-        {'DOWN', AckMon, process, AckPid, normal} -> ok
-    after 5000 -> ct:fail(timeout)
+        {'DOWN', AckMon, process, AckPid, normal} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
     end.
 
 ack_process_handles_unknown_remote_server(_Config) ->
@@ -823,7 +802,9 @@ ack_process_handles_unknown_remote_server(_Config) ->
     R = cets:insert_request(Pid1, {1}),
     pong = cets:ping(Pid1),
     %% Extract From value
-    [{servers, _}, {From, [Pid2]}] = maps:to_list(sys:get_state(AckPid)),
+    [{servers, _}, {From, [Pid2]}] =
+        maps:to_list(
+            sys:get_state(AckPid)),
     cets_ack:ack(AckPid, From, RandomPid),
     sys:resume(Pid2),
     %% Ack process still works fine
@@ -852,7 +833,8 @@ ack_calling_add_when_server_list_is_empty_is_not_allowed(_Config) ->
     receive
         {'DOWN', Mon, process, Pid, Reason} ->
             {unexpected_add_msg, _} = Reason
-    after 5000 -> ct:fail(timeout)
+    after 5000 ->
+        ct:fail(timeout)
     end.
 
 sync_using_name_works(_Config) ->
@@ -871,7 +853,9 @@ insert_into_bag(_Config) ->
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 2}),
-    [{1, 1}, {1, 2}] = lists:sort(cets:dump(T)).
+    [{1, 1}, {1, 2}] =
+        lists:sort(
+            cets:dump(T)).
 
 delete_from_bag(_Config) ->
     T = b2,
@@ -885,7 +869,9 @@ delete_many_from_bag(_Config) ->
     {ok, _Pid} = cets:start(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}, {1, 5}, {2, 3}]),
     cets:delete_objects(T, [{1, 2}, {1, 5}, {1, 4}]),
-    [{1, 1}, {1, 3}, {2, 3}] = lists:sort(cets:dump(T)).
+    [{1, 1}, {1, 3}, {2, 3}] =
+        lists:sort(
+            cets:dump(T)).
 
 delete_request_from_bag(_Config) ->
     T = b4,
@@ -915,8 +901,12 @@ insert_into_keypos_table(_Config) ->
     {ok, _Pid} = cets:start(T, #{keypos => 2}),
     cets:insert(T, {rec, 1}),
     cets:insert(T, {rec, 2}),
-    [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
-    [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
+    [{rec, 1}] =
+        lists:sort(
+            ets:lookup(T, 1)),
+    [{rec, 1}, {rec, 2}] =
+        lists:sort(
+            cets:dump(T)).
 
 table_name_works(_Config) ->
     T = tabnamecheck,
@@ -1033,8 +1023,10 @@ start_node(Sname) ->
 
 receive_message(M) ->
     receive
-        M -> ok
-    after 5000 -> error({receive_message_timeout, M})
+        M ->
+            ok
+    after 5000 ->
+        error({receive_message_timeout, M})
     end.
 
 make_name(Config, Num) ->
@@ -1054,6 +1046,5 @@ set_join_ref(Pid, JoinRef) ->
     sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
 
 set_other_servers(Pid, Servers) ->
-    sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
-        State#{other_servers := Servers}
-    end).
+    sys:replace_state(Pid,
+                      fun(#{other_servers := _} = State) -> State#{other_servers := Servers} end).

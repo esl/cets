@@ -1,4 +1,5 @@
 -module(cets_test_wait).
+
 -export([wait_until/2]).
 
 %% From mongoose_helper
@@ -14,32 +15,31 @@ wait_until(Fun, ExpectedValue) ->
 
 %% Example: wait_until(fun () -> ... end, SomeVal, #{time_left => timer:seconds(2)})
 wait_until(Fun, ExpectedValue, Opts) ->
-    Defaults = #{
-        validator => fun(NewValue) -> ExpectedValue =:= NewValue end,
-        expected_value => ExpectedValue,
-        time_left => timer:seconds(5),
-        sleep_time => 100,
-        history => [],
-        name => timeout
-    },
+    Defaults =
+        #{validator => fun(NewValue) -> ExpectedValue =:= NewValue end,
+          expected_value => ExpectedValue,
+          time_left => timer:seconds(5),
+          sleep_time => 100,
+          history => [],
+          name => timeout},
     do_wait_until(Fun, maps:merge(Defaults, Opts)).
 
-do_wait_until(
-    _Fun,
-    #{
-        expected_value := ExpectedValue,
-        time_left := TimeLeft,
-        history := History,
-        name := Name
-    } = Opts
-) when TimeLeft =< 0 ->
+do_wait_until(_Fun,
+              #{expected_value := ExpectedValue,
+                time_left := TimeLeft,
+                history := History,
+                name := Name} =
+                  Opts)
+    when TimeLeft =< 0 ->
     error({Name, ExpectedValue, simplify_history(lists:reverse(History), 1), on_error(Opts)});
 do_wait_until(Fun, #{validator := Validator} = Opts) ->
     try Fun() of
         Value ->
             case Validator(Value) of
-                true -> {ok, Value};
-                _ -> wait_and_continue(Fun, Value, Opts)
+                true ->
+                    {ok, Value};
+                _ ->
+                    wait_and_continue(Fun, Value, Opts)
             end
     catch
         Error:Reason:Stacktrace ->
@@ -58,17 +58,12 @@ simplify_history([H | T], Times) ->
 simplify_history([], 1) ->
     [].
 
-wait_and_continue(
-    Fun,
-    FunResult,
-    #{
-        time_left := TimeLeft,
-        sleep_time := SleepTime,
-        history := History
-    } = Opts
-) ->
+wait_and_continue(Fun,
+                  FunResult,
+                  #{time_left := TimeLeft,
+                    sleep_time := SleepTime,
+                    history := History} =
+                      Opts) ->
     timer:sleep(SleepTime),
-    do_wait_until(Fun, Opts#{
-        time_left => TimeLeft - SleepTime,
-        history => [FunResult | History]
-    }).
+    do_wait_until(Fun,
+                  Opts#{time_left => TimeLeft - SleepTime, history => [FunResult | History]}).

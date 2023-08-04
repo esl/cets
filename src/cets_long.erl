@@ -1,5 +1,6 @@
 %% Helper to log long running operations.
 -module(cets_long).
+
 -export([run_spawn/2, run_tracked/2]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -8,6 +9,7 @@
 -type log_info() :: map().
 -type task_result() :: term().
 -type task_fun() :: fun(() -> task_result()).
+
 -export_type([log_info/0]).
 
 %% Spawn a new process to do some memory-intensive task
@@ -20,14 +22,14 @@ run_spawn(Info, F) ->
     Pid = self(),
     Ref = make_ref(),
     proc_lib:spawn_link(fun() ->
-        try run_tracked(Info, F) of
-            Res ->
-                Pid ! {result, Ref, Res}
-        catch
-            Class:Reason:Stacktrace ->
-                Pid ! {forward_error, Ref, {Class, Reason, Stacktrace}}
-        end
-    end),
+                           try run_tracked(Info, F) of
+                               Res ->
+                                   Pid ! {result, Ref, Res}
+                           catch
+                               Class:Reason:Stacktrace ->
+                                   Pid ! {forward_error, Ref, {Class, Reason, Stacktrace}}
+                           end
+                        end),
     receive
         {result, Ref, Res} ->
             Res;
@@ -50,12 +52,10 @@ run_tracked(Info, Fun) ->
         Fun()
     catch
         Class:Reason:Stacktrace ->
-            Log = Info#{
-                what => long_task_failed,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            },
+            Log = Info#{what => long_task_failed,
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace},
             ?LOG_ERROR(Log),
             erlang:raise(Class, Reason, Stacktrace)
     after

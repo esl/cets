@@ -7,7 +7,9 @@
 %% So, we use a file with nodes to connect as a discovery mechanism
 %% (so, you can hardcode nodes or use your method of filling it)
 -module(cets_discovery_file).
+
 -behaviour(cets_discovery).
+
 -export([init/1, get_nodes/1]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -23,11 +25,9 @@ init(Opts) ->
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
-            Log = #{
-                what => discovery_failed,
-                filename => Filename,
-                reason => Reason
-            },
+            Log = #{what => discovery_failed,
+                    filename => Filename,
+                    reason => Reason},
             ?LOG_ERROR(Log),
             {{error, Reason}, State};
         {ok, Text} ->

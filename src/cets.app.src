@@ -1,9 +1,10 @@
-{application, cets, [
-    {description, "Clustered Erlang Term Storage"},
-    {vsn, "0.1"},
-    {modules, []},
-    {registered, []},
-    {applications, [kernel, stdlib]},
-    {env, []}
+{application,
+ cets,
+ [{description, "Clustered Erlang Term Storage"},
+  {vsn, "0.1"},
+  {modules, []},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []}]}.
+
     % {mod, {cets_app, []}
-]}.

@@ -1,9 +1,6 @@
 -module(cets_metadata).
--export([
-    init/1,
-    set/3,
-    get/2
-]).
+
+-export([init/1, set/3, get/2]).
 
 init(Name) ->
     FullName = name(Name),

@@ -27,7 +27,10 @@ long_call(Server, Msg) ->
 long_call(Server, Msg, Info) ->
     case where(Server) of
         Pid when is_pid(Pid) ->
-            Info2 = Info#{server => Server, pid => Pid, node => node(Pid)},
+            Info2 =
+                Info#{server => Server,
+                      pid => Pid,
+                      node => node(Pid)},
             F = fun() -> gen_server:call(Pid, Msg, infinity) end,
             cets_long:run_tracked(Info2, F);
         undefined ->
@@ -46,11 +49,16 @@ sync_operation(Server, Op) ->
     gen_server:call(Server, {op, Op}, infinity).
 
 -spec where(server_ref()) -> pid() | undefined.
-where(Pid) when is_pid(Pid) -> Pid;
-where(Name) when is_atom(Name) -> whereis(Name);
-where({global, Name}) -> global:whereis_name(Name);
-where({local, Name}) -> whereis(Name);
-where({via, Module, Name}) -> Module:whereis_name(Name).
+where(Pid) when is_pid(Pid) ->
+    Pid;
+where(Name) when is_atom(Name) ->
+    whereis(Name);
+where({global, Name}) ->
+    global:whereis_name(Name);
+where({local, Name}) ->
+    whereis(Name);
+where({via, Module, Name}) ->
+    Module:whereis_name(Name).
 
 %% Wait around 15 seconds before giving up
 %% (we don't count how much we spend calling the leader though)
@@ -68,13 +76,11 @@ send_leader_op(Server, Op, Backoff) ->
     Res = sync_operation(Leader, {leader_op, Op}),
     case Res of
         {error, {wrong_leader, ExpectedLeader}} ->
-            Log = #{
-                what => wrong_leader,
-                server => Server,
-                operation => Op,
-                called_leader => Leader,
-                expected_leader => ExpectedLeader
-            },
+            Log = #{what => wrong_leader,
+                    server => Server,
+                    operation => Op,
+                    called_leader => Leader,
+                    expected_leader => ExpectedLeader},
             ?LOG_WARNING(Log),
             %% This could happen if a new node joins the cluster.
             %% So, a simple retry should help.

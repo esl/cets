@@ -1,17 +1,12 @@
 %% @doc Node discovery logic
 %% Joins table together when a new node appears
 -module(cets_discovery).
+
 -behaviour(gen_server).
 
 -export([start/1, start_link/1, add_table/2, info/1]).
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
 -ignore_xref([start/1, start_link/1, add_table/2, info/1, behaviour_info/1]).
 
@@ -23,14 +18,12 @@
 -export_type([get_nodes_result/0]).
 
 -type from() :: {pid(), reference()}.
--type state() :: #{
-    results := [term()],
-    tables := [atom()],
-    backend_module := module(),
-    backend_state := state(),
-    timer_ref := reference() | undefined
-}.
-
+-type state() ::
+    #{results := [term()],
+      tables := [atom()],
+      backend_module := module(),
+      backend_state := state(),
+      timer_ref := reference() | undefined}.
 %% Backend could define its own options
 -type opts() :: #{name := atom(), _ := _}.
 -type start_result() :: {ok, pid()} | {error, term()}.
@@ -76,13 +69,12 @@ init(Opts) ->
     self() ! check,
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
-    {ok, #{
-        results => [],
-        tables => Tables,
-        backend_module => Mod,
-        backend_state => BackendState,
-        timer_ref => undefined
-    }}.
+    {ok,
+     #{results => [],
+       tables => Tables,
+       backend_module => Mod,
+       backend_state => BackendState,
+       timer_ref => undefined}}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()}.
 handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
@@ -96,7 +88,9 @@ handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
     {reply, {ok, Tables}, State};
 handle_call(Msg, From, State) ->
-    ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
+    ?LOG_ERROR(#{what => unexpected_call,
+                 msg => Msg,
+                 from => From}),
     {reply, {error, unexpected_call}, State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
@@ -148,8 +142,10 @@ cancel_old_timer(_State) ->
 
 flush_all_checks() ->
     receive
-        check -> flush_all_checks()
-    after 0 -> ok
+        check ->
+            flush_all_checks()
+    after 0 ->
+        ok
     end.
 
 do_join(Tab, Node) ->
@@ -158,9 +154,15 @@ do_join(Tab, Node) ->
     case rpc:call(Node, erlang, whereis, [Tab]) of
         Pid when is_pid(Pid), is_pid(LocalPid) ->
             Result = cets_join:join(cets_discovery, #{table => Tab}, LocalPid, Pid),
-            #{what => join_result, result => Result, node => Node, table => Tab};
+            #{what => join_result,
+              result => Result,
+              node => Node,
+              table => Tab};
         Other ->
-            #{what => pid_not_found, reason => Other, node => Node, table => Tab}
+            #{what => pid_not_found,
+              reason => Other,
+              node => Node,
+              table => Tab}
     end.
 
 report_results(Results, _State = #{results := OldResults}) ->

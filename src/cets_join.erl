@@ -1,23 +1,23 @@
 %% @doc Cluster join logic.
 %% Checkpoints are used for testing and do not affect the joining logic.
 -module(cets_join).
+
 -export([join/4]).
 -export([join/5]).
+
 -include_lib("kernel/include/logger.hrl").
 
 -type lock_key() :: term().
 -type join_ref() :: reference().
 -type server_pid() :: cets:server_pid().
-
 %% Critical events during the joining procedure
 -type checkpoint() ::
-    join_start
-    | before_retry
-    | before_get_pids
-    | before_check_fully_connected
-    | before_unpause
-    | {before_send_dump, server_pid()}.
-
+    join_start |
+    before_retry |
+    before_get_pids |
+    before_check_fully_connected |
+    before_unpause |
+    {before_send_dump, server_pid()}.
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
 -type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
 
@@ -29,27 +29,28 @@
 %% Writes from other nodes would wait for join completion.
 %% LockKey should be the same on all nodes.
 -spec join(lock_key(), cets_long:log_info(), server_pid(), server_pid()) ->
-    ok | {error, term()}.
+              ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) ->
     join(LockKey, Info, LocalPid, RemotePid, #{}).
 
--spec join(lock_key(), cets_long:log_info(), pid(), pid(), join_opts()) -> ok | {error, term()}.
+-spec join(lock_key(), cets_long:log_info(), pid(), pid(), join_opts()) ->
+              ok | {error, term()}.
 join(_LockKey, _Info, Pid, Pid, _JoinOpts) when is_pid(Pid) ->
     {error, join_with_the_same_pid};
-join(LockKey, Info, LocalPid, RemotePid, JoinOpts) when is_pid(LocalPid), is_pid(RemotePid) ->
-    Info2 = Info#{
-        local_pid => LocalPid,
-        remote_pid => RemotePid,
-        remote_node => node(RemotePid)
-    },
+join(LockKey, Info, LocalPid, RemotePid, JoinOpts)
+    when is_pid(LocalPid), is_pid(RemotePid) ->
+    Info2 =
+        Info#{local_pid => LocalPid,
+              remote_pid => RemotePid,
+              remote_node => node(RemotePid)},
     F = fun() -> join1(LockKey, Info2, LocalPid, RemotePid, JoinOpts) end,
     try
         cets_long:run_tracked(Info2#{long_task_name => join}, F)
     catch
-        error:Reason:_ ->
+        error:Reason ->
             {error, Reason};
         %% Exits are thrown by gen_server:call API
-        exit:Reason:_ ->
+        exit:Reason ->
             {error, Reason}
     end.
 
@@ -68,13 +69,13 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     %% - for performance reasons, we don't want to cause too much load for active nodes
     %% - to avoid deadlocks, because joining does gen_server calls
     F = fun() ->
-        Diff = erlang:system_time(millisecond) - Start,
-        %% Getting the lock could take really long time in case nodes are
-        %% overloaded or joining is already in progress on another node
-        ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
-        %% Do joining in a separate process to reduce GC
-        cets_long:run_spawn(Info, fun() -> join2(LocalPid, RemotePid, JoinOpts) end)
-    end,
+           Diff = erlang:system_time(millisecond) - Start,
+           %% Getting the lock could take really long time in case nodes are
+           %% overloaded or joining is already in progress on another node
+           ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
+           %% Do joining in a separate process to reduce GC
+           cets_long:run_spawn(Info, fun() -> join2(LocalPid, RemotePid, JoinOpts) end)
+        end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
@@ -153,31 +154,36 @@ apply_resolver(ordered_set, LocalDump, RemoteDump, F, Pos) ->
     %% Both dumps are sorted by the key (the lowest key first)
     apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [], []).
 
-apply_resolver_for_sorted([X | LocalDump], [X | RemoteDump], F, Pos, LocalAcc, RemoteAcc) ->
+apply_resolver_for_sorted([X | LocalDump],
+                          [X | RemoteDump],
+                          F,
+                          Pos,
+                          LocalAcc,
+                          RemoteAcc) ->
     %% Presents in both dumps, skip it at all (we don't need to insert it, it is already inserted)
     apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, LocalAcc, RemoteAcc);
-apply_resolver_for_sorted(
-    [L | LocalDump] = LocalDumpFull,
-    [R | RemoteDump] = RemoteDumpFull,
-    F,
-    Pos,
-    LocalAcc,
-    RemoteAcc
-) ->
+apply_resolver_for_sorted([L | LocalDump] = LocalDumpFull,
+                          [R | RemoteDump] = RemoteDumpFull,
+                          F,
+                          Pos,
+                          LocalAcc,
+                          RemoteAcc) ->
     LKey = element(Pos, L),
     RKey = element(Pos, R),
-    if
-        LKey =:= RKey ->
-            New = F(L, R),
-            apply_resolver_for_sorted(LocalDump, RemoteDump, F, Pos, [New | LocalAcc], [
-                New | RemoteAcc
-            ]);
-        LKey < RKey ->
-            %% Record exists only in the local dump
-            apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L | LocalAcc], RemoteAcc);
-        true ->
-            %% Record exists only in the remote dump
-            apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R | RemoteAcc])
+    if LKey =:= RKey ->
+           New = F(L, R),
+           apply_resolver_for_sorted(LocalDump,
+                                     RemoteDump,
+                                     F,
+                                     Pos,
+                                     [New | LocalAcc],
+                                     [New | RemoteAcc]);
+       LKey < RKey ->
+           %% Record exists only in the local dump
+           apply_resolver_for_sorted(LocalDump, RemoteDumpFull, F, Pos, [L | LocalAcc], RemoteAcc);
+       true ->
+           %% Record exists only in the remote dump
+           apply_resolver_for_sorted(LocalDumpFull, RemoteDump, F, Pos, LocalAcc, [R | RemoteAcc])
     end;
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
@@ -199,12 +205,10 @@ check_do_not_overlap(LocPids, RemPids) ->
         [] ->
             ok;
         Overlap ->
-            Log = #{
-                what => check_do_not_overlap_failed,
-                local_servers => LocPids,
-                remote_servers => RemPids,
-                overlapped_servers => Overlap
-            },
+            Log = #{what => check_do_not_overlap_failed,
+                    local_servers => LocPids,
+                    remote_servers => RemPids,
+                    overlapped_servers => Overlap},
             ?LOG_ERROR(Log),
             error(check_do_not_overlap_failed)
     end.
@@ -218,11 +222,9 @@ check_fully_connected(Pids) ->
         true ->
             check_same_join_ref(Pids);
         false ->
-            Log = #{
-                what => check_fully_connected_failed,
-                expected_pids => Pids,
-                server_lists => Lists
-            },
+            Log = #{what => check_fully_connected_failed,
+                    expected_pids => Pids,
+                    server_lists => Lists},
             ?LOG_ERROR(Log),
             error(check_fully_connected_failed)
     end.
@@ -239,10 +241,7 @@ check_same_join_ref(Pids) ->
         [_] ->
             ok;
         _ ->
-            Log = #{
-                what => check_same_join_ref_failed,
-                refs => lists:zip(Pids, Refs)
-            },
+            Log = #{what => check_same_join_ref_failed, refs => lists:zip(Pids, Refs)},
             ?LOG_ERROR(Log),
             error(check_same_join_ref_failed)
     end.

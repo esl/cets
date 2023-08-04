@@ -4,37 +4,23 @@
 %% Collects acks from nodes in the cluster.
 %% When one of the remote nodes goes down, the server stops waiting for acks from it.
 -module(cets_ack).
+
 -behaviour(gen_server).
 
 %% API functions
--export([
-    start_link/1,
-    set_servers/2,
-    add/2,
-    ack/3,
-    send_remote_down/2
-]).
-
+-export([start_link/1, set_servers/2, add/2, ack/3, send_remote_down/2]).
 %% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
 -include_lib("kernel/include/logger.hrl").
 
 -type ack_pid() :: pid().
 -type server_pid() :: cets:server_pid().
 -type from() :: gen_server:from().
--type state() :: #{
-    servers := [server_pid()],
+-type state() :: #{servers := [server_pid()], from() => [server_pid(), ...]}.
+
     %% We store tasks directly in the state map
-    from() => [server_pid(), ...]
-}.
 
 -export_type([ack_pid/0]).
 
@@ -78,7 +64,9 @@ init(_) ->
 
 -spec handle_call(term(), _From, state()) -> {reply, {error, unexpected_call}, state()}.
 handle_call(Msg, From, State) ->
-    ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
+    ?LOG_ERROR(#{what => unexpected_call,
+                 msg => Msg,
+                 from => From}),
     {reply, {error, unexpected_call}, State}.
 
 handle_cast({set_servers, Servers}, State) ->
@@ -116,13 +104,12 @@ handle_add(_, _) ->
 -spec handle_remote_down(server_pid(), state()) -> state().
 handle_remote_down(RemotePid, State) ->
     %% Call handle_updated for all pending tasks
-    F = fun
-        (Key, _Value, State2) when is_atom(Key) ->
-            %% Ignore keys that are not used for tasks (i.e. servers key)
-            State2;
-        (From, Servers, State2) ->
-            handle_updated(From, RemotePid, Servers, State2)
-    end,
+    F = fun (Key, _Value, State2) when is_atom(Key) ->
+                %% Ignore keys that are not used for tasks (i.e. servers key)
+                State2;
+            (From, Servers, State2) ->
+                handle_updated(From, RemotePid, Servers, State2)
+        end,
     maps:fold(F, State, State).
 
 -spec handle_updated(from(), server_pid(), state()) -> state().
