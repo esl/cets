@@ -18,12 +18,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Compile
-      run: rebar3 compile
     - name: Run tests
-      run: rebar3 as test ct --sname=ct1 --cover
-    - name: Send test coverage report
-      run: rebar3 as test codecov analyze
+      run: make cover_test
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3
       env:
@@ -37,10 +33,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Compile
-      run: rebar3 compile
     - name: Run dialyzer
-      run: rebar3 dialyzer
+      run: make dial
 
   gradualizer:
     runs-on: ubuntu-latest
@@ -50,10 +44,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Compile
-      run: rebar3 compile
     - name: Run gradualizer
-      run: rebar3 as grad gradualizer
+      run: make grad
 
   xref:
     runs-on: ubuntu-latest
@@ -63,10 +55,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Compile
-      run: rebar3 compile
     - name: Run xref
-      run: rebar3 xref
+      run: make xref
 
   erlfmt:
     runs-on: ubuntu-latest
@@ -77,4 +67,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run erlfmt
-      run: rebar3 fmt --check
+      run: make check_format
