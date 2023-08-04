@@ -29,6 +29,19 @@ all() ->
         insert_new_fails_if_the_local_server_is_dead,
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
+        join_ref_is_same_after_join,
+        join_fails_because_server_process_not_found,
+        join_fails_because_server_process_not_found_before_get_pids,
+        join_fails_before_send_dump,
+        join_fails_before_send_dump_and_there_are_pending_remote_ops,
+        send_dump_fails_during_join_because_receiver_exits,
+        join_fails_in_check_fully_connected,
+        join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
+        join_fails_because_pids_do_not_match_for_nodes_in_segment,
+        join_fails_because_servers_overlap,
+        remote_ops_are_ignored_if_join_ref_does_not_match,
+        join_retried_if_lock_is_busy,
+        send_dump_contains_already_added_servers,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -62,7 +75,8 @@ all() ->
         unknown_cast_message_is_ignored_in_ack_process,
         unknown_call_returns_error_from_ack_process,
         code_change_returns_ok,
-        code_change_returns_ok_for_ack
+        code_change_returns_ok_for_ack,
+        run_spawn_forwards_errors
     ].
 
 init_per_suite(Config) ->
@@ -74,11 +88,14 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(test_multinode_auto_discovery, Config) ->
+init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
     ct:make_priv_dir(),
-    Config;
-init_per_testcase(_, Config) ->
-    Config.
+    init_per_testcase_generic(Name, Config);
+init_per_testcase(Name, Config) ->
+    init_per_testcase_generic(Name, Config).
+
+init_per_testcase_generic(Name, Config) ->
+    [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -367,10 +384,241 @@ join_with_the_same_pid(_Config) ->
     %% Just insert something into a table to check later the size
     cets:insert(joinsame, {1, 1}),
     link(Pid),
-    ok = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
+    {error, join_with_the_same_pid} = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
+
+join_ref_is_same_after_join(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    #{join_ref := JoinRef} = cets:info(Pid1),
+    #{join_ref := JoinRef} = cets:info(Pid2).
+
+join_fails_because_server_process_not_found(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (join_start) ->
+            exit(Pid1, sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
+
+join_fails_because_server_process_not_found_before_get_pids(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        (before_get_pids) ->
+            exit(Pid1, sim_error);
+        (_) ->
+            ok
+    end,
+    {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
+
+join_fails_before_send_dump(Config) ->
+    Me = self(),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    cets:insert(Pid1, {1}),
+    cets:insert(Pid2, {2}),
+    F = fun
+        ({before_send_dump, P}) when Pid1 =:= P ->
+            Me ! before_send_dump_called_for_pid1;
+        ({before_send_dump, P}) when Pid2 =:= P ->
+            error(sim_error);
+        (_) ->
+            ok
+    end,
+    {error, sim_error} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    %% Ensure we sent dump to Pid1
+    receive_message(before_send_dump_called_for_pid1),
+    %% Not joined, some data exchanged
+    cets:sync(Pid1),
+    cets:sync(Pid2),
+    [] = cets:other_pids(Pid1),
+    [] = cets:other_pids(Pid2),
+    %% Pid1 applied new version of dump
+    %% Though, it got disconnected after
+    {ok, [{1}, {2}]} = cets:remote_dump(Pid1),
+    %% Pid2 rejected changes
+    {ok, [{2}]} = cets:remote_dump(Pid2),
+    receive_message({down_called, Pid1, Pid2}).
+
+%% Checks that remote ops are dropped if join_ref does not match in the state and in remote_op message
+join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        ({before_send_dump, P}) when Pid1 =:= P ->
+            Me ! before_send_dump_called_for_pid1;
+        ({before_send_dump, P}) when Pid2 =:= P ->
+            sys:suspend(Pid2),
+            error(sim_error);
+        (before_unpause) ->
+            %% Crash in before_unpause, otherwise cets_join will block in cets:unpause/2
+            %% (because Pid2 is suspended).
+            %% Servers would be unpaused automatically though, because cets_join process exits
+            %% (i.e. cets:unpause/2 call is totally optional)
+            error(sim_error2);
+        (_) ->
+            ok
+    end,
+    {error, sim_error2} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    %% Ensure we sent dump to Pid1
+    receive_message(before_send_dump_called_for_pid1),
+    cets:insert_request(Pid1, {1}),
+    %% Check that the remote_op has reached Pid2 message box
+    cets_test_wait:wait_until(fun() -> count_remote_ops_in_the_message_box(Pid2) end, 1),
+    sys:resume(Pid2),
+    %% Wait till remote_op is processed
+    cets:ping(Pid2),
+    %% Check that the insert was ignored
+    {ok, []} = cets:remote_dump(Pid2).
+
+send_dump_fails_during_join_because_receiver_exits(Config) ->
+    Me = self(),
+    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
+        Me ! {down_called, self(), RemotePid}
+    end,
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    F = fun
+        ({before_send_dump, P}) when P =:= Pid1 ->
+            %% Kill Pid2 process.
+            %% It does not crash the join process.
+            %% Pid1 would receive a dump with Pid2 in the server list.
+            exit(Pid2, sim_error),
+            %% Ensure Pid1 got DOWN message from Pid2 already
+            pong = cets:ping(Pid1),
+            Me ! before_send_dump_called;
+        (_) ->
+            ok
+    end,
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    receive_message(before_send_dump_called),
+    pong = cets:ping(Pid1),
+    receive_message({down_called, Pid1, Pid2}),
+    [] = cets:other_pids(Pid1),
+    %% Pid1 still works
+    cets:insert(Pid1, {1}),
+    {ok, [{1}]} = cets:remote_dump(Pid1).
+
+join_fails_in_check_fully_connected(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    [Pid3] = cets:other_pids(Pid2),
+    F = fun
+        (before_check_fully_connected) ->
+            %% Ask Pid2 to remove Pid3 from the list
+            Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
+            %% Ensure Pid2 did the cleaning
+            pong = cets:ping(Pid2),
+            [] = cets:other_pids(Pid2),
+            Me ! before_check_fully_connected_called;
+        (_) ->
+            ok
+    end,
+    {error, check_fully_connected_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    receive_message(before_check_fully_connected_called).
+
+join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    %% But for some reason Pid3 has a different join_ref
+    %% (probably could happen if it still haven't checked other nodes after a join)
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    set_join_ref(Pid3, make_ref()),
+    {error, check_same_join_ref_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    %% Pid2 and Pid3 are connected
+    %% But for some reason Pid3 has a different other_nodes list
+    %% (probably could happen if it still haven't checked other nodes after a join)
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
+    set_other_servers(Pid3, []),
+    {error, check_fully_connected_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+join_fails_because_servers_overlap(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    {ok, Pid3} = cets:start(make_name(Config, 3), #{}),
+    set_other_servers(Pid1, [Pid3]),
+    set_other_servers(Pid2, [Pid3]),
+    {error, check_do_not_overlap_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    #{join_ref := JoinRef} = cets:info(Pid1),
+    set_join_ref(Pid1, make_ref()),
+    cets:insert(Pid2, {1}),
+    %% fix and check again
+    set_join_ref(Pid1, JoinRef),
+    cets:insert(Pid2, {2}),
+    {ok, [{2}]} = cets:remote_dump(Pid1).
+
+join_retried_if_lock_is_busy(Config) ->
+    Me = self(),
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    Lock = lock_name(Config),
+    SleepyF = fun
+        (join_start) ->
+            Me ! join_start,
+            timer:sleep(infinity);
+        (_) ->
+            ok
+    end,
+    F = fun
+        (before_retry) -> Me ! before_retry;
+        (_) -> ok
+    end,
+    %% Get the lock in a separate process
+    spawn_link(fun() ->
+        cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
+    end),
+    receive_message(join_start),
+    %% We actually would not return from cets_join:join unless we get the lock
+    spawn_link(fun() ->
+        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
+    end),
+    receive_message(before_retry).
+
+send_dump_contains_already_added_servers(Config) ->
+    %% Check that even if we have already added server in send_dump, nothing crashes
+    {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
+    {ok, Pid2} = cets:start(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    PauseRef = cets:pause(Pid1),
+    %% That should be called by cets_join module
+    cets:send_dump(Pid1, [Pid2], make_ref(), [{1}]),
+    cets:unpause(Pid1, PauseRef),
+    {ok, [{1}]} = cets:remote_dump(Pid1).
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -731,6 +979,15 @@ code_change_returns_ok_for_ack(_Config) ->
     ok = sys:change_code(AckPid, cets_ack, v2, []),
     sys:resume(AckPid).
 
+run_spawn_forwards_errors(_Config) ->
+    matched =
+        try
+            cets_long:run_spawn(#{}, fun() -> error(oops) end)
+        catch
+            error:oops ->
+                matched
+        end.
+
 still_works(Pid) ->
     pong = cets:ping(Pid),
     %% The server works fine
@@ -773,3 +1030,30 @@ start_node(Sname) ->
     {ok, _Peer, Node} = peer:start(#{name => Sname}),
     ok = rpc:call(Node, code, add_paths, [code:get_path()]),
     Node.
+
+receive_message(M) ->
+    receive
+        M -> ok
+    after 5000 -> error({receive_message_timeout, M})
+    end.
+
+make_name(Config, Num) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num)).
+
+lock_name(Config) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_lock").
+
+count_remote_ops_in_the_message_box(Pid) ->
+    {messages, Messages} = erlang:process_info(Pid, messages),
+    Ops = [M || M <- Messages, element(1, M) =:= remote_op],
+    length(Ops).
+
+set_join_ref(Pid, JoinRef) ->
+    sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
+
+set_other_servers(Pid, Servers) ->
+    sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
+        State#{other_servers := Servers}
+    end).
