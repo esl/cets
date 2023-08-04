@@ -106,66 +106,61 @@ init_per_testcase_generic(Name, Config) ->
 end_per_testcase(_, _Config) ->
     ok.
 
-inserted_records_could_be_read_back(_Config) ->
-    start_local(ins1, #{}),
-    cets:insert(ins1, {alice, 32}),
-    [{alice, 32}] = ets:lookup(ins1, alice).
+inserted_records_could_be_read_back(Config) ->
+    Tab = make_name(Config),
+    start_local(Tab),
+    cets:insert(Tab, {alice, 32}),
+    [{alice, 32}] = ets:lookup(Tab, alice).
 
-insert_many_with_one_record(_Config) ->
-    start_local(ins1m, #{}),
-    cets:insert_many(ins1m, [{alice, 32}]),
-    [{alice, 32}] = ets:lookup(ins1m, alice).
+insert_many_with_one_record(Config) ->
+    Tab = make_name(Config),
+    start_local(Tab),
+    cets:insert_many(Tab, [{alice, 32}]),
+    [{alice, 32}] = ets:lookup(Tab, alice).
 
-insert_many_with_two_records(_Config) ->
-    start_local(ins2m, #{}),
-    cets:insert_many(ins2m, [{alice, 32}, {bob, 55}]),
-    [{alice, 32}, {bob, 55}] = ets:tab2list(ins2m).
+insert_many_with_two_records(Config) ->
+    Tab = make_name(Config),
+    start_local(Tab),
+    cets:insert_many(Tab, [{alice, 32}, {bob, 55}]),
+    [{alice, 32}, {bob, 55}] = ets:tab2list(Tab).
 
-delete_works(_Config) ->
-    start_local(del1, #{}),
-    cets:insert(del1, {alice, 32}),
-    cets:delete(del1, alice),
-    [] = ets:lookup(del1, alice).
+delete_works(Config) ->
+    Tab = make_name(Config),
+    start_local(Tab),
+    cets:insert(Tab, {alice, 32}),
+    cets:delete(Tab, alice),
+    [] = ets:lookup(Tab, alice).
 
-delete_many_works(_Config) ->
-    start_local(del2, #{}),
-    cets:insert(del2, {alice, 32}),
-    cets:delete_many(del2, [alice]),
-    [] = ets:lookup(del2, alice).
+delete_many_works(Config) ->
+    Tab = make_name(Config, 1),
+    start_local(Tab),
+    cets:insert(Tab, {alice, 32}),
+    cets:delete_many(Tab, [alice]),
+    [] = ets:lookup(Tab, alice).
 
-join_works(_Config) ->
-    {ok, Pid1} = start_local(join1tab, #{}),
-    {ok, Pid2} = start_local(join2tab, #{}),
-    ok = cets_join:join(join_lock1, #{}, Pid1, Pid2).
+join_works(Config) ->
+    given_two_joined_tables(Config).
 
-inserted_records_could_be_read_back_from_replicated_table(_Config) ->
-    {ok, Pid1} = start_local(ins1tab, #{}),
-    {ok, Pid2} = start_local(ins2tab, #{}),
-    ok = cets_join:join(join_lock1_ins, #{}, Pid1, Pid2),
-    cets:insert(ins1tab, {alice, 32}),
-    [{alice, 32}] = ets:lookup(ins2tab, alice).
+inserted_records_could_be_read_back_from_replicated_table(Config) ->
+    #{tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    cets:insert(Tab1, {alice, 32}),
+    [{alice, 32}] = ets:lookup(Tab2, alice).
 
-insert_new_works(_Config) ->
-    {ok, Pid1} = start_local(newins1tab, #{}),
-    {ok, Pid2} = start_local(newins2tab, #{}),
-    ok = cets_join:join(join_lock1_insnew, #{}, Pid1, Pid2),
+insert_new_works(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     true = cets:insert_new(Pid1, {alice, 32}),
     %% Duplicate found
     false = cets:insert_new(Pid1, {alice, 32}),
     false = cets:insert_new(Pid1, {alice, 33}),
     false = cets:insert_new(Pid2, {alice, 33}).
 
-insert_new_works_with_table_name(_Config) ->
-    {ok, Pid1} = start_local(T1 = tabinsnew1, #{}),
-    {ok, Pid2} = start_local(T2 = tabinsnew2, #{}),
-    ok = cets_join:join(join_lock1_insnew2, #{}, Pid1, Pid2),
-    true = cets:insert_new(T1, {alice, 32}),
-    false = cets:insert_new(T2, {alice, 32}).
+insert_new_works_with_table_name(Config) ->
+    #{tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    true = cets:insert_new(Tab1, {alice, 32}),
+    false = cets:insert_new(Tab2, {alice, 32}).
 
-insert_new_works_when_leader_is_back(_Config) ->
-    {ok, Pid1} = start_local(newins1tab_back, #{}),
-    {ok, Pid2} = start_local(newins2tab_back, #{}),
-    ok = cets_join:join(join_lock1_insnew_back, #{}, Pid1, Pid2),
+insert_new_works_when_leader_is_back(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     Leader = cets:get_leader(Pid1),
     %% Highest Pid is the leader:
     Pid2 = Leader,
@@ -176,18 +171,16 @@ insert_new_works_when_leader_is_back(_Config) ->
     end),
     true = cets:insert_new(Pid1, {alice, 32}).
 
-insert_new_when_new_leader_has_joined(_Config) ->
-    {ok, Pid1} = start_local(T1 = insert_new_tab4a, #{}),
-    {ok, Pid2} = start_local(T2 = insert_new_tab4b, #{}),
-    {ok, Pid3} = start_local(T3 = insert_new_tab4c, #{}),
+insert_new_when_new_leader_has_joined(Config) ->
+    #{pids := [Pid1, Pid2, Pid3], tabs := [T1, T2, T3]} = given_3_servers(Config),
     %% Join first network segment
-    ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% Pause insert into the first segment
     Leader = cets:get_leader(Pid1),
     PauseMon = cets:pause(Leader),
     spawn(fun() ->
         timer:sleep(100),
-        ok = cets_join:join(insert_new_lock4, #{}, Pid1, Pid3),
+        ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
         cets:unpause(Leader, PauseMon)
     end),
     %% Inserted by Pid3
@@ -196,12 +189,10 @@ insert_new_when_new_leader_has_joined(_Config) ->
     [Res = cets:dump(T) || T <- [T1, T2, T3]].
 
 %% Checks that the handle_wrong_leader is called
-insert_new_when_new_leader_has_joined_duplicate(_Config) ->
-    {ok, Pid1} = start_local(T1 = insert_new_tab5a, #{}),
-    {ok, Pid2} = start_local(T2 = insert_new_tab5b, #{}),
-    {ok, Pid3} = start_local(T3 = insert_new_tab5c, #{}),
+insert_new_when_new_leader_has_joined_duplicate(Config) ->
+    #{pids := [Pid1, Pid2, Pid3], tabs := [T1, T2, T3]} = given_3_servers(Config),
     %% Join first network segment
-    ok = cets_join:join(join_lock1_insnew_back4, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% Put record into the second network segment
     true = cets:insert_new(Pid3, {alice, 33}),
     %% Pause insert into the first segment
@@ -219,10 +210,8 @@ insert_new_when_new_leader_has_joined_duplicate(_Config) ->
 
 %% Rare case when tables contain different data
 %% (the developer should try to avoid the manual removal of data if possible)
-insert_new_when_inconsistent(_Config) ->
-    {ok, Pid1} = start_local(T1 = insert_new_lock6a, #{}),
-    {ok, Pid2} = start_local(T2 = insert_new_lock6b, #{}),
-    ok = cets_join:join(insert_new_lock6, #{}, Pid1, Pid2),
+insert_new_when_inconsistent(Config) ->
+    #{tabs := [T1, T2], pids := [Pid1, Pid2]} = given_two_joined_tables(Config),
     true = cets:insert_new(Pid1, {alice, 33}),
     true = cets:insert_new(Pid2, {bob, 40}),
     %% Introduce inconsistency
@@ -233,12 +222,12 @@ insert_new_when_inconsistent(_Config) ->
     [{bob, 40}] = cets:dump(T1),
     [{alice, 33}, {bob, 66}] = cets:dump(T2).
 
-insert_new_is_retried_when_leader_is_reelected(_Config) ->
+insert_new_is_retried_when_leader_is_reelected(Config) ->
     Me = self(),
     F = fun(X) -> Me ! {wrong_leader_detected, X} end,
-    {ok, Pid1} = start_local(newins1tab_back2, #{}),
-    {ok, Pid2} = start_local(newins2tab_back2, #{handle_wrong_leader => F}),
-    ok = cets_join:join(join_lock1_insnew_back2, #{}, Pid1, Pid2),
+    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
+    {ok, Pid2} = start_local(make_name(Config, 2), #{handle_wrong_leader => F}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     Leader = cets:get_leader(Pid1),
     %% Ask process to reject all the leader operations
     cets:set_leader(Leader, false),
@@ -268,10 +257,8 @@ insert_new_is_retried_when_leader_is_reelected(_Config) ->
 %% - handle cets_down exception
 %% - call insert_new one more time
 %% - read the data back using ets:lookup to ensure it is your record written
-insert_new_fails_if_the_leader_dies(_Config) ->
-    {ok, Pid1} = start_local(newins1tab_back3, #{}),
-    {ok, Pid2} = start_local(newins2tab_back3, #{}),
-    ok = cets_join:join(join_lock1_insnew_back3, #{}, Pid1, Pid2),
+insert_new_fails_if_the_leader_dies(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     cets:pause(Pid2),
     spawn(fun() ->
         timer:sleep(100),
@@ -295,60 +282,62 @@ insert_new_fails_if_the_local_server_is_dead(_Config) ->
         exit:{noproc, {gen_server, call, _}} -> ok
     end.
 
-leader_is_the_same_in_metadata_after_join(_Config) ->
-    {ok, Pid1} = start_local(T1 = check_lead1, #{}),
-    {ok, Pid2} = start_local(T2 = check_lead2, #{}),
-    ok = cets_join:join(check_lead_lock, #{}, Pid1, Pid2),
+leader_is_the_same_in_metadata_after_join(Config) ->
+    #{tabs := [T1, T2], pids := [Pid1, Pid2]} = given_two_joined_tables(Config),
     Leader = cets:get_leader(Pid1),
     Leader = cets:get_leader(Pid2),
     Leader = cets_metadata:get(T1, leader),
     Leader = cets_metadata:get(T2, leader).
 
-join_works_with_existing_data(_Config) ->
-    {ok, Pid1} = start_local(ex1tab, #{}),
-    {ok, Pid2} = start_local(ex2tab, #{}),
-    cets:insert(ex1tab, {alice, 32}),
+join_works_with_existing_data(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    cets:insert(Tab1, {alice, 32}),
     %% Join will copy and merge existing tables
-    ok = cets_join:join(join_lock1_ex, #{}, Pid1, Pid2),
-    [{alice, 32}] = ets:lookup(ex2tab, alice).
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    [{alice, 32}] = ets:lookup(Tab2, alice).
 
 %% This testcase tests an edgecase: inserting with the same key from two nodes.
 %% Usually, inserting with the same key from two different nodes is not possible
 %% (because the node-name is a part of the key).
-join_works_with_existing_data_with_conflicts(_Config) ->
-    {ok, Pid1} = start_local(con1tab, #{}),
-    {ok, Pid2} = start_local(con2tab, #{}),
-    cets:insert(con1tab, {alice, 32}),
-    cets:insert(con2tab, {alice, 33}),
+join_works_with_existing_data_with_conflicts(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    cets:insert(Tab1, {alice, 32}),
+    cets:insert(Tab2, {alice, 33}),
     %% Join will copy and merge existing tables
-    ok = cets_join:join(join_lock1_con, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% We insert data from other table into our table when merging, so the values get swapped
-    [{alice, 33}] = ets:lookup(con1tab, alice),
-    [{alice, 32}] = ets:lookup(con2tab, alice).
+    [{alice, 33}] = ets:lookup(Tab1, alice),
+    [{alice, 32}] = ets:lookup(Tab2, alice).
 
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler(_Config) ->
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler(Config) ->
     Opts = #{handle_conflict => fun resolve_highest/2},
-    {ok, Pid1} = start_local(fn_con1tab, Opts),
-    {ok, Pid2} = start_local(fn_con2tab, Opts),
-    cets:insert(fn_con1tab, {alice, 32}),
-    cets:insert(fn_con2tab, {alice, 33}),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1, Opts),
+    {ok, Pid2} = start_local(Tab2, Opts),
+    cets:insert(Tab1, {alice, 32}),
+    cets:insert(Tab2, {alice, 33}),
     %% Join will copy and merge existing tables
-    ok = cets_join:join(join_lock2_con, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% Key with the highest Number remains
-    [{alice, 33}] = ets:lookup(fn_con1tab, alice),
-    [{alice, 33}] = ets:lookup(fn_con2tab, alice).
+    [{alice, 33}] = ets:lookup(Tab1, alice),
+    [{alice, 33}] = ets:lookup(Tab2, alice).
 
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys(_Config) ->
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys(Config) ->
     %% Deeper testing of cets_join:apply_resolver function
     Opts = #{handle_conflict => fun resolve_highest/2},
-    {ok, Pid1} = start_local(T1 = fn2_con1tab, Opts),
-    {ok, Pid2} = start_local(T2 = fn2_con2tab, Opts),
-    {ok, Pid3} = start_local(T3 = fn2_con3tab, Opts),
+    #{tabs := [T1, T2, T3], pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config, Opts),
     cets:insert_many(T1, [{alice, 32}, {bob, 10}, {michal, 40}]),
     cets:insert_many(T2, [{alice, 33}, {kate, 3}, {michal, 2}]),
     %% Join will copy and merge existing tables
-    ok = cets_join:join(join_lock3_con, #{}, Pid1, Pid2),
-    ok = cets_join:join(join_lock3_con, #{}, Pid1, Pid3),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
     %% Key with the highest Number remains
     Dump = [{alice, 33}, {bob, 10}, {kate, 3}, {michal, 40}],
     Dump = cets:dump(T1),
@@ -358,10 +347,12 @@ join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_mo
 -record(user, {name, age, updated}).
 
 %% Test with records (which require keypos = 2 option)
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2(_Config) ->
+join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2(Config) ->
     Opts = #{handle_conflict => fun resolve_user_conflict/2, keypos => 2},
-    {ok, Pid1} = start_local(T1 = keypos2_tab1, Opts),
-    {ok, Pid2} = start_local(T2 = keypos2_tab2, Opts),
+    T1 = make_name(Config, 1),
+    T2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(T1, Opts),
+    {ok, Pid2} = start_local(T2, Opts),
     cets:insert(T1, #user{name = alice, age = 30, updated = erlang:system_time()}),
     cets:insert(T2, #user{name = alice, age = 25, updated = erlang:system_time()}),
     %% Join will copy and merge existing tables
@@ -381,30 +372,29 @@ resolve_user_conflict(_U1, U2) ->
 resolve_highest({K, A}, {K, B}) ->
     {K, max(A, B)}.
 
-bag_with_conflict_handler_not_allowed(_Config) ->
+bag_with_conflict_handler_not_allowed(Config) ->
     {error, [bag_with_conflict_handler]} =
-        cets:start(ex1tab, #{handle_conflict => fun resolve_highest/2, type => bag}).
+        cets:start(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
 
-join_with_the_same_pid(_Config) ->
-    {ok, Pid} = start_local(joinsame, #{}),
+join_with_the_same_pid(Config) ->
+    Tab = make_name(Config),
+    {ok, Pid} = start_local(Tab),
     %% Just insert something into a table to check later the size
-    cets:insert(joinsame, {1, 1}),
+    cets:insert(Tab, {1, 1}),
     link(Pid),
-    {error, join_with_the_same_pid} = cets_join:join(joinsame_lock1_con, #{}, Pid, Pid),
+    {error, join_with_the_same_pid} = cets_join:join(lock_name(Config), #{}, Pid, Pid),
     Nodes = [node()],
     %% The process is still running and no data loss (i.e. size is not zero)
     #{nodes := Nodes, size := 1} = cets:info(Pid).
 
 join_ref_is_same_after_join(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     #{join_ref := JoinRef} = cets:info(Pid1),
     #{join_ref := JoinRef} = cets:info(Pid2).
 
 join_fails_because_server_process_not_found(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     F = fun
         (join_start) ->
             exit(Pid1, sim_error);
@@ -415,8 +405,8 @@ join_fails_because_server_process_not_found(Config) ->
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     F = fun
         (before_get_pids) ->
             exit(Pid1, sim_error);
@@ -462,8 +452,8 @@ join_fails_before_send_dump(Config) ->
 %% Checks that remote ops are dropped if join_ref does not match in the state and in remote_op message
 join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
     Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     F = fun
         ({before_send_dump, P}) when Pid1 =:= P ->
             Me ! before_send_dump_called_for_pid1;
@@ -522,9 +512,7 @@ send_dump_fails_during_join_because_receiver_exits(Config) ->
 
 join_fails_in_check_fully_connected(Config) ->
     Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    {ok, Pid3} = start_local(make_name(Config, 3), #{}),
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     %% Pid2 and Pid3 are connected
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     [Pid3] = cets:other_pids(Pid2),
@@ -544,9 +532,7 @@ join_fails_in_check_fully_connected(Config) ->
     receive_message(before_check_fully_connected_called).
 
 join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    {ok, Pid3} = start_local(make_name(Config, 3), #{}),
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     %% Pid2 and Pid3 are connected
     %% But for some reason Pid3 has a different join_ref
     %% (probably could happen if it still haven't checked other nodes after a join)
@@ -556,9 +542,7 @@ join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
 join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    {ok, Pid3} = start_local(make_name(Config, 3), #{}),
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     %% Pid2 and Pid3 are connected
     %% But for some reason Pid3 has a different other_nodes list
     %% (probably could happen if it still haven't checked other nodes after a join)
@@ -568,17 +552,15 @@ join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
 join_fails_because_servers_overlap(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    {ok, Pid3} = start_local(make_name(Config, 3), #{}),
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     set_other_servers(Pid1, [Pid3]),
     set_other_servers(Pid2, [Pid3]),
     {error, check_do_not_overlap_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
 remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
     #{join_ref := JoinRef} = cets:info(Pid1),
     set_join_ref(Pid1, make_ref()),
@@ -590,8 +572,8 @@ remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
 
 join_retried_if_lock_is_busy(Config) ->
     Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     Lock = lock_name(Config),
     SleepyF = fun
         (join_start) ->
@@ -617,8 +599,8 @@ join_retried_if_lock_is_busy(Config) ->
 
 send_dump_contains_already_added_servers(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
     PauseRef = cets:pause(Pid1),
     %% That should be called by cets_join module
@@ -629,7 +611,7 @@ send_dump_contains_already_added_servers(Config) ->
 test_multinode(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
-    Tab = tab1,
+    Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
@@ -667,7 +649,7 @@ test_multinode(Config) ->
     ok.
 
 test_multinode_remote_insert(Config) ->
-    Tab = rem_tab,
+    Tab = make_name(Config),
     [Node2, Node3 | _] = proplists:get_value(nodes, Config),
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
@@ -681,7 +663,7 @@ test_multinode_remote_insert(Config) ->
 node_list_is_correct(Config) ->
     Node1 = node(),
     [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
-    Tab = tab3,
+    Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
@@ -698,7 +680,7 @@ node_list_is_correct(Config) ->
 test_multinode_auto_discovery(Config) ->
     Node1 = node(),
     [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
-    Tab = tab2,
+    Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
     Dir = proplists:get_value(priv_dir, Config),
@@ -709,37 +691,35 @@ test_multinode_auto_discovery(Config) ->
     %% Waits for the first check
     sys:get_state(Disco),
     [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := tab2}] =
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.
 
-test_locally(_Config) ->
-    {ok, Pid1} = start_local(t1, #{}),
-    {ok, Pid2} = start_local(t2, #{}),
-    ok = cets_join:join(lock1, #{table => [t1, t2]}, Pid1, Pid2),
-    cets:insert(t1, {1}),
-    cets:insert(t1, {1}),
-    cets:insert(t2, {2}),
-    D = cets:dump(t1),
-    D = cets:dump(t2).
+test_locally(Config) ->
+    #{tabs := [T1, T2]} = given_two_joined_tables(Config),
+    cets:insert(T1, {1}),
+    cets:insert(T1, {1}),
+    cets:insert(T2, {2}),
+    D = cets:dump(T1),
+    D = cets:dump(T2).
 
-handle_down_is_called(_Config) ->
+handle_down_is_called(Config) ->
     Parent = self(),
     DownFn = fun(#{remote_pid := _RemotePid, table := _Tab}) ->
         Parent ! down_called
     end,
-    {ok, Pid1} = start_local(d1, #{handle_down => DownFn}),
-    {ok, Pid2} = start_local(d2, #{}),
-    ok = cets_join:join(lock1, #{table => [d1, d2]}, Pid1, Pid2),
+    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
+    ok = cets_join:join(lock_name(Config), #{table => [d1, d2]}, Pid1, Pid2),
     exit(Pid2, oops),
     receive
         down_called -> ok
     after 5000 -> ct:fail(timeout)
     end.
 
-events_are_applied_in_the_correct_order_after_unpause(_Config) ->
-    T = t4,
-    {ok, Pid} = start_local(T, #{}),
+events_are_applied_in_the_correct_order_after_unpause(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T),
     PauseMon = cets:pause(Pid),
     R1 = cets:insert_request(T, {1}),
     R2 = cets:delete_request(T, 1),
@@ -755,9 +735,9 @@ events_are_applied_in_the_correct_order_after_unpause(_Config) ->
     [{reply, ok} = cets:wait_response(R, 5000) || R <- [R1, R2, R3, R4]],
     [{2}, {3}, {6}, {7}] = lists:sort(cets:dump(T)).
 
-pause_multiple_times(_Config) ->
-    T = t5,
-    {ok, Pid} = start_local(T, #{}),
+pause_multiple_times(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T),
     PauseMon1 = cets:pause(Pid),
     PauseMon2 = cets:pause(Pid),
     Ref1 = cets:insert_request(Pid, {1}),
@@ -774,17 +754,16 @@ pause_multiple_times(_Config) ->
     {reply, ok} = cets:wait_response(Ref2, 5000),
     [{1}, {2}] = lists:sort(cets:dump(T)).
 
-unpause_twice(_Config) ->
-    T = t6,
-    {ok, Pid} = start_local(T, #{}),
+unpause_twice(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T),
     PauseMon = cets:pause(Pid),
     ok = cets:unpause(Pid, PauseMon),
     {error, unknown_pause_monitor} = cets:unpause(Pid, PauseMon).
 
-unpause_if_pause_owner_crashes(_Config) ->
+unpause_if_pause_owner_crashes(Config) ->
     Me = self(),
-    T = pause_crashed,
-    {ok, Pid} = start_local(T, #{}),
+    {ok, Pid} = start_local(make_name(Config)),
     spawn_monitor(fun() ->
         cets:pause(Pid),
         Me ! pause_called,
@@ -797,17 +776,15 @@ unpause_if_pause_owner_crashes(_Config) ->
     %% Check that the server is unpaused
     ok = cets:insert(Pid, {1}).
 
-write_returns_if_remote_server_crashes(_Config) ->
-    {ok, Pid1} = start_local(c1, #{}),
-    {ok, Pid2} = start_local(c2, #{}),
-    ok = cets_join:join(lock1, #{table => [c1, c2]}, Pid1, Pid2),
+write_returns_if_remote_server_crashes(Config) ->
+    #{tab1 := Tab1, pid2 := Pid2} = given_two_joined_tables(Config),
     sys:suspend(Pid2),
-    R = cets:insert_request(c1, {1}),
+    R = cets:insert_request(Tab1, {1}),
     exit(Pid2, oops),
     {reply, ok} = cets:wait_response(R, 5000).
 
-ack_process_stops_correctly(_Config) ->
-    {ok, Pid} = start_local(ack_stops, #{}),
+ack_process_stops_correctly(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     AckMon = monitor(process, AckPid),
     cets:stop(Pid),
@@ -816,10 +793,8 @@ ack_process_stops_correctly(_Config) ->
     after 5000 -> ct:fail(timeout)
     end.
 
-ack_process_handles_unknown_remote_server(_Config) ->
-    {ok, Pid1} = start_local(ack_unkn1, #{}),
-    {ok, Pid2} = start_local(ack_unkn2, #{}),
-    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+ack_process_handles_unknown_remote_server(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     sys:suspend(Pid2),
     #{ack_pid := AckPid} = cets:info(Pid1),
     [Pid2] = cets:other_pids(Pid1),
@@ -835,10 +810,8 @@ ack_process_handles_unknown_remote_server(_Config) ->
     %% Ack process still works fine
     {reply, ok} = cets:wait_response(R, 5000).
 
-ack_process_handles_unknown_from(_Config) ->
-    {ok, Pid1} = start_local(ack_unkn_from1, #{}),
-    {ok, Pid2} = start_local(ack_unkn_from2, #{}),
-    ok = cets_join:join(lock_ack, #{}, Pid1, Pid2),
+ack_process_handles_unknown_from(Config) ->
+    #{pid1 := Pid1} = given_two_joined_tables(Config),
     #{ack_pid := AckPid} = cets:info(Pid1),
     R = cets:insert_request(Pid1, {1}),
     From = {self(), make_ref()},
@@ -846,8 +819,8 @@ ack_process_handles_unknown_from(_Config) ->
     %% Ack process still works fine
     {reply, ok} = cets:wait_response(R, 5000).
 
-ack_calling_add_when_server_list_is_empty_is_not_allowed(_Config) ->
-    {ok, Pid} = start_local(add_fails, #{}),
+ack_calling_add_when_server_list_is_empty_is_not_allowed(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     Mon = monitor(process, Pid),
     #{ack_pid := AckPid} = cets:info(Pid),
     FakeFrom = {self(), make_ref()},
@@ -861,125 +834,126 @@ ack_calling_add_when_server_list_is_empty_is_not_allowed(_Config) ->
     after 5000 -> ct:fail(timeout)
     end.
 
-sync_using_name_works(_Config) ->
-    {ok, _Pid1} = start_local(c4, #{}),
-    cets:sync(c4).
+sync_using_name_works(Config) ->
+    T = make_name(Config),
+    {ok, _Pid1} = start_local(T),
+    cets:sync(T).
 
-insert_many_request(_Config) ->
-    {ok, Pid} = start_local(c5, #{}),
+insert_many_request(Config) ->
+    Tab = make_name(Config),
+    {ok, Pid} = start_local(Tab),
     R = cets:insert_many_request(Pid, [{a}, {b}]),
     {reply, ok} = cets:wait_response(R, 5000),
-    [{a}, {b}] = ets:tab2list(c5).
+    [{a}, {b}] = ets:tab2list(Tab).
 
-insert_into_bag(_Config) ->
-    T = b1,
+insert_into_bag(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{type => bag}),
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 1}),
     cets:insert(T, {1, 2}),
     [{1, 1}, {1, 2}] = lists:sort(cets:dump(T)).
 
-delete_from_bag(_Config) ->
-    T = b2,
+delete_from_bag(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     cets:delete_object(T, {1, 2}),
     [{1, 1}] = cets:dump(T).
 
-delete_many_from_bag(_Config) ->
-    T = b3,
+delete_many_from_bag(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}, {1, 5}, {2, 3}]),
     cets:delete_objects(T, [{1, 2}, {1, 5}, {1, 4}]),
     [{1, 1}, {1, 3}, {2, 3}] = lists:sort(cets:dump(T)).
 
-delete_request_from_bag(_Config) ->
-    T = b4,
+delete_request_from_bag(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}]),
     R = cets:delete_object_request(T, {1, 2}),
     {reply, ok} = cets:wait_response(R, 5000),
     [{1, 1}] = cets:dump(T).
 
-delete_request_many_from_bag(_Config) ->
-    T = b5,
+delete_request_many_from_bag(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{type => bag}),
     cets:insert_many(T, [{1, 1}, {1, 2}, {1, 3}]),
     R = cets:delete_objects_request(T, [{1, 1}, {1, 3}]),
     {reply, ok} = cets:wait_response(R, 5000),
     [{1, 2}] = cets:dump(T).
 
-insert_into_bag_is_replicated(_Config) ->
-    {ok, Pid1} = start_local(b6a, #{type => bag}),
-    {ok, Pid2} = start_local(T2 = b6b, #{type => bag}),
-    ok = cets_join:join(join_lock_b6, #{}, Pid1, Pid2),
+insert_into_bag_is_replicated(Config) ->
+    #{pid1 := Pid1, tab2 := T2} = given_two_joined_tables(Config, #{type => bag}),
     cets:insert(Pid1, {1, 1}),
     [{1, 1}] = cets:dump(T2).
 
-insert_into_keypos_table(_Config) ->
-    T = kp1,
+insert_into_keypos_table(Config) ->
+    T = make_name(Config),
     {ok, _Pid} = start_local(T, #{keypos => 2}),
     cets:insert(T, {rec, 1}),
     cets:insert(T, {rec, 2}),
     [{rec, 1}] = lists:sort(ets:lookup(T, 1)),
     [{rec, 1}, {rec, 2}] = lists:sort(cets:dump(T)).
 
-table_name_works(_Config) ->
-    T = tabnamecheck,
-    {ok, Pid} = start_local(T, #{}),
+table_name_works(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T),
     {ok, T} = cets:table_name(T),
     {ok, T} = cets:table_name(Pid),
     #{table := T} = cets:info(Pid).
 
-info_contains_opts(_Config) ->
-    {ok, Pid} = start_local(info_contains_opts, #{type => bag}),
+info_contains_opts(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
 
 %% Cases to improve code coverage
 
-unknown_down_message_is_ignored(_Config) ->
-    {ok, Pid} = start_local(rand_down_msg, #{}),
+unknown_down_message_is_ignored(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     RandPid = spawn(fun() -> ok end),
     Pid ! {'DOWN', make_ref(), process, RandPid, oops},
     still_works(Pid).
 
-unknown_message_is_ignored(_Config) ->
-    {ok, Pid} = start_local(unkn_msg, #{}),
+unknown_message_is_ignored(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     Pid ! oops,
     still_works(Pid).
 
-unknown_cast_message_is_ignored(_Config) ->
-    {ok, Pid} = start_local(unkn_cast_msg, #{}),
+unknown_cast_message_is_ignored(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     gen_server:cast(Pid, oops),
     still_works(Pid).
 
-unknown_message_is_ignored_in_ack_process(_Config) ->
-    {ok, Pid} = start_local(ack_unkn_msg, #{}),
+unknown_message_is_ignored_in_ack_process(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     AckPid ! oops,
     still_works(Pid).
 
-unknown_cast_message_is_ignored_in_ack_process(_Config) ->
-    {ok, Pid} = start_local(ack_unkn_cast_msg, #{}),
+unknown_cast_message_is_ignored_in_ack_process(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     gen_server:cast(AckPid, oops),
     still_works(Pid).
 
-unknown_call_returns_error_from_ack_process(_Config) ->
-    {ok, Pid} = start_local(ack_unkn_call_msg, #{}),
+unknown_call_returns_error_from_ack_process(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     {error, unexpected_call} = gen_server:call(AckPid, oops),
     still_works(Pid).
 
-code_change_returns_ok(_Config) ->
-    {ok, Pid} = start_local(ack_code_chg, #{}),
+code_change_returns_ok(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets, v2, []),
     sys:resume(AckPid).
 
-code_change_returns_ok_for_ack(_Config) ->
-    {ok, Pid} = start_local(code_chg, #{}),
+code_change_returns_ok_for_ack(Config) ->
+    {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets_ack, v2, []),
@@ -994,11 +968,16 @@ run_spawn_forwards_errors(_Config) ->
                 matched
         end.
 
+%% Helper functions
+
 still_works(Pid) ->
     pong = cets:ping(Pid),
     %% The server works fine
     ok = cets:insert(Pid, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid).
+
+start_local(Name) ->
+    start_local(Name, #{}).
 
 start_local(Name, Opts) ->
     {ok, Pid} = cets:start(Name, Opts),
@@ -1060,6 +1039,9 @@ receive_message(M) ->
     after 5000 -> error({receive_message_timeout, M})
     end.
 
+make_name(Config) ->
+    make_name(Config, 1).
+
 make_name(Config, Num) ->
     Testcase = proplists:get_value(testcase, Config),
     list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num)).
@@ -1080,3 +1062,30 @@ set_other_servers(Pid, Servers) ->
     sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
         State#{other_servers := Servers}
     end).
+
+given_two_joined_tables(Config) ->
+    given_two_joined_tables(Config, #{}).
+
+given_two_joined_tables(Config, Opts) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1, Opts),
+    {ok, Pid2} = start_local(Tab2, Opts),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    #{
+        tab1 => Tab1,
+        tab2 => Tab2,
+        pid1 => Pid1,
+        pid2 => Pid2,
+        tabs => [Tab1, Tab2],
+        pids => [Pid1, Pid2]
+    }.
+
+given_3_servers(Config) ->
+    given_3_servers(Config, #{}).
+
+given_3_servers(Config, Opts) ->
+    {ok, Pid1} = start_local(T1 = make_name(Config, 1), Opts),
+    {ok, Pid2} = start_local(T2 = make_name(Config, 2), Opts),
+    {ok, Pid3} = start_local(T3 = make_name(Config, 3), Opts),
+    #{pids => [Pid1, Pid2, Pid3], tabs => [T1, T2, T3]}.
