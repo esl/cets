@@ -22,6 +22,8 @@ jobs:
       run: make pre_test
     - name: Run tests
       run: make cover_test
+    - name: Produce codecov.json report
+      run: make cover_json
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3
       env:

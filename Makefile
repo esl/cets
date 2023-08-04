@@ -20,9 +20,12 @@ grad:
 pre_test:
 	rebar3 as test compile
 
-cover_test:
-	rebar3 as test ct --sname=ct1 --cover
-	rebar3 as test codecov analyze
-
 run_test:
 	rebar3 as test ct --sname=ct1
+
+cover_test:
+	rebar3 as test ct --sname=ct1 --cover
+
+# Produce codecov.json report
+cover_json:
+	rebar3 as test codecov analyze

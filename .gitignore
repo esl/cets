@@ -3,3 +3,4 @@ _build/
 *.sw*
 codecov.json
 rebar3.crashdump
+*.beam
