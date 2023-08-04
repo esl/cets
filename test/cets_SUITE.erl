@@ -406,7 +406,7 @@ join_fails_because_server_process_not_found(Config) ->
             ok
     end,
     {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
     {ok, Pid1} = cets:start(make_name(Config, 1), #{}),
@@ -418,7 +418,7 @@ join_fails_because_server_process_not_found_before_get_pids(Config) ->
             ok
     end,
     {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}).
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_before_send_dump(Config) ->
     Me = self(),
@@ -438,7 +438,7 @@ join_fails_before_send_dump(Config) ->
             ok
     end,
     {error, sim_error} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     %% Not joined, some data exchanged
@@ -474,7 +474,7 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
             ok
     end,
     {error, sim_error2} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     cets:insert_request(Pid1, {1}),
@@ -505,7 +505,7 @@ send_dump_fails_during_join_because_receiver_exits(Config) ->
         (_) ->
             ok
     end,
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     receive_message(before_send_dump_called),
     pong = cets:ping(Pid1),
     receive_message({down_called, Pid1, Pid2}),
@@ -534,7 +534,7 @@ join_fails_in_check_fully_connected(Config) ->
             ok
     end,
     {error, check_fully_connected_failed} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{step_handler => F}),
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
     receive_message(before_check_fully_connected_called).
 
 join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
@@ -600,12 +600,12 @@ join_retried_if_lock_is_busy(Config) ->
     end,
     %% Get the lock in a separate process
     spawn_link(fun() ->
-        cets_join:join(Lock, #{}, Pid1, Pid2, #{step_handler => SleepyF})
+        cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
     end),
     receive_message(join_start),
     %% We actually would not return from cets_join:join unless we get the lock
     spawn_link(fun() ->
-        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{step_handler => F})
+        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
     end),
     receive_message(before_retry).
 

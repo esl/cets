@@ -1,4 +1,5 @@
 %% @doc Cluster join logic.
+%% Checkpoints are used for testing and do not affect the joining logic.
 -module(cets_join).
 -export([join/4]).
 -export([join/5]).
@@ -8,7 +9,8 @@
 -type join_ref() :: reference().
 -type server_pid() :: cets:server_pid().
 
--type step() ::
+%% Critical events during the joining procedure
+-type checkpoint() ::
     join_start
     | before_retry
     | before_get_pids
@@ -16,8 +18,8 @@
     | before_unpause
     | {before_send_dump, server_pid()}.
 
--type step_handler() :: fun((step()) -> ok).
--type join_opts() :: #{step_handler => step_handler()}.
+-type checkpoint_handler() :: fun((checkpoint()) -> ok).
+-type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
 
 -export_type([join_ref/0]).
 
@@ -71,7 +73,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
         %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
         %% Do joining in a separate process to reduce GC
-        cets_long:run_spawn(Info, fun() -> join2(Info, LocalPid, RemotePid, JoinOpts) end)
+        cets_long:run_spawn(Info, fun() -> join2(LocalPid, RemotePid, JoinOpts) end)
     end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
@@ -79,27 +81,27 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     Retries = 1,
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
-            run_step(before_retry, JoinOpts),
+            checkpoint(before_retry, JoinOpts),
             ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
             Result
     end.
 
-join2(_Info, LocalPid, RemotePid, JoinOpts) ->
-    run_step(join_start, JoinOpts),
+%% Exchanges data and a list of servers.
+%% Pauses new operations during the exchange.
+-spec join2(server_pid(), server_pid(), join_opts()) -> ok.
+join2(LocalPid, RemotePid, JoinOpts) ->
+    checkpoint(join_start, JoinOpts),
     JoinRef = make_ref(),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
-    #{opts := Opts} = cets:info(LocalPid),
-    run_step(before_get_pids, JoinOpts),
+    #{opts := ServerOpts} = cets:info(LocalPid),
+    checkpoint(before_get_pids, JoinOpts),
     LocPids = get_pids(LocalPid),
     RemPids = get_pids(RemotePid),
-    check_do_not_overlap(LocPids, RemPids),
-    run_step(before_check_fully_connected, JoinOpts),
-    check_fully_connected(LocPids),
-    check_fully_connected(RemPids),
+    check_pids(LocPids, RemPids, JoinOpts),
     AllPids = LocPids ++ RemPids,
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
@@ -114,20 +116,20 @@ join2(_Info, LocalPid, RemotePid, JoinOpts) ->
         %% and before making any changes
         check_fully_connected(LocPids),
         check_fully_connected(RemPids),
-        {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, Opts),
+        {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, ServerOpts),
         RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
         LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
         lists:foreach(LocF, LocPids),
         lists:foreach(RemF, RemPids),
         ok
     after
-        run_step(before_unpause, JoinOpts),
+        checkpoint(before_unpause, JoinOpts),
         %% If unpause fails, there would be log messages
         lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
     end.
 
 send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
-    run_step({before_send_dump, Pid}, JoinOpts),
+    checkpoint({before_send_dump, Pid}, JoinOpts),
     %% Error reporting would be done by cets_long:call_tracked
     catch cets:send_dump(Pid, Pids, JoinRef, Dump).
 
@@ -139,11 +141,11 @@ remote_or_local_dump(Pid) ->
     %% We actually need to ask the remote process
     cets:remote_dump(Pid).
 
-maybe_apply_resolver(LocalDump, RemoteDump, Opts = #{handle_conflict := F}) ->
-    Type = maps:get(type, Opts, ordered_set),
-    Pos = maps:get(keypos, Opts, 1),
+maybe_apply_resolver(LocalDump, RemoteDump, ServerOpts = #{handle_conflict := F}) ->
+    Type = maps:get(type, ServerOpts, ordered_set),
+    Pos = maps:get(keypos, ServerOpts, 1),
     apply_resolver(Type, LocalDump, RemoteDump, F, Pos);
-maybe_apply_resolver(LocalDump, RemoteDump, _Opts) ->
+maybe_apply_resolver(LocalDump, RemoteDump, _ServerOpts) ->
     {LocalDump, RemoteDump}.
 
 %% Bags do not have conflicts, so do not define a resolver for them.
@@ -182,6 +184,12 @@ apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) 
 
 get_pids(Pid) ->
     [Pid | cets:other_pids(Pid)].
+
+check_pids(LocPids, RemPids, JoinOpts) ->
+    check_do_not_overlap(LocPids, RemPids),
+    checkpoint(before_check_fully_connected, JoinOpts),
+    check_fully_connected(LocPids),
+    check_fully_connected(RemPids).
 
 -spec check_do_not_overlap([server_pid()], [server_pid()]) -> ok.
 check_do_not_overlap(LocPids, RemPids) ->
@@ -243,8 +251,10 @@ pid_to_join_ref(Pid) ->
     #{join_ref := JoinRef} = cets:info(Pid),
     JoinRef.
 
--spec run_step(step(), join_opts()) -> ok.
-run_step(Step, #{step_handler := F}) ->
-    F(Step);
-run_step(_Step, _Opts) ->
+%% Checkpoints are used for testing
+%% Checkpoints do nothing in production
+-spec checkpoint(checkpoint(), join_opts()) -> ok.
+checkpoint(CheckPointName, #{checkpoint_handler := F}) ->
+    F(CheckPointName);
+checkpoint(_CheckPointName, _Opts) ->
     ok.
