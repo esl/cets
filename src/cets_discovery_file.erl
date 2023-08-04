@@ -15,23 +15,25 @@
 -type opts() :: #{disco_file := file:filename()}.
 -type state() :: opts().
 
+
 -spec init(opts()) -> state().
 init(Opts) ->
     Opts.
+
 
 -spec get_nodes(state()) -> {cets_discovery:get_nodes_result(), state()}.
 get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
             Log = #{
-                what => discovery_failed,
-                filename => Filename,
-                reason => Reason
-            },
+                    what => discovery_failed,
+                    filename => Filename,
+                    reason => Reason
+                   },
             ?LOG_ERROR(Log),
             {{error, Reason}, State};
         {ok, Text} ->
             Lines = binary:split(Text, [<<"\r">>, <<"\n">>, <<" ">>], [global]),
-            Nodes = [binary_to_atom(X, latin1) || X <- Lines, X =/= <<>>],
+            Nodes = [ binary_to_atom(X, latin1) || X <- Lines, X =/= <<>> ],
             {{ok, Nodes}, State}
     end.
