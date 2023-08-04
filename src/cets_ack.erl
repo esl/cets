@@ -8,22 +8,22 @@
 
 %% API functions
 -export([
-    start_link/1,
-    set_servers/2,
-    add/2,
-    ack/3,
-    send_remote_down/2
-]).
+         start_link/1,
+         set_servers/2,
+         add/2,
+         ack/3,
+         send_remote_down/2
+        ]).
 
 %% gen_server callbacks
 -export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+         init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3
+        ]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -31,10 +31,10 @@
 -type server_pid() :: cets:server_pid().
 -type from() :: gen_server:from().
 -type state() :: #{
-    servers := [server_pid()],
-    %% We store tasks directly in the state map
-    from() => [server_pid(), ...]
-}.
+                   servers := [server_pid()],
+                   %% We store tasks directly in the state map
+                   from() => [server_pid(), ...]
+                  }.
 
 -export_type([ack_pid/0]).
 
@@ -117,13 +117,13 @@ handle_add(_, _) ->
 handle_remote_down(RemotePid, State) ->
     %% Call handle_updated for all pending tasks
     F = fun
-        (Key, _Value, State2) when is_atom(Key) ->
-            %% Ignore keys that are not used for tasks (i.e. servers key)
-            State2;
+            (Key, _Value, State2) when is_atom(Key) ->
+                %% Ignore keys that are not used for tasks (i.e. servers key)
+                                             State2;
         (From, Servers, State2) ->
-            handle_updated(From, RemotePid, Servers, State2)
-    end,
-    maps:fold(F, State, State).
+                                             handle_updated(From, RemotePid, Servers, State2)
+                                     end,
+maps:fold(F, State, State).
 
 -spec handle_updated(from(), server_pid(), state()) -> state().
 handle_updated(From, RemotePid, State) ->

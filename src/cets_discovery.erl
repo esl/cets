@@ -5,13 +5,13 @@
 
 -export([start/1, start_link/1, add_table/2, info/1]).
 -export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+         init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3
+        ]).
 
 -ignore_xref([start/1, start_link/1, add_table/2, info/1, behaviour_info/1]).
 
@@ -24,12 +24,12 @@
 
 -type from() :: {pid(), reference()}.
 -type state() :: #{
-    results := [term()],
-    tables := [atom()],
-    backend_module := module(),
-    backend_state := state(),
-    timer_ref := reference() | undefined
-}.
+                   results := [term()],
+                   tables := [atom()],
+                   backend_module := module(),
+                   backend_state := state(),
+                   timer_ref := reference() | undefined
+                  }.
 
 %% Backend could define its own options
 -type opts() :: #{name := atom(), _ := _}.
@@ -77,12 +77,12 @@ init(Opts) ->
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
     {ok, #{
-        results => [],
-        tables => Tables,
-        backend_module => Mod,
-        backend_state => BackendState,
-        timer_ref => undefined
-    }}.
+           results => [],
+           tables => Tables,
+           backend_module => Mod,
+           backend_state => BackendState,
+           timer_ref => undefined
+          }}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()}.
 handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->

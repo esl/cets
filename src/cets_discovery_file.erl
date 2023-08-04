@@ -24,10 +24,10 @@ get_nodes(State = #{disco_file := Filename}) ->
     case file:read_file(Filename) of
         {error, Reason} ->
             Log = #{
-                what => discovery_failed,
-                filename => Filename,
-                reason => Reason
-            },
+                    what => discovery_failed,
+                    filename => Filename,
+                    reason => Reason
+                   },
             ?LOG_ERROR(Log),
             {{error, Reason}, State};
         {ok, Text} ->
