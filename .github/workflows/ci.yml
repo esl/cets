@@ -21,7 +21,7 @@ jobs:
     - name: Compile
       run: rebar3 compile
     - name: Run tests
-      run: rebar3 as test ct --sname=ct1 --cover
+      run: rebar3 cover_test
     - name: Send test coverage report
       run: rebar3 as test codecov analyze
     - name: Upload coverage reports to Codecov
@@ -64,4 +64,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run erlfmt
-      run: rebar3 fmt --check
+      run: rebar3 format_check
