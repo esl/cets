@@ -21,7 +21,7 @@ jobs:
     - name: Compile
       run: rebar3 as test compile
     - name: Run tests
-      run: rebar3 cover_test
+      run: rebar3 cover_tests
     - name: Send test coverage report
       run: rebar3 as test codecov analyze
     - name: Upload coverage reports to Codecov
