@@ -3,6 +3,14 @@
 
 -compile([export_all, nowarn_export_all]).
 
+-hank([
+    {unnecessary_function_arguments, [
+        run_spawn_forwards_errors/1,
+        insert_new_fails_if_the_local_server_is_dead/1,
+        end_per_testcase/2
+    ]}
+]).
+
 all() ->
     [{group, cets}].
 

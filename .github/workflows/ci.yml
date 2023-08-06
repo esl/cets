@@ -40,7 +40,7 @@ jobs:
     - name: Run dialyzer
       run: rebar3 dialyzer
 
-  xref:
+  xref_and_hank:
     runs-on: ubuntu-latest
 
     container:
@@ -50,6 +50,8 @@ jobs:
     - uses: actions/checkout@v3
     - name: Run xref
       run: rebar3 xref
+    - name: Run dead code cleaner (Hank)
+      run: rebar3 find_dead_code
 
   erlfmt:
     runs-on: ubuntu-latest
