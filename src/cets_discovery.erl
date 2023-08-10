@@ -57,9 +57,9 @@ start_common(F, Opts) ->
         end,
     apply(gen_server, F, Args).
 
--spec add_table(server(), cets:table_name()) -> ok | {error, already_added}.
+-spec add_table(server(), cets:table_name()) -> ok.
 add_table(Server, Table) ->
-    gen_server:call(Server, {add_table, Table}).
+    gen_server:cast(Server, {add_table, Table}).
 
 -spec get_tables(server()) -> {ok, [cets:table_name()]}.
 get_tables(Server) ->
@@ -85,14 +85,6 @@ init(Opts) ->
     }}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()}.
-handle_call({add_table, Table}, _From, State = #{tables := Tables}) ->
-    case lists:member(Table, Tables) of
-        true ->
-            {reply, {error, already_added}, State};
-        false ->
-            State2 = State#{tables := [Table | Tables]},
-            {reply, ok, handle_check(State2)}
-    end;
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
     {reply, {ok, Tables}, State};
 handle_call(Msg, From, State) ->
@@ -100,6 +92,14 @@ handle_call(Msg, From, State) ->
     {reply, {error, unexpected_call}, State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
+handle_cast({add_table, Table}, State = #{tables := Tables}) ->
+    case lists:member(Table, Tables) of
+        true ->
+            {noreply, State};
+        false ->
+            State2 = State#{tables := [Table | Tables]},
+            {noreply, handle_check(State2)}
+    end;
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
