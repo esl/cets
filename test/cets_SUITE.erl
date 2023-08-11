@@ -83,7 +83,8 @@ cases() ->
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
         run_spawn_forwards_errors,
-        long_call_to_unknown_name_returns_pid_not_found
+        long_call_to_unknown_name_throws_pid_not_found,
+        send_leader_op_throws_noproc
     ].
 
 init_per_suite(Config) ->
@@ -965,10 +966,25 @@ run_spawn_forwards_errors(_Config) ->
                 matched
         end.
 
-%% Helper functions
+long_call_to_unknown_name_throws_pid_not_found(_Config) ->
+    matched =
+        try
+            cets_call:long_call(unknown_name_please, test)
+        catch
+            error:{pid_not_found, unknown_name_please} ->
+                matched
+        end.
 
-long_call_to_unknown_name_returns_pid_not_found(_Config) ->
-    {error, pid_not_found} = cets_call:long_call(unknown_name_please, test).
+send_leader_op_throws_noproc(_Config) ->
+    matched =
+        try
+            cets_call:send_leader_op(unknown_name_please, {op, {insert, {1}}})
+        catch
+            exit:{noproc, {gen_server, call, [unknown_name_please, get_leader]}} ->
+                matched
+        end.
+
+%% Helper functions
 
 still_works(Pid) ->
     pong = cets:ping(Pid),
