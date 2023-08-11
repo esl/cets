@@ -272,7 +272,7 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()}.
+-spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()} | timeout.
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
 
@@ -579,9 +579,10 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers, join_ref := J
     %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
 
--spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.
+-spec send_remote_op(server_pid(), remote_op()) -> ok.
 send_remote_op(RemotePid, RemoteOp) ->
-    erlang:send(RemotePid, RemoteOp, [noconnect]).
+    erlang:send(RemotePid, RemoteOp, [noconnect]),
+    ok.
 
 -spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
