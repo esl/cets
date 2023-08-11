@@ -40,7 +40,7 @@
 
 %% API functions
 
--spec start_link(cets:table_name()) -> {ok, ack_pid()}.
+-spec start_link(cets:table_name()) -> gen_server:start_ret().
 start_link(Tab) ->
     Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).

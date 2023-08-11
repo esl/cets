@@ -155,6 +155,7 @@
     handle_conflict => handle_conflict_fun(),
     handle_wrong_leader => handle_wrong_leader()
 }.
+-type response_return() :: {reply, ok} | {error, term()} | timeout.
 
 -export_type([request_id/0, op/0, server_pid/0, server_ref/0, long_msg/0, info/0, table_name/0]).
 
@@ -175,7 +176,7 @@
 %%   We recommend to define that function if keys could have conflicts.
 %%   This function would be called once for each conflicting key.
 %%   We recommend to keep that function pure (or at least no blocking calls from it).
--spec start(table_name(), start_opts()) -> {ok, server_pid()}.
+-spec start(table_name(), start_opts()) -> gen_server:start_ret().
 start(Tab, Opts) when is_atom(Tab) ->
     case check_opts(Opts) of
         [] ->
@@ -272,7 +273,7 @@ delete_many_request(Server, Keys) ->
 delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
--spec wait_response(request_id(), timeout()) -> {reply, ok} | {error, term()}.
+-spec wait_response(request_id(), timeout()) -> response_return().
 wait_response(Mon, Timeout) ->
     gen_server:wait_response(Mon, Timeout).
 
@@ -579,9 +580,10 @@ replicate(Op, From, #{ack_pid := AckPid, other_servers := Servers, join_ref := J
     %% AckPid would call gen_server:reply(From, ok) once all the remote servers reply
     ok.
 
--spec send_remote_op(server_pid(), remote_op()) -> noconnect | ok.
+-spec send_remote_op(server_pid(), remote_op()) -> ok.
 send_remote_op(RemotePid, RemoteOp) ->
-    erlang:send(RemotePid, RemoteOp, [noconnect]).
+    erlang:send(RemotePid, RemoteOp, [noconnect]),
+    ok.
 
 -spec apply_backlog(state()) -> state().
 apply_backlog(State = #{backlog := Backlog}) ->
