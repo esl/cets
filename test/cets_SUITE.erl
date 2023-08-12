@@ -82,7 +82,9 @@ cases() ->
         unknown_call_returns_error_from_ack_process,
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
-        run_spawn_forwards_errors
+        run_spawn_forwards_errors,
+        long_call_to_unknown_name_throws_pid_not_found,
+        send_leader_op_throws_noproc
     ].
 
 init_per_suite(Config) ->
@@ -271,11 +273,7 @@ insert_new_fails_if_the_leader_dies(Config) ->
     end.
 
 insert_new_fails_if_the_local_server_is_dead(_Config) ->
-    %% Get a pid for a stopped process
-    {Pid, Mon} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', Mon, process, Pid, _Reason} -> ok
-    end,
+    Pid = stopped_pid(),
     try
         cets:insert_new(Pid, {alice, 32})
     catch
@@ -968,6 +966,24 @@ run_spawn_forwards_errors(_Config) ->
                 matched
         end.
 
+long_call_to_unknown_name_throws_pid_not_found(_Config) ->
+    matched =
+        try
+            cets_call:long_call(unknown_name_please, test)
+        catch
+            error:{pid_not_found, unknown_name_please} ->
+                matched
+        end.
+
+send_leader_op_throws_noproc(_Config) ->
+    matched =
+        try
+            cets_call:send_leader_op(unknown_name_please, {op, {insert, {1}}})
+        catch
+            exit:{noproc, {gen_server, call, [unknown_name_please, get_leader]}} ->
+                matched
+        end.
+
 %% Helper functions
 
 still_works(Pid) ->
@@ -1089,3 +1105,10 @@ given_3_servers(Config, Opts) ->
     {ok, Pid2} = start_local(T2 = make_name(Config, 2), Opts),
     {ok, Pid3} = start_local(T3 = make_name(Config, 3), Opts),
     #{pids => [Pid1, Pid2, Pid3], tabs => [T1, T2, T3]}.
+
+stopped_pid() ->
+    %% Get a pid for a stopped process
+    {Pid, Mon} = spawn_monitor(fun() -> ok end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} -> ok
+    end.
