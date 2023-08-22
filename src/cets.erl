@@ -433,12 +433,11 @@ handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := 
 handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            Log = #{
+            ?LOG_ERROR(#{
                 what => pause_owner_crashed,
                 state => State,
                 paused_by_pid => Pid
-            },
-            ?LOG_ERROR(Log),
+            }),
             handle_unpause2(Mon, Mons, State);
         false ->
             handle_down2(Pid, State)
@@ -454,12 +453,11 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
             set_other_servers(Servers2, State);
         false ->
             %% This should not happen
-            Log = #{
+            ?LOG_ERROR(#{
                 what => handle_down_failed,
                 remote_pid => RemotePid,
                 state => State
-            },
-            ?LOG_ERROR(Log),
+            }),
             State
     end.
 
@@ -476,13 +474,12 @@ add_servers(Pids, Servers) ->
         Overlap ->
             %% Should not happen (cets_join checks for it)
             %% Still log it, if that happens
-            Log = #{
+            ?LOG_ERROR(#{
                 what => already_added,
                 already_added_servers => Overlap,
                 pids => Pids,
                 servers => Servers
-            },
-            ?LOG_ERROR(Log)
+            })
     end,
     [erlang:monitor(process, Pid) || Pid <- NewServers],
     ordsets:union(NewServers, Servers).
@@ -522,14 +519,13 @@ handle_remote_op(Op, From, AckPid, JoinRef, State = #{join_ref := JoinRef}) ->
     do_op(Op, State),
     cets_ack:ack(AckPid, From, self());
 handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
-    Log = #{
+    ?LOG_ERROR(#{
         what => drop_remote_op,
         from => From,
         remote_join_ref => RemoteJoinRef,
         join_ref => JoinRef,
         op => Op
-    },
-    ?LOG_ERROR(Log),
+    }),
     %% We still need to reply to the remote process so it could stop waiting
     cets_ack:ack(AckPid, From, self()).
 
@@ -640,14 +636,13 @@ send_check_server(Pid, JoinRef) ->
 handle_check_server(_FromPid, JoinRef, #{join_ref := JoinRef}) ->
     ok;
 handle_check_server(FromPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
-    Log = #{
+    ?LOG_WARNING(#{
         what => cets_check_server_failed,
         text => <<"Disconnect the remote server">>,
         remote_pid => FromPid,
         remote_join_ref => RemoteJoinRef,
         join_ref => JoinRef
-    },
-    ?LOG_WARNING(Log),
+    }),
     %% Ask the remote server to disconnect from us
     Reason = {check_server_failed, {RemoteJoinRef, JoinRef}},
     FromPid ! {'DOWN', make_ref(), process, self(), Reason},
