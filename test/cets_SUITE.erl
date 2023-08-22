@@ -4,10 +4,18 @@
 -compile([export_all, nowarn_export_all]).
 
 all() ->
-    [{group, cets}].
+    [
+        {group, cets},
+        %% To improve the code coverage we need to test with logging disabled
+        %% More info: https://github.com/erlang/otp/issues/7531
+        {group, cets_no_log}
+    ].
 
 groups() ->
-    [{cets, [parallel, {repeat_until_any_fail, 3}], cases()}].
+    [
+        {cets, [parallel, {repeat_until_any_fail, 3}], cases()},
+        {cets_no_log, [parallel], cases()}
+    ].
 
 cases() ->
     [
@@ -96,6 +104,18 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
+init_per_group(cets_no_log, Config) ->
+    [ok = logger:set_module_level(M, none) || M <- log_modules()],
+    Config;
+init_per_group(_Group, Config) ->
+    Config.
+
+end_per_group(cets_no_log, Config) ->
+    [ok = logger:unset_module_level(M) || M <- log_modules()],
+    Config;
+end_per_group(_Group, Config) ->
+    Config.
+
 init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
     ct:make_priv_dir(),
     init_per_testcase_generic(Name, Config);
@@ -107,6 +127,10 @@ init_per_testcase_generic(Name, Config) ->
 
 end_per_testcase(_, _Config) ->
     ok.
+
+%% Modules that use a multiline LOG_ macro
+log_modules() ->
+    [cets, cets_call, cets_join].
 
 inserted_records_could_be_read_back(Config) ->
     Tab = make_name(Config),
