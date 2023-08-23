@@ -711,9 +711,8 @@ test_multinode_auto_discovery(Config) ->
     FileName = filename:join(Dir, "disco.txt"),
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
-    %% Waits for the first check
-    sys:get_state(Disco),
-    [Node2] = other_nodes(Node1, Tab),
+    %% Disco is async, so we have to wait for the final state
+    cets_test_wait:wait_until(fun() -> other_nodes(Node1, Tab) end, [Node2]),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.
@@ -730,9 +729,8 @@ test_disco_add_table(Config) ->
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
-    %% Waits for the first check
-    sys:get_state(Disco),
-    [Node2] = other_nodes(Node1, Tab),
+    %% Disco is async, so we have to wait for the final state
+    cets_test_wait:wait_until(fun() -> other_nodes(Node1, Tab) end, [Node2]),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.

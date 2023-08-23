@@ -25,9 +25,14 @@
 -type from() :: {pid(), reference()}.
 -type state() :: #{
     results := [term()],
+    nodes := [node()],
     tables := [atom()],
     backend_module := module(),
     backend_state := state(),
+    get_nodes_status := not_running | running,
+    should_retry_get_nodes := boolean(),
+    join_status := not_running | running,
+    should_retry_join := boolean(),
     timer_ref := reference() | undefined
 }.
 
@@ -72,15 +77,22 @@ info(Server) ->
 
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
+    %% Sends nodeup / nodedown
+    ok = net_kernel:monitor_nodes(true),
     Mod = maps:get(backend_module, Opts, cets_discovery_file),
     self() ! check,
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
     {ok, #{
         results => [],
+        nodes => [],
         tables => Tables,
         backend_module => Mod,
         backend_state => BackendState,
+        get_nodes_status => not_running,
+        should_retry_get_nodes => false,
+        join_status => not_running,
+        should_retry_join => false,
         timer_ref => undefined
     }}.
 
@@ -97,8 +109,9 @@ handle_cast({add_table, Table}, State = #{tables := Tables}) ->
         true ->
             {noreply, State};
         false ->
+            self() ! check,
             State2 = State#{tables := [Table | Tables]},
-            {noreply, handle_check(State2)}
+            {noreply, State2}
     end;
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
@@ -107,6 +120,14 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info(check, State) ->
     {noreply, handle_check(State)};
+handle_info({handle_check_result, Res, BackendState}, State) ->
+    {noreply, handle_get_nodes_result(Res, BackendState, State)};
+handle_info({nodeup, _Node}, State) ->
+    {noreply, try_joining(State)};
+handle_info({nodedown, _Node}, State) ->
+    {noreply, State};
+handle_info({joining_finished, Results}, State) ->
+    {noreply, handle_joining_finished(Results, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -121,18 +142,69 @@ code_change(_OldVsn, State, _Extra) ->
 handle_check(State = #{tables := []}) ->
     %% No tables to track, skip
     schedule_check(State);
+handle_check(State = #{get_nodes_status := running}) ->
+    State#{should_retry_get_nodes := true};
 handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
-    {Res, BackendState2} = Mod:get_nodes(BackendState),
-    State2 = handle_get_nodes_result(Res, State),
-    schedule_check(State2#{backend_state := BackendState2}).
+    Self = self(),
+    spawn_link(fun() ->
+        Info = #{task => cets_discovery_get_nodes, backend_module => Mod},
+        F = fun() -> Mod:get_nodes(BackendState) end,
+        {Res, BackendState2} = cets_long:run_tracked(Info, F),
+        Self ! {handle_check_result, Res, BackendState2}
+    end),
+    State#{get_nodes_status := running}.
 
-handle_get_nodes_result({error, _Reason}, State) ->
+handle_get_nodes_result(Res, BackendState, State) ->
+    State2 = State#{backend_state := BackendState, get_nodes_status := not_running},
+    State3 = set_nodes(Res, State2),
+    schedule_check(State3).
+
+set_nodes({error, _Reason}, State) ->
     State;
-handle_get_nodes_result({ok, Nodes}, State = #{tables := Tables}) ->
-    Results = [do_join(Tab, Node) || Tab <- Tables, Node <- Nodes, node() =/= Node],
-    report_results(Results, State),
-    State#{results := Results}.
+set_nodes({ok, Nodes}, State) ->
+    ping_not_connected_nodes(Nodes),
+    try_joining(State#{nodes := Nodes}).
 
+%% Called when:
+%% - a list of connected nodes changes (i.e. nodes() call result)
+%% - a list of nodes is received from the discovery backend
+try_joining(State = #{join_status := running}) ->
+    State#{should_retry_join := true};
+try_joining(State = #{join_status := not_running, nodes := Nodes, tables := Tables}) ->
+    Self = self(),
+    AvailableNodes = nodes(),
+    spawn_link(fun() ->
+        %% We only care about connected nodes here
+        %% We do not wanna try to connect here - we do it in ping_not_connected_nodes/1
+        Results = [
+            do_join(Tab, Node)
+         || Node <- Nodes, lists:member(Node, AvailableNodes), Tab <- Tables
+        ],
+        Self ! {joining_finished, Results}
+    end),
+    State#{join_status := running, should_retry_join := false}.
+
+%% Called when try_joining finishes the async task
+-spec handle_joining_finished(list(), state()) -> state().
+handle_joining_finished(Results, State = #{should_retry_join := Retry}) ->
+    report_results(Results, State),
+    State2 = State#{results := Results},
+    case Retry of
+        true ->
+            try_joining(State2);
+        false ->
+            State
+    end.
+
+ping_not_connected_nodes(Nodes) ->
+    NotConNodes = Nodes -- [node() | nodes()],
+    [spawn(fun() -> net_adm:ping(Node) end) || Node <- lists:sort(NotConNodes)],
+    ok.
+
+schedule_check(State = #{should_retry_get_nodes := true, get_nodes_status := not_running}) ->
+    %% Retry without any delay
+    self() ! check,
+    State#{should_retry_get_nodes := false};
 schedule_check(State) ->
     cancel_old_timer(State),
     TimerRef = erlang:send_after(5000, self(), check),
