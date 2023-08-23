@@ -60,6 +60,7 @@ cases() ->
         test_multinode_remote_insert,
         node_list_is_correct,
         test_multinode_auto_discovery,
+        test_multinode_auto_discovery_with_wait_for_ready,
         test_disco_add_table,
         test_locally,
         handle_down_is_called,
@@ -715,6 +716,27 @@ test_multinode_auto_discovery(Config) ->
     cets_test_wait:wait_until(fun() -> other_nodes(Node1, Tab) end, [Node2]),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
+    #{verify_ready := []} =
+        cets_discovery:system_info(Disco),
+    ok.
+
+test_multinode_auto_discovery_with_wait_for_ready(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco.txt"),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco),
+    #{verify_ready := []} =
+        cets_discovery:system_info(Disco),
     ok.
 
 test_disco_add_table(Config) ->

@@ -3,7 +3,7 @@
 -module(cets_discovery).
 -behaviour(gen_server).
 
--export([start/1, start_link/1, add_table/2, info/1]).
+-export([start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2]).
 -export([
     init/1,
     handle_call/3,
@@ -13,7 +13,9 @@
     code_change/3
 ]).
 
--ignore_xref([start/1, start_link/1, add_table/2, info/1, behaviour_info/1]).
+-ignore_xref([
+    start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2, behaviour_info/1
+]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -26,14 +28,18 @@
 -type state() :: #{
     results := [term()],
     nodes := [node()],
+    %% The nodes that returned pang, sorted
+    unavailable_nodes := [node()],
     tables := [atom()],
     backend_module := module(),
     backend_state := state(),
     get_nodes_status := not_running | running,
     should_retry_get_nodes := boolean(),
+    last_get_nodes_result := not_called_yet | get_nodes_result(),
     join_status := not_running | running,
     should_retry_join := boolean(),
-    timer_ref := reference() | undefined
+    timer_ref := reference() | undefined,
+    pending_wait_for_ready := [gen_server:from()]
 }.
 
 %% Backend could define its own options
@@ -75,6 +81,16 @@ info(Server) ->
     {ok, Tables} = get_tables(Server),
     [cets:info(Tab) || Tab <- Tables].
 
+system_info(Server) ->
+    gen_server:call(Server, system_info).
+
+%% This calls blocks until the initial discovery is done
+%% It also waits till the data is loaded from the remote nodes
+wait_for_ready(Server, Timeout) ->
+    F = fun() -> gen_server:call(Server, wait_for_ready, Timeout) end,
+    Info = #{task => cets_wait_for_ready},
+    cets_long:run_tracked(Info, F).
+
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
     %% Sends nodeup / nodedown
@@ -86,19 +102,26 @@ init(Opts) ->
     {ok, #{
         results => [],
         nodes => [],
+        unavailable_nodes => [],
         tables => Tables,
         backend_module => Mod,
         backend_state => BackendState,
         get_nodes_status => not_running,
         should_retry_get_nodes => false,
+        last_get_nodes_result => not_called_yet,
         join_status => not_running,
         should_retry_join => false,
-        timer_ref => undefined
+        timer_ref => undefined,
+        pending_wait_for_ready => []
     }}.
 
--spec handle_call(term(), from(), state()) -> {reply, term(), state()}.
+-spec handle_call(term(), from(), state()) -> {reply, term(), state()} | {noreply, state()}.
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
     {reply, {ok, Tables}, State};
+handle_call(system_info, _From, State) ->
+    {reply, handle_system_info(State), State};
+handle_call(wait_for_ready, From, State = #{pending_wait_for_ready := Pending}) ->
+    {noreply, trigger_verify_ready(State#{pending_wait_for_ready := [From | Pending]})};
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -120,14 +143,17 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info(check, State) ->
     {noreply, handle_check(State)};
-handle_info({handle_check_result, Res, BackendState}, State) ->
-    {noreply, handle_get_nodes_result(Res, BackendState, State)};
-handle_info({nodeup, _Node}, State) ->
-    {noreply, try_joining(State)};
+handle_info({handle_check_result, Result, BackendState}, State) ->
+    {noreply, handle_get_nodes_result(Result, BackendState, State)};
+handle_info({nodeup, Node}, State) ->
+    State2 = remove_node_from_unavailable_list(Node, State),
+    {noreply, try_joining(State2)};
 handle_info({nodedown, _Node}, State) ->
     {noreply, State};
 handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
+handle_info({ping_result, Node, Result}, State) ->
+    {noreply, handle_ping_result(Node, Result, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -149,15 +175,21 @@ handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
     spawn_link(fun() ->
         Info = #{task => cets_discovery_get_nodes, backend_module => Mod},
         F = fun() -> Mod:get_nodes(BackendState) end,
-        {Res, BackendState2} = cets_long:run_tracked(Info, F),
-        Self ! {handle_check_result, Res, BackendState2}
+        {Result, BackendState2} = cets_long:run_tracked(Info, F),
+        Self ! {handle_check_result, Result, BackendState2}
     end),
     State#{get_nodes_status := running}.
 
-handle_get_nodes_result(Res, BackendState, State) ->
-    State2 = State#{backend_state := BackendState, get_nodes_status := not_running},
-    State3 = set_nodes(Res, State2),
-    schedule_check(State3).
+-spec handle_get_nodes_result(Result, BackendState, State) -> State when
+    Result :: get_nodes_result(), BackendState :: backend_state(), State :: state().
+handle_get_nodes_result(Result, BackendState, State) ->
+    State2 = State#{
+        backend_state := BackendState,
+        get_nodes_status := not_running,
+        last_get_nodes_result := Result
+    },
+    State3 = set_nodes(Result, State2),
+    schedule_check(trigger_verify_ready(State3)).
 
 set_nodes({error, _Reason}, State) ->
     State;
@@ -188,18 +220,30 @@ try_joining(State = #{join_status := not_running, nodes := Nodes, tables := Tabl
 -spec handle_joining_finished(list(), state()) -> state().
 handle_joining_finished(Results, State = #{should_retry_join := Retry}) ->
     report_results(Results, State),
-    State2 = State#{results := Results},
+    State2 = trigger_verify_ready(State#{results := Results}),
     case Retry of
         true ->
             try_joining(State2);
         false ->
-            State
+            State2
     end.
 
 ping_not_connected_nodes(Nodes) ->
+    Self = self(),
     NotConNodes = Nodes -- [node() | nodes()],
-    [spawn(fun() -> net_adm:ping(Node) end) || Node <- lists:sort(NotConNodes)],
+    [
+        spawn(fun() -> Self ! {ping_result, Node, net_adm:ping(Node)} end)
+     || Node <- lists:sort(NotConNodes)
+    ],
     ok.
+
+handle_ping_result(Node, pang, State = #{unavailable_nodes := UnNodes}) ->
+    trigger_verify_ready(State#{unavailable_nodes := ordsets:add_element(Node, UnNodes)});
+handle_ping_result(_Node, pong, State) ->
+    State.
+
+remove_node_from_unavailable_list(Node, State = #{unavailable_nodes := UnNodes}) ->
+    State#{unavailable_nodes := ordsets:del_element(Node, UnNodes)}.
 
 schedule_check(State = #{should_retry_get_nodes := true, get_nodes_status := not_running}) ->
     %% Retry without any delay
@@ -242,3 +286,56 @@ report_results(Results, _State = #{results := OldResults}) ->
 
 report_result(Map) ->
     ?LOG_INFO(Map).
+
+trigger_verify_ready(State = #{pending_wait_for_ready := []}) ->
+    State;
+trigger_verify_ready(State = #{pending_wait_for_ready := [_ | _] = Pending}) ->
+    case verify_ready(State) of
+        [] ->
+            [gen_server:reply(From, ok) || From <- Pending],
+            State#{pending_wait_for_ready := []};
+        _ ->
+            State
+    end.
+
+%% Returns a list of missing initial tasks
+%% When the function returns [], the initial clustering is done
+%% (or at least we've tried once and finished all the async tasks)
+verify_ready(State) ->
+    verify_last_get_nodes_result_ok(State) ++
+        verify_done_waiting_for_pangs(State) ++
+        verify_tried_joining(State).
+
+-spec verify_last_get_nodes_result_ok(state()) ->
+    [{bad_last_get_nodes_result, {error, term()} | not_called_yet}].
+verify_last_get_nodes_result_ok(#{last_get_nodes_result := {ok, _}}) ->
+    [];
+verify_last_get_nodes_result_ok(#{last_get_nodes_result := Res}) ->
+    [{bad_last_get_nodes_result, Res}].
+
+verify_done_waiting_for_pangs(#{nodes := Nodes, unavailable_nodes := UnNodes}) ->
+    Expected = lists:sort(Nodes -- [node() | nodes()]),
+    case UnNodes of
+        Expected ->
+            [];
+        _ ->
+            [{still_waiting_for_pangs, Expected -- UnNodes}]
+    end.
+
+verify_tried_joining(State = #{nodes := Nodes, tables := Tables}) ->
+    AvailableNodes = nodes(),
+    NodesToJoin = [Node || Node <- Nodes, lists:member(Node, AvailableNodes)],
+    Missing = [
+        {Node, Table}
+     || Node <- NodesToJoin, Table <- Tables, not has_join_result_for(Node, Table, State)
+    ],
+    case Missing of
+        [] -> [];
+        _ -> [{waiting_for_join_result, Missing}]
+    end.
+
+has_join_result_for(Node, Table, #{results := Results}) ->
+    [] =/= [R || R = #{node := N, table := T} <- Results, N =:= Node, T =:= Table].
+
+handle_system_info(State) ->
+    State#{verify_ready => verify_ready(State)}.
