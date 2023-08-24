@@ -1,5 +1,28 @@
 %% @doc Node discovery logic
 %% Joins table together when a new node appears
+%%
+%% Things that make discovery logic harder:
+%% - A table list is dynamic (but eventually we add all the tables into it)
+%% - Creating Erlang distribution connection is async, but it net_kernel:ping/1 is blocking
+%% - net_kernel:ping/1 could block for unknown number of seconds
+%%   (but net_kernel default timeout is 7 seconds)
+%% - Resolving nodename could take a lot of time (5 seconds in tests).
+%%   It is unpredictable blocking.
+%% - join tables should be one by one to avoid OOM.
+%% - Backend:get_nodes/1 could take a long time.
+%% - cets_discovery:get_tables/1, cets_discovery:add_table/2 should be fast.
+%% - The most important net_kernel flags for us to consider are:
+%%   - dist_auto_connect=never
+%%   - connect_all
+%%   - prevent_overlapping_partitions
+%%   These flags change the way the discovery logic behaves.
+%%
+%% Retry logic considerations:
+%% - Backend:get_nodes/1 could return an error during startup, so we have to retry fast.
+%% - There are two periods of operation for this module:
+%%   - startup phase, usually first 5 minutes.
+%%   - regular operation phase, after the startup phase.
+%% - We don't need to check for the updated get_nodes too often in the regular operation phase.
 -module(cets_discovery).
 -behaviour(gen_server).
 
