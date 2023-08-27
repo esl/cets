@@ -60,6 +60,8 @@ cases() ->
         join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
         join_fails_because_pids_do_not_match_for_nodes_in_segment,
         join_fails_because_servers_overlap,
+        join_after_simulated_netsplit,
+        leader_op_after_simulated_netsplit,
         remote_ops_are_ignored_if_join_ref_does_not_match,
         join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
@@ -622,6 +624,26 @@ join_fails_because_servers_overlap(Config) ->
     set_other_servers(Pid2, [Pid3]),
     {error, check_do_not_overlap_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+
+join_after_simulated_netsplit(Config) ->
+    #{pids := [Pid1, Pid2, Pid3, Pid4]} = given_n_servers(Config, #{}, 4),
+    %% Join Pid1, Pid2, Pid3
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    simulate_netsplit(Pid1, Pid2),
+    %% We could detect this condition and notify other nodes about the local netsplit.
+    %% By default, global module would prevent overlapping partitions on its own.
+    {error, check_fully_connected_failed} =
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid4).
+
+leader_op_after_simulated_netsplit(Config) ->
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
+    %% Join Pid1, Pid2, Pid3
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    simulate_netsplit(Pid1, Pid3),
+    %% This would send the operation to Pid2
+    cets:insert_new(Pid1, {alice, 32}).
 
 remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
     {ok, Pid1} = start_local(make_name(Config, 1)),
@@ -1448,10 +1470,18 @@ given_3_servers(Config) ->
     given_3_servers(Config, #{}).
 
 given_3_servers(Config, Opts) ->
-    {ok, Pid1} = start_local(T1 = make_name(Config, 1), Opts),
-    {ok, Pid2} = start_local(T2 = make_name(Config, 2), Opts),
-    {ok, Pid3} = start_local(T3 = make_name(Config, 3), Opts),
-    #{pids => [Pid1, Pid2, Pid3], tabs => [T1, T2, T3]}.
+    given_n_servers(Config, Opts, 3).
+
+given_n_servers(Config, Opts, N) ->
+    Tabs = [make_name(Config, Num) || Num <- lists:seq(1, N)],
+    Pids = [
+        begin
+            {ok, Pid} = start_local(T, Opts),
+            Pid
+        end
+     || T <- Tabs
+    ],
+    #{pids => Pids, tabs => Tabs}.
 
 stopped_pid() ->
     %% Get a pid for a stopped process
@@ -1480,3 +1510,11 @@ not_leader(Leader, Other, Leader) ->
     Other;
 not_leader(Other, Leader, Leader) ->
     Other.
+
+simulate_netsplit(Pid1, Pid2) ->
+    simulate_netsplit_one_way(Pid1, Pid2),
+    simulate_netsplit_one_way(Pid2, Pid1).
+
+simulate_netsplit_one_way(Pid2, Pid1) ->
+    Pid1 ! {'DOWN', make_ref(), process, Pid2, sim_netsplit},
+    ok.
