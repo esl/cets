@@ -65,7 +65,8 @@ cases() ->
         test_disco_handles_bad_node,
         cets_discovery_fun_backend_works,
         test_disco_add_table_twice,
-        test_disco_add_table_two_tables,
+        test_disco_add_two_tables,
+        disco_retried_if_get_nodes_fail,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -805,7 +806,7 @@ test_disco_add_table_twice(Config) ->
     %% Check that everything is fine
     #{tables := [Tab]} = cets_discovery:system_info(Disco).
 
-test_disco_add_table_two_tables(Config) ->
+test_disco_add_two_tables(Config) ->
     Node1 = node(),
     [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
     Tab1 = make_name(Config, 1),
@@ -845,6 +846,23 @@ test_disco_add_table_two_tables(Config) ->
         #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab2}
     ] =
         cets_discovery:info(Disco),
+    ok.
+
+disco_retried_if_get_nodes_fail(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) ->
+        {{error, simulate_error}, State}
+    end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
+        after_error
+    ),
     ok.
 
 test_locally(Config) ->

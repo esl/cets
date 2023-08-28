@@ -44,11 +44,13 @@
 
 -type backend_state() :: term().
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
+-type retry_type() :: initial | after_error | regular.
 
 -export_type([get_nodes_result/0]).
 
 -type from() :: {pid(), reference()}.
 -type state() :: #{
+    phase := initial | regular,
     results := [term()],
     nodes := [node()],
     %% The nodes that returned pang, sorted
@@ -59,6 +61,7 @@
     get_nodes_status := not_running | running,
     should_retry_get_nodes := boolean(),
     last_get_nodes_result := not_called_yet | get_nodes_result(),
+    last_get_nodes_retry_type := retry_type(),
     join_status := not_running | running,
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
@@ -122,7 +125,10 @@ init(Opts) ->
     self() ! check,
     Tables = maps:get(tables, Opts, []),
     BackendState = Mod:init(Opts),
+    %% Changes phase from initial to regular (affects the check interval)
+    erlang:send_after(timer:minutes(5), self(), enter_regular_phase),
     {ok, #{
+        phase => inital,
         results => [],
         nodes => [],
         unavailable_nodes => [],
@@ -132,6 +138,7 @@ init(Opts) ->
         get_nodes_status => not_running,
         should_retry_get_nodes => false,
         last_get_nodes_result => not_called_yet,
+        last_get_nodes_retry_type => initial,
         join_status => not_running,
         should_retry_join => false,
         timer_ref => undefined,
@@ -177,6 +184,8 @@ handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
 handle_info({ping_result, Node, Result}, State) ->
     {noreply, handle_ping_result(Node, Result, State)};
+handle_info(enter_regular_phase, State) ->
+    {noreply, State#{phase := regular}};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -190,7 +199,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_check(state()) -> state().
 handle_check(State = #{tables := []}) ->
     %% No tables to track, skip
-    schedule_check(State);
+    State;
 handle_check(State = #{get_nodes_status := running}) ->
     State#{should_retry_get_nodes := true};
 handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
@@ -274,8 +283,23 @@ schedule_check(State = #{should_retry_get_nodes := true, get_nodes_status := not
     State#{should_retry_get_nodes := false};
 schedule_check(State) ->
     cancel_old_timer(State),
-    TimerRef = erlang:send_after(5000, self(), check),
-    State#{timer_ref := TimerRef}.
+    RetryType = choose_retry_type(State),
+    RetryTimeout = retry_type_to_timeout(RetryType),
+    TimerRef = erlang:send_after(RetryTimeout, self(), check),
+    State#{timer_ref := TimerRef, last_get_nodes_retry_type := RetryType}.
+
+-spec choose_retry_type(state()) -> retry_type().
+choose_retry_type(#{last_get_nodes_result := {error, _}}) ->
+    after_error;
+choose_retry_type(#{phase := initial}) ->
+    initial;
+choose_retry_type(_) ->
+    regular.
+
+-spec retry_type_to_timeout(retry_type()) -> non_neg_integer().
+retry_type_to_timeout(initial) -> 5000;
+retry_type_to_timeout(after_error) -> 1000;
+retry_type_to_timeout(regular) -> 180000.
 
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
     %% Match result to prevent from Dialyzer warning
