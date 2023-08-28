@@ -62,6 +62,7 @@ cases() ->
         test_multinode_auto_discovery,
         test_multinode_auto_discovery_with_wait_for_ready,
         test_disco_add_table,
+        test_disco_handles_bad_node,
         test_disco_add_table_twice,
         test_locally,
         handle_down_is_called,
@@ -757,6 +758,26 @@ test_disco_add_table(Config) ->
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.
+
+test_disco_handles_bad_node(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco_badnode.txt"),
+    ok = file:write_file(FileName, io_lib:format("badnode@localhost~n~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    cets_discovery:add_table(Disco, Tab),
+    %% Check that wait_for_ready would not block forever:
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    %% Check if the node sent pang:
+    #{unavailable_nodes := ['badnode@localhost']} = cets_discovery:system_info(Disco),
+    %% Check that other nodes are discovered fine
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco).
 
 test_disco_add_table_twice(Config) ->
     Dir = proplists:get_value(priv_dir, Config),
