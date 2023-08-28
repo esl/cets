@@ -62,6 +62,7 @@ cases() ->
         test_multinode_auto_discovery,
         test_multinode_auto_discovery_with_wait_for_ready,
         test_disco_add_table,
+        test_disco_add_table_twice,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -756,6 +757,16 @@ test_disco_add_table(Config) ->
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.
+
+test_disco_add_table_twice(Config) ->
+    Dir = proplists:get_value(priv_dir, Config),
+    FileName = filename:join(Dir, "disco.txt"),
+    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    Tab = make_name(Config),
+    {ok, _Pid} = start_local(Tab),
+    cets_discovery:add_table(Disco, Tab),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco).
 
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
