@@ -156,7 +156,7 @@ handle_cast({add_table, Table}, State = #{tables := Tables}) ->
             {noreply, State};
         false ->
             self() ! check,
-            State2 = State#{tables := [Table | Tables]},
+            State2 = State#{tables := ordsets:add_element(Table, Tables)},
             {noreply, State2}
     end;
 handle_cast(Msg, State) ->
@@ -243,7 +243,7 @@ try_joining(State = #{join_status := not_running, nodes := Nodes, tables := Tabl
 -spec handle_joining_finished(list(), state()) -> state().
 handle_joining_finished(Results, State = #{should_retry_join := Retry}) ->
     report_results(Results, State),
-    State2 = trigger_verify_ready(State#{results := Results}),
+    State2 = trigger_verify_ready(State#{results := Results, join_status := not_running}),
     case Retry of
         true ->
             try_joining(State2);

@@ -63,7 +63,9 @@ cases() ->
         test_multinode_auto_discovery_with_wait_for_ready,
         test_disco_add_table,
         test_disco_handles_bad_node,
+        cets_discovery_fun_backend_works,
         test_disco_add_table_twice,
+        test_disco_add_table_two_tables,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -779,6 +781,19 @@ test_disco_handles_bad_node(Config) ->
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco).
 
+cets_discovery_fun_backend_works(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco).
+
 test_disco_add_table_twice(Config) ->
     Dir = proplists:get_value(priv_dir, Config),
     FileName = filename:join(Dir, "disco.txt"),
@@ -787,7 +802,50 @@ test_disco_add_table_twice(Config) ->
     {ok, _Pid} = start_local(Tab),
     cets_discovery:add_table(Disco, Tab),
     cets_discovery:add_table(Disco, Tab),
+    %% Check that everything is fine
     #{tables := [Tab]} = cets_discovery:system_info(Disco).
+
+test_disco_add_table_two_tables(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, _} = start(Node1, Tab1),
+    {ok, _} = start(Node2, Tab1),
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab2),
+    Me = self(),
+    F = fun
+        (State = #{waited := true}) ->
+            Me ! called_after_waited,
+            {{ok, [Node1, Node2]}, State};
+        (State) ->
+            wait_till_test_stage(Me, sent_both),
+            Me ! waited_for_sent_both,
+            {{ok, [Node1, Node2]}, State#{waited => true}}
+    end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    %% Add two tables async
+    cets_discovery:add_table(Disco, Tab1),
+    %% After the first table, Disco would get blocked in get_nodes function (see wait_till_test_stage in F above)
+    cets_discovery:add_table(Disco, Tab2),
+    put(test_stage, sent_both),
+    %% Just ensure wait_till_test_stage function works:
+    wait_till_test_stage(Me, sent_both),
+    %% First check is done, the second check should be triggered asap
+    %% (i.e. because of should_retry_get_nodes=true set in state)
+    receive_message(waited_for_sent_both),
+    %% try_joining would be called after set_nodes,
+    %% but it is async, so wait until it is done:
+    cets_test_wait:wait_until(
+        fun() -> maps:get(join_status, cets_discovery:system_info(Disco)) end, not_running
+    ),
+    [
+        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab1},
+        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab2}
+    ] =
+        cets_discovery:info(Disco),
+    ok.
 
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
@@ -1208,3 +1266,10 @@ stopped_pid() ->
     receive
         {'DOWN', Mon, process, Pid, _Reason} -> ok
     end.
+
+get_pd(Pid, Key) ->
+    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
+    proplists:get_value(Key, Dict).
+
+wait_till_test_stage(Pid, Stage) ->
+    cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
