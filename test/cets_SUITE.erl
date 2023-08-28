@@ -67,6 +67,7 @@ cases() ->
         test_disco_add_table_twice,
         test_disco_add_two_tables,
         disco_retried_if_get_nodes_fail,
+        disco_uses_regular_retry_interval_in_the_regular_phase,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -864,6 +865,21 @@ disco_retried_if_get_nodes_fail(Config) ->
         after_error
     ),
     ok.
+
+disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Disco ! enter_regular_phase,
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end, regular
+    ),
+    #{phase := regular} = cets_discovery:system_info(Disco).
 
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),

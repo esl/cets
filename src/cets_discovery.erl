@@ -128,7 +128,7 @@ init(Opts) ->
     %% Changes phase from initial to regular (affects the check interval)
     erlang:send_after(timer:minutes(5), self(), enter_regular_phase),
     {ok, #{
-        phase => inital,
+        phase => initial,
         results => [],
         nodes => [],
         unavailable_nodes => [],
