@@ -68,6 +68,7 @@ cases() ->
         node_list_is_correct,
         test_multinode_auto_discovery,
         test_disco_add_table,
+        test_disco_file_appears,
         test_disco_handles_bad_node,
         cets_discovery_fun_backend_works,
         test_disco_add_table_twice,
@@ -779,6 +780,30 @@ test_disco_add_table(Config) ->
         cets_discovery:info(Disco),
     ok.
 
+test_disco_file_appears(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco3.txt"),
+    file:delete(FileName),
+    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
+        after_error
+    ),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    %% Disco is async, so we have to wait for the final state
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco),
+    ok.
+
 test_disco_handles_bad_node(Config) ->
     Node1 = node(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
@@ -1183,10 +1208,9 @@ unknown_call_returns_error_from_ack_process(Config) ->
 
 code_change_returns_ok(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
-    #{ack_pid := AckPid} = cets:info(Pid),
-    sys:suspend(AckPid),
-    ok = sys:change_code(AckPid, cets, v2, []),
-    sys:resume(AckPid).
+    sys:suspend(Pid),
+    ok = sys:change_code(Pid, cets, v2, []),
+    sys:resume(Pid).
 
 code_change_returns_ok_for_ack(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
