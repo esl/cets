@@ -107,6 +107,7 @@ cases() ->
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
         run_spawn_forwards_errors,
+        run_tracked_failed,
         long_call_to_unknown_name_throws_pid_not_found,
         send_leader_op_throws_noproc
     ].
@@ -1223,6 +1224,16 @@ run_spawn_forwards_errors(_Config) ->
     matched =
         try
             cets_long:run_spawn(#{}, fun() -> error(oops) end)
+        catch
+            error:oops ->
+                matched
+        end.
+
+run_tracked_failed(Config) ->
+    matched =
+        try
+            F = fun() -> error(oops) end,
+            cets_long:run_tracked(#{}, F)
         catch
             error:oops ->
                 matched
