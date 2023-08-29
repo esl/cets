@@ -105,10 +105,13 @@ cases() ->
     ].
 
 init_per_suite(Config) ->
-    Node2 = start_node(ct2),
-    Node3 = start_node(ct3),
-    Node4 = start_node(ct4),
-    [{nodes, [Node2, Node3, Node4]} | Config].
+    Names = [ct2, ct3, ct4],
+    {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
+    [
+        {nodes, maps:from_list(lists:zip(Names, Nodes))},
+        {peers, maps:from_list(lists:zip(Names, Peers))}
+        | Config
+    ].
 
 end_per_suite(Config) ->
     Config.
@@ -641,7 +644,7 @@ send_dump_contains_already_added_servers(Config) ->
 
 test_multinode(Config) ->
     Node1 = node(),
-    [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(peers, Config),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
@@ -681,7 +684,7 @@ test_multinode(Config) ->
 
 test_multinode_remote_insert(Config) ->
     Tab = make_name(Config),
-    [Node2, Node3 | _] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
     {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
     ok = join(Node2, Tab, Pid2, Pid3),
@@ -693,7 +696,7 @@ test_multinode_remote_insert(Config) ->
 
 node_list_is_correct(Config) ->
     Node1 = node(),
-    [Node2, Node3, Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
@@ -710,7 +713,7 @@ node_list_is_correct(Config) ->
 
 test_multinode_auto_discovery(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
@@ -729,7 +732,7 @@ test_multinode_auto_discovery(Config) ->
 
 test_multinode_auto_discovery_with_wait_for_ready(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
@@ -748,7 +751,7 @@ test_multinode_auto_discovery_with_wait_for_ready(Config) ->
 
 test_disco_add_table(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
@@ -766,7 +769,7 @@ test_disco_add_table(Config) ->
 
 test_disco_handles_bad_node(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
@@ -786,7 +789,7 @@ test_disco_handles_bad_node(Config) ->
 
 cets_discovery_fun_backend_works(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
@@ -810,7 +813,7 @@ test_disco_add_table_twice(Config) ->
 
 test_disco_add_two_tables(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab1 = make_name(Config, 1),
     Tab2 = make_name(Config, 2),
     {ok, _} = start(Node1, Tab1),
@@ -853,7 +856,7 @@ test_disco_add_two_tables(Config) ->
 
 disco_retried_if_get_nodes_fail(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
@@ -870,7 +873,7 @@ disco_retried_if_get_nodes_fail(Config) ->
 
 disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
@@ -886,7 +889,7 @@ disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
 disco_handles_node_up_and_down(Config) ->
     BadNode = 'badnode@localhost',
     Node1 = node(),
-    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
@@ -1249,7 +1252,15 @@ other_nodes(Node, Tab) ->
 join(Node1, Tab, Pid1, Pid2) ->
     rpc(Node1, cets_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
 
-rpc(Node, M, F, Args) ->
+%% Apply function using rpc or peer module
+rpc(Peer, M, F, Args) when is_pid(Peer) ->
+    case peer:call(Peer, M, F, Args) of
+        {badrpc, Error} ->
+            ct:fail({badrpc, Error});
+        Other ->
+            Other
+    end;
+rpc(Node, M, F, Args) when is_atom(Node) ->
     case rpc:call(Node, M, F, Args) of
         {badrpc, Error} ->
             ct:fail({badrpc, Error});
@@ -1258,9 +1269,10 @@ rpc(Node, M, F, Args) ->
     end.
 
 start_node(Sname) ->
-    {ok, _Peer, Node} = peer:start(#{name => Sname}),
-    ok = rpc:call(Node, code, add_paths, [code:get_path()]),
-    Node.
+    {ok, Peer, Node} = peer:start(#{name => Sname, connection => standard_io}),
+    %% Do RPC using alternative connection method
+    ok = peer:call(Peer, code, add_paths, [code:get_path()]),
+    {Node, Peer}.
 
 receive_message(M) ->
     receive

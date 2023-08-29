@@ -15,7 +15,8 @@
 %%   - dist_auto_connect=never
 %%   - connect_all
 %%   - prevent_overlapping_partitions
-%%   These flags change the way the discovery logic behaves.
+%% These flags change the way the discovery logic behaves.
+%% Also the module would not try to connect to the hidden nodes.
 %%
 %% Retry logic considerations:
 %% - Backend:get_nodes/1 could return an error during startup, so we have to retry fast.
