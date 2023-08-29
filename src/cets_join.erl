@@ -201,8 +201,8 @@ check_do_not_overlap(LocPids, RemPids) ->
         Overlap ->
             ?LOG_ERROR(#{
                 what => check_do_not_overlap_failed,
-                local_servers => LocPids,
-                remote_servers => RemPids,
+                local_servers => LocSet,
+                remote_servers => RemSet,
                 overlapped_servers => Overlap
             }),
             error(check_do_not_overlap_failed)

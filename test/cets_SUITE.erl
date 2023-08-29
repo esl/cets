@@ -8,13 +8,19 @@ all() ->
         {group, cets},
         %% To improve the code coverage we need to test with logging disabled
         %% More info: https://github.com/erlang/otp/issues/7531
-        {group, cets_no_log}
+        {group, cets_no_log},
+        {group, cets_seq}
     ].
 
 groups() ->
     [
         {cets, [parallel, {repeat_until_any_fail, 3}], cases()},
-        {cets_no_log, [parallel], cases()}
+        {cets_no_log, [parallel], cases()},
+        %% These tests actually simulate a netsplit on the distribution level.
+        %% Though, global's prevent_overlapping_partitions option starts kicking
+        %% all nodes from the cluster, so we have to be careful not to break other cases.
+        %% Setting prevent_overlapping_partitions=false on ct5 helps.
+        {cets_seq, [sequence], seq_cases()}
     ].
 
 cases() ->
@@ -37,6 +43,7 @@ cases() ->
         insert_new_works_when_leader_is_back,
         insert_new_when_new_leader_has_joined,
         insert_new_when_new_leader_has_joined_duplicate,
+        insert_new_when_inconsistent_minimal,
         insert_new_when_inconsistent,
         insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
@@ -60,7 +67,6 @@ cases() ->
         test_multinode_remote_insert,
         node_list_is_correct,
         test_multinode_auto_discovery,
-        test_multinode_auto_discovery_with_wait_for_ready,
         test_disco_add_table,
         test_disco_handles_bad_node,
         cets_discovery_fun_backend_works,
@@ -104,8 +110,14 @@ cases() ->
         send_leader_op_throws_noproc
     ].
 
+seq_cases() ->
+    [
+        insert_returns_when_netsplit,
+        inserts_after_netsplit_reconnects
+    ].
+
 init_per_suite(Config) ->
-    Names = [ct2, ct3, ct4],
+    Names = [ct2, ct3, ct4, ct5],
     {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
@@ -200,17 +212,18 @@ insert_new_works_with_table_name(Config) ->
 insert_new_works_when_leader_is_back(Config) ->
     #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     Leader = cets:get_leader(Pid1),
-    %% Highest Pid is the leader:
-    Pid2 = Leader,
+    NotLeader = not_leader(Pid1, Pid2, Leader),
     cets:set_leader(Leader, false),
     spawn(fun() ->
         timer:sleep(100),
         cets:set_leader(Leader, true)
     end),
-    true = cets:insert_new(Pid1, {alice, 32}).
+    true = cets:insert_new(NotLeader, {alice, 32}).
 
 insert_new_when_new_leader_has_joined(Config) ->
-    #{pids := [Pid1, Pid2, Pid3], tabs := [T1, T2, T3]} = given_3_servers(Config),
+    #{pids := Pids, tabs := Tabs} = given_3_servers(Config),
+    %% Processes do not always start in order (i.e. sort them now)
+    [Pid1, Pid2, Pid3] = lists:sort(Pids),
     %% Join first network segment
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% Pause insert into the first segment
@@ -224,11 +237,13 @@ insert_new_when_new_leader_has_joined(Config) ->
     %% Inserted by Pid3
     true = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 32}],
-    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+    [Res = cets:dump(T) || T <- Tabs].
 
 %% Checks that the handle_wrong_leader is called
 insert_new_when_new_leader_has_joined_duplicate(Config) ->
-    #{pids := [Pid1, Pid2, Pid3], tabs := [T1, T2, T3]} = given_3_servers(Config),
+    #{pids := Pids, tabs := Tabs} = given_3_servers(Config),
+    %% Processes do not always start in order (i.e. sort them now)
+    [Pid1, Pid2, Pid3] = lists:sort(Pids),
     %% Join first network segment
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     %% Put record into the second network segment
@@ -244,39 +259,52 @@ insert_new_when_new_leader_has_joined_duplicate(Config) ->
     %% Checked and ignored by Pid3
     false = cets:insert_new(Pid1, {alice, 32}),
     Res = [{alice, 33}],
-    [Res = cets:dump(T) || T <- [T1, T2, T3]].
+    [Res = cets:dump(T) || T <- Tabs].
+
+insert_new_when_inconsistent_minimal(Config) ->
+    #{pids := [Pid1, _Pid2]} = given_two_joined_tables(Config),
+    true = cets:insert_new(Pid1, {alice, 33}),
+    false = cets:insert_new(Pid1, {alice, 55}).
 
 %% Rare case when tables contain different data
 %% (the developer should try to avoid the manual removal of data if possible)
 insert_new_when_inconsistent(Config) ->
-    #{tabs := [T1, T2], pids := [Pid1, Pid2]} = given_two_joined_tables(Config),
-    true = cets:insert_new(Pid1, {alice, 33}),
-    true = cets:insert_new(Pid2, {bob, 40}),
+    #{pids := [Pid1, Pid2]} = given_two_joined_tables(Config),
+    Leader = cets:get_leader(Pid1),
+    NotLeader = not_leader(Pid1, Pid2, Leader),
+    {ok, LeaderTab} = cets:table_name(Leader),
+    {ok, NotLeaderTab} = cets:table_name(NotLeader),
+    true = cets:insert_new(NotLeader, {alice, 33}),
+    true = cets:insert_new(Leader, {bob, 40}),
     %% Introduce inconsistency
-    ets:delete(T1, alice),
-    ets:delete(T2, bob),
-    false = cets:insert_new(Pid1, {alice, 55}),
-    true = cets:insert_new(Pid2, {bob, 66}),
-    [{bob, 40}] = cets:dump(T1),
-    [{alice, 33}, {bob, 66}] = cets:dump(T2).
+    ets:delete(NotLeaderTab, alice),
+    ets:delete(LeaderTab, bob),
+    false = cets:insert_new(NotLeader, {alice, 55}),
+    true = cets:insert_new(Leader, {bob, 66}),
+    [{bob, 40}] = cets:dump(NotLeaderTab),
+    [{alice, 33}, {bob, 66}] = cets:dump(LeaderTab).
 
 insert_new_is_retried_when_leader_is_reelected(Config) ->
     Me = self(),
-    F = fun(X) -> Me ! {wrong_leader_detected, X} end,
-    {ok, Pid1} = start_local(make_name(Config, 1), #{}),
+    F = fun(X) ->
+        put(test_stage, detected),
+        Me ! {wrong_leader_detected, X}
+    end,
+    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_wrong_leader => F}),
     {ok, Pid2} = start_local(make_name(Config, 2), #{handle_wrong_leader => F}),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     Leader = cets:get_leader(Pid1),
+    NotLeader = not_leader(Pid1, Pid2, Leader),
     %% Ask process to reject all the leader operations
     cets:set_leader(Leader, false),
-    spawn(fun() ->
-        timer:sleep(100),
+    spawn_link(fun() ->
+        wait_till_test_stage(Leader, detected),
         %% Fix the leader, so it can process our insert_new call
         cets:set_leader(Leader, true)
     end),
     %% This function would block, because Leader process would reject the operation
     %% Until we call cets:set_leader(Leader, true)
-    true = cets:insert_new(Pid1, {alice, 32}),
+    true = cets:insert_new(NotLeader, {alice, 32}),
     %% Check that we actually use retry logic
     %% Check that handle_wrong_leader callback function is called at least once
     receive
@@ -723,24 +751,6 @@ test_multinode_auto_discovery(Config) ->
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
     %% Disco is async, so we have to wait for the final state
-    cets_test_wait:wait_until(fun() -> other_nodes(Node1, Tab) end, [Node2]),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco),
-    #{verify_ready := []} =
-        cets_discovery:system_info(Disco),
-    ok.
-
-test_multinode_auto_discovery_with_wait_for_ready(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    Dir = proplists:get_value(priv_dir, Config),
-    ct:pal("Dir ~p", [Dir]),
-    FileName = filename:join(Dir, "disco.txt"),
-    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
     ok = cets_discovery:wait_for_ready(Disco, 5000),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
@@ -762,7 +772,8 @@ test_disco_add_table(Config) ->
     {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     %% Disco is async, so we have to wait for the final state
-    cets_test_wait:wait_until(fun() -> other_nodes(Node1, Tab) end, [Node2]),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
     ok.
@@ -844,8 +855,18 @@ test_disco_add_two_tables(Config) ->
     %% try_joining would be called after set_nodes,
     %% but it is async, so wait until it is done:
     cets_test_wait:wait_until(
-        fun() -> maps:with([join_status, should_retry_join], cets_discovery:system_info(Disco)) end,
-        #{join_status => not_running, should_retry_join => false}
+        fun() ->
+            maps:with(
+                [get_nodes_status, should_retry_get_nodes, join_status, should_retry_join],
+                cets_discovery:system_info(Disco)
+            )
+        end,
+        #{
+            get_nodes_status => not_running,
+            should_retry_get_nodes => false,
+            join_status => not_running,
+            should_retry_join => false
+        }
     ),
     [
         #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab1},
@@ -1200,6 +1221,45 @@ send_leader_op_throws_noproc(_Config) ->
                 matched
         end.
 
+insert_returns_when_netsplit(Config) ->
+    #{ct5 := Node2} = proplists:get_value(peers, Config),
+    Node1 = node(),
+    Tab = ns_tab,
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    ok = cets_join:join(join_lock_ns, #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R = cets:insert_request(Tab, {1, test}),
+    block_node(Node2),
+    try
+        {reply, ok} = cets:wait_response(R, 5000)
+    after
+        reconnect_node(Node2)
+    end.
+
+inserts_after_netsplit_reconnects(Config) ->
+    %% test with ct5 node
+    #{ct5 := Node2} = proplists:get_value(peers, Config),
+    Node1 = node(),
+    Tab = ns_re_tab,
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    ok = cets_join:join(join_lock_ns_re, #{}, Pid1, Pid2),
+    sys:suspend(Pid2),
+    R = cets:insert_request(Tab, {1, v1}),
+    block_node(Node2),
+    try
+        {reply, ok} = cets:wait_response(R, 5000)
+    after
+        reconnect_node(Node2)
+    end,
+    sys:resume(Pid2),
+    cets:insert(Pid1, {1, v2}),
+    cets:insert(Pid2, {1, v3}),
+    %% No automatic recovery
+    [{1, v2}] = dump(Node1, Tab),
+    [{1, v3}] = dump(Node2, Tab).
+
 %% Helper functions
 
 still_works(Pid) ->
@@ -1268,8 +1328,13 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
             Other
     end.
 
+extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
+extra_args(_) -> "".
+
 start_node(Sname) ->
-    {ok, Peer, Node} = peer:start(#{name => Sname, connection => standard_io}),
+    {ok, Peer, Node} = peer:start(#{
+        name => Sname, connection => standard_io, args => extra_args(Sname)
+    }),
     %% Do RPC using alternative connection method
     ok = peer:call(Peer, code, add_paths, [code:get_path()]),
     {Node, Peer}.
@@ -1344,3 +1409,18 @@ get_pd(Pid, Key) ->
 
 wait_till_test_stage(Pid, Stage) ->
     cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
+
+%% Disconnect node until manually connected
+block_node(Node) ->
+    rpc(Node, erlang, set_cookie, [invalid_cookie]),
+    rpc(Node, erlang, disconnect_node, [node()]),
+    ok.
+
+reconnect_node(Node) ->
+    rpc(Node, erlang, set_cookie, [erlang:get_cookie()]),
+    pong = rpc(Node, net_adm, ping, [node()]).
+
+not_leader(Leader, Other, Leader) ->
+    Other;
+not_leader(Other, Leader, Leader) ->
+    Other.
