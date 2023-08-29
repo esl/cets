@@ -179,6 +179,8 @@ handle_info({nodeup, Node}, State) ->
     State2 = remove_node_from_unavailable_list(Node, State),
     {noreply, try_joining(State2)};
 handle_info({nodedown, _Node}, State) ->
+    %% Do another check to update unavailable_nodes list
+    self() ! check,
     {noreply, State};
 handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
@@ -296,7 +298,10 @@ choose_retry_type(#{phase := initial}) ->
 choose_retry_type(_) ->
     regular.
 
--spec retry_type_to_timeout(retry_type()) -> non_neg_integer().
+%% Returns timeout in milliseconds to retry calling the get_nodes function.
+%% get_nodes is called after add_table without waiting.
+%% It is also would be retried without waiting if should_retry_get_nodes set to true.
+-spec retry_type_to_timeout(retry_type()) -> 5000 | 1000 | 180000.
 retry_type_to_timeout(initial) -> 5000;
 retry_type_to_timeout(after_error) -> 1000;
 retry_type_to_timeout(regular) -> 180000.

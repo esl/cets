@@ -68,6 +68,7 @@ cases() ->
         test_disco_add_two_tables,
         disco_retried_if_get_nodes_fail,
         disco_uses_regular_retry_interval_in_the_regular_phase,
+        disco_handles_node_up_and_down,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -840,7 +841,8 @@ test_disco_add_two_tables(Config) ->
     %% try_joining would be called after set_nodes,
     %% but it is async, so wait until it is done:
     cets_test_wait:wait_until(
-        fun() -> maps:get(join_status, cets_discovery:system_info(Disco)) end, not_running
+        fun() -> maps:with([join_status, should_retry_join], cets_discovery:system_info(Disco)) end,
+        #{join_status => not_running, should_retry_join => false}
     ),
     [
         #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab1},
@@ -880,6 +882,29 @@ disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
         fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end, regular
     ),
     #{phase := regular} = cets_discovery:system_info(Disco).
+
+disco_handles_node_up_and_down(Config) ->
+    BadNode = 'badnode@localhost',
+    Node1 = node(),
+    [Node2, _Node3, _Node4] = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2, BadNode]}, State}
+    end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    %% get_nodes call is async, so wait for it
+    cets_test_wait:wait_until(
+        fun() -> length(maps:get(nodes, cets_discovery:system_info(Disco))) end,
+        3
+    ),
+    Disco ! {nodeup, BadNode},
+    Disco ! {nodedown, BadNode},
+    %% Check that wait_for_ready still works
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok.
 
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
