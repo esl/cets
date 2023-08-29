@@ -50,9 +50,16 @@
 -export_type([get_nodes_result/0]).
 
 -type from() :: {pid(), reference()}.
+-type join_result() :: #{
+    node := node(),
+    table := atom(),
+    what := join_result | pid_not_found,
+    result => ok | {error, _},
+    reason => term()
+}.
 -type state() :: #{
     phase := initial | regular,
-    results := [term()],
+    results := [join_result()],
     nodes := [node()],
     %% The nodes that returned pang, sorted
     unavailable_nodes := [node()],
@@ -108,11 +115,13 @@ info(Server) ->
     {ok, Tables} = get_tables(Server),
     [cets:info(Tab) || Tab <- Tables].
 
+-spec system_info(server()) -> map().
 system_info(Server) ->
     gen_server:call(Server, system_info).
 
 %% This calls blocks until the initial discovery is done
 %% It also waits till the data is loaded from the remote nodes
+-spec wait_for_ready(server(), timeout()) -> ok.
 wait_for_ready(Server, Timeout) ->
     F = fun() -> gen_server:call(Server, wait_for_ready, Timeout) end,
     Info = #{task => cets_wait_for_ready},
@@ -226,6 +235,7 @@ handle_get_nodes_result(Result, BackendState, State) ->
     State3 = set_nodes(Result, State2),
     schedule_check(trigger_verify_ready(State3)).
 
+-spec set_nodes({error, term()} | {ok, [node()]}, state()) -> state().
 set_nodes({error, _Reason}, State) ->
     State;
 set_nodes({ok, Nodes}, State) ->
@@ -235,6 +245,7 @@ set_nodes({ok, Nodes}, State) ->
 %% Called when:
 %% - a list of connected nodes changes (i.e. nodes() call result)
 %% - a list of nodes is received from the discovery backend
+-spec try_joining(state()) -> state().
 try_joining(State = #{join_status := running}) ->
     State#{should_retry_join := true};
 try_joining(State = #{join_status := not_running, nodes := Nodes, tables := Tables}) ->
@@ -263,6 +274,7 @@ handle_joining_finished(Results, State = #{should_retry_join := Retry}) ->
             State2
     end.
 
+-spec ping_not_connected_nodes([node()]) -> ok.
 ping_not_connected_nodes(Nodes) ->
     Self = self(),
     NotConNodes = Nodes -- [node() | nodes()],
@@ -272,14 +284,17 @@ ping_not_connected_nodes(Nodes) ->
     ],
     ok.
 
+-spec handle_ping_result(node(), pong | pang, state()) -> state().
 handle_ping_result(Node, pang, State = #{unavailable_nodes := UnNodes}) ->
     trigger_verify_ready(State#{unavailable_nodes := ordsets:add_element(Node, UnNodes)});
 handle_ping_result(_Node, pong, State) ->
     State.
 
+-spec remove_node_from_unavailable_list(node(), state()) -> state().
 remove_node_from_unavailable_list(Node, State = #{unavailable_nodes := UnNodes}) ->
     State#{unavailable_nodes := ordsets:del_element(Node, UnNodes)}.
 
+-spec schedule_check(state()) -> state().
 schedule_check(State = #{should_retry_get_nodes := true, get_nodes_status := not_running}) ->
     %% Retry without any delay
     self() ! check,
@@ -307,6 +322,7 @@ retry_type_to_timeout(initial) -> 5000;
 retry_type_to_timeout(after_error) -> 1000;
 retry_type_to_timeout(regular) -> 180000.
 
+-spec cancel_old_timer(state()) -> ok.
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
     %% Match result to prevent from Dialyzer warning
     _ = erlang:cancel_timer(OldRef),
@@ -321,6 +337,7 @@ flush_all_checks() ->
     after 0 -> ok
     end.
 
+-spec do_join(atom(), node()) -> join_result().
 do_join(Tab, Node) ->
     LocalPid = whereis(Tab),
     %% That would trigger autoconnect for the first time
@@ -332,14 +349,17 @@ do_join(Tab, Node) ->
             #{what => pid_not_found, reason => Other, node => Node, table => Tab}
     end.
 
+-spec report_results([join_result()], state()) -> ok.
 report_results(Results, _State = #{results := OldResults}) ->
     Changed = Results -- OldResults,
     lists:foreach(fun report_result/1, Changed),
     ok.
 
+-spec report_result(join_result()) -> ok.
 report_result(Map) ->
     ?LOG_INFO(Map).
 
+-spec trigger_verify_ready(state()) -> state().
 trigger_verify_ready(State = #{pending_wait_for_ready := []}) ->
     State;
 trigger_verify_ready(State = #{pending_wait_for_ready := [_ | _] = Pending}) ->
@@ -354,6 +374,7 @@ trigger_verify_ready(State = #{pending_wait_for_ready := [_ | _] = Pending}) ->
 %% Returns a list of missing initial tasks
 %% When the function returns [], the initial clustering is done
 %% (or at least we've tried once and finished all the async tasks)
+-spec verify_ready(state()) -> list().
 verify_ready(State) ->
     verify_last_get_nodes_result_ok(State) ++
         verify_done_waiting_for_pangs(State) ++
@@ -366,6 +387,7 @@ verify_last_get_nodes_result_ok(#{last_get_nodes_result := {ok, _}}) ->
 verify_last_get_nodes_result_ok(#{last_get_nodes_result := Res}) ->
     [{bad_last_get_nodes_result, Res}].
 
+-spec verify_done_waiting_for_pangs(state()) -> [{still_waiting_for_pangs, [node()]}].
 verify_done_waiting_for_pangs(#{nodes := Nodes, unavailable_nodes := UnNodes}) ->
     Expected = lists:sort(Nodes -- [node() | nodes()]),
     case UnNodes of
@@ -375,6 +397,8 @@ verify_done_waiting_for_pangs(#{nodes := Nodes, unavailable_nodes := UnNodes}) -
             [{still_waiting_for_pangs, Expected -- UnNodes}]
     end.
 
+-spec verify_tried_joining(state()) ->
+    [{waiting_for_join_result, [{Node :: node(), Table :: atom()}]}].
 verify_tried_joining(State = #{nodes := Nodes, tables := Tables}) ->
     AvailableNodes = nodes(),
     NodesToJoin = [Node || Node <- Nodes, lists:member(Node, AvailableNodes)],
