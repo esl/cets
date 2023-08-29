@@ -113,7 +113,8 @@ cases() ->
 seq_cases() ->
     [
         insert_returns_when_netsplit,
-        inserts_after_netsplit_reconnects
+        inserts_after_netsplit_reconnects,
+        disco_connects_to_unconnected_node
     ].
 
 init_per_suite(Config) ->
@@ -1224,10 +1225,10 @@ send_leader_op_throws_noproc(_Config) ->
 insert_returns_when_netsplit(Config) ->
     #{ct5 := Node2} = proplists:get_value(peers, Config),
     Node1 = node(),
-    Tab = ns_tab,
+    Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
-    ok = cets_join:join(join_lock_ns, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     sys:suspend(Pid2),
     R = cets:insert_request(Tab, {1, test}),
     block_node(Node2),
@@ -1238,13 +1239,12 @@ insert_returns_when_netsplit(Config) ->
     end.
 
 inserts_after_netsplit_reconnects(Config) ->
-    %% test with ct5 node
     #{ct5 := Node2} = proplists:get_value(peers, Config),
     Node1 = node(),
-    Tab = ns_re_tab,
+    Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
-    ok = cets_join:join(join_lock_ns_re, #{}, Pid1, Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
     sys:suspend(Pid2),
     R = cets:insert_request(Tab, {1, v1}),
     block_node(Node2),
@@ -1259,6 +1259,25 @@ inserts_after_netsplit_reconnects(Config) ->
     %% No automatic recovery
     [{1, v2}] = dump(Node1, Tab),
     [{1, v3}] = dump(Node2, Tab).
+
+disco_connects_to_unconnected_node(Config) ->
+    Node1 = node(),
+    #{ct5 := Peer2} = proplists:get_value(peers, Config),
+    #{ct5 := Node2} = proplists:get_value(nodes, Config),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    cets_test_wait:wait_until(
+        fun() -> lists:member(Node2, nodes()) end,
+        false
+    ),
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000).
 
 %% Helper functions
 
