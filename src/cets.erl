@@ -109,12 +109,13 @@
 -type backlog_entry() :: {op(), from()}.
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
+-type servers() :: ordsets:ordset(server_pid()).
 -type state() :: #{
     tab := table_name(),
     ack_pid := ack_pid(),
     join_ref := join_ref(),
     %% Updated by set_other_servers/2 function only
-    other_servers := [server_pid()],
+    other_servers := servers(),
     leader := server_pid(),
     is_leader := boolean(),
     opts := start_opts(),
@@ -133,7 +134,7 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, [server_pid()], join_ref(), [tuple()]}.
+    | {send_dump, servers(), join_ref(), [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -157,7 +158,16 @@
 }.
 -type response_return() :: {reply, ok} | {error, term()} | timeout.
 
--export_type([request_id/0, op/0, server_pid/0, server_ref/0, long_msg/0, info/0, table_name/0]).
+-export_type([
+    request_id/0,
+    op/0,
+    server_pid/0,
+    server_ref/0,
+    long_msg/0,
+    info/0,
+    table_name/0,
+    servers/0
+]).
 
 %% API functions
 
@@ -203,7 +213,7 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), [server_pid()], join_ref(), [tuple()]) -> ok.
+-spec send_dump(server_ref(), servers(), join_ref(), [tuple()]) -> ok.
 send_dump(Server, NewPids, JoinRef, OurDump) ->
     Info = #{msg => send_dump, join_ref => JoinRef, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, NewPids, JoinRef, OurDump}, Info).
@@ -299,7 +309,7 @@ other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
 %% Get a list of other CETS processes that are handling this table.
--spec other_pids(server_ref()) -> [server_pid()].
+-spec other_pids(server_ref()) -> servers().
 other_pids(Server) ->
     cets_call:long_call(Server, other_servers).
 
@@ -423,7 +433,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
--spec handle_send_dump([server_pid()], join_ref(), [tuple()], state()) -> {reply, ok, state()}.
+-spec handle_send_dump(servers(), join_ref(), [tuple()], state()) -> {reply, ok, state()}.
 handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
@@ -462,7 +472,7 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
     end.
 
 %% Merge two lists of pids, create the missing monitors.
--spec add_servers(Servers, Servers) -> Servers when Servers :: [server_pid()].
+-spec add_servers(Servers, Servers) -> Servers when Servers :: servers().
 add_servers(Pids, Servers) ->
     %% Ignore ourself in the list
     %% Also filter out already added servers
@@ -485,7 +495,7 @@ add_servers(Pids, Servers) ->
     ordsets:union(NewServers, Servers).
 
 %% Sets other_servers field, chooses the leader
--spec set_other_servers([server_pid()], state()) -> state().
+-spec set_other_servers(servers(), state()) -> state().
 set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
     %% Choose process with highest pid.
     %% Uses total ordering of terms in Erlang

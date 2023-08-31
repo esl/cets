@@ -182,20 +182,20 @@ apply_resolver_for_sorted(
 apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) ->
     {lists:reverse(LocalAcc, LocalDump), lists:reverse(RemoteAcc, RemoteDump)}.
 
+-spec get_pids(server_pid()) -> cets:servers().
 get_pids(Pid) ->
-    [Pid | cets:other_pids(Pid)].
+    ordsets:add_element(Pid, cets:other_pids(Pid)).
 
+-spec check_pids(cets:servers(), cets:servers(), join_opts()) -> ok.
 check_pids(LocPids, RemPids, JoinOpts) ->
     check_do_not_overlap(LocPids, RemPids),
     checkpoint(before_check_fully_connected, JoinOpts),
     check_fully_connected(LocPids),
     check_fully_connected(RemPids).
 
--spec check_do_not_overlap([server_pid()], [server_pid()]) -> ok.
+-spec check_do_not_overlap(cets:servers(), cets:servers()) -> ok.
 check_do_not_overlap(LocPids, RemPids) ->
-    LocSet = ordsets:from_list(LocPids),
-    RemSet = ordsets:from_list(RemPids),
-    case ordsets:intersection(LocSet, RemSet) of
+    case ordsets:intersection(LocPids, RemPids) of
         [] ->
             ok;
         Overlap ->
@@ -210,40 +210,40 @@ check_do_not_overlap(LocPids, RemPids) ->
 
 %% Checks that other_pids lists match for all nodes
 %% If they are not matching - the node removal process could be in progress
--spec check_fully_connected([server_pid()]) -> ok.
+-spec check_fully_connected(cets:servers()) -> ok.
 check_fully_connected(Pids) ->
     Lists = [get_pids(Pid) || Pid <- Pids],
-    case are_fully_connected_lists([Pids | Lists]) of
-        true ->
+    case lists:usort([Pids | Lists]) of
+        [_] ->
             check_same_join_ref(Pids);
-        false ->
+        UniqueLists ->
             ?LOG_ERROR(#{
                 what => check_fully_connected_failed,
                 expected_pids => Pids,
-                server_lists => Lists
+                server_lists => Lists,
+                unique_lists => UniqueLists
             }),
             error(check_fully_connected_failed)
     end.
 
-%% Check that all elements of the list match (if sorted)
-are_fully_connected_lists(Lists) ->
-    length(lists:usort([lists:sort(List) || List <- Lists])) =:= 1.
-
 %% Check if all nodes have the same join_ref
 %% If not - we don't want to continue joining
+-spec check_same_join_ref(cets:servers()) -> ok.
 check_same_join_ref(Pids) ->
     Refs = [pid_to_join_ref(Pid) || Pid <- Pids],
     case lists:usort(Refs) of
         [_] ->
             ok;
-        _ ->
+        UniqueRefs ->
             ?LOG_ERROR(#{
                 what => check_same_join_ref_failed,
-                refs => lists:zip(Pids, Refs)
+                refs => lists:zip(Pids, Refs),
+                unique_refs => UniqueRefs
             }),
             error(check_same_join_ref_failed)
     end.
 
+-spec pid_to_join_ref(server_pid()) -> join_ref().
 pid_to_join_ref(Pid) ->
     #{join_ref := JoinRef} = cets:info(Pid),
     JoinRef.
