@@ -69,9 +69,9 @@ spawn_mon(Info, Parent, Start) ->
 
 run_monitor(Info, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
-    monitor_loop(Mon, Info, Start).
+    monitor_loop(Mon, Info, Parent, Start).
 
-monitor_loop(Mon, Info, Start) ->
+monitor_loop(Mon, Info, Parent, Start) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
@@ -80,9 +80,21 @@ monitor_loop(Mon, Info, Start) ->
             ok
     after 5000 ->
         Diff = diff(Start),
-        ?LOG_INFO(Info#{what => long_task_progress, time_ms => Diff}),
-        monitor_loop(Mon, Info, Start)
+        ?LOG_WARNING(Info#{
+            what => long_task_progress,
+            time_ms => Diff,
+            current_stacktrace => pinfo(Parent, current_stacktrace)
+        }),
+        monitor_loop(Mon, Info, Parent, Start)
     end.
 
 diff(Start) ->
     erlang:system_time(millisecond) - Start.
+
+pinfo(Pid, Key) ->
+    case erlang:process_info(Pid, Key) of
+        {Key, Val} ->
+            Val;
+        undefined ->
+            undefined
+    end.

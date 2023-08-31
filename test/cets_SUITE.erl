@@ -98,6 +98,7 @@ cases() ->
         insert_into_keypos_table,
         table_name_works,
         info_contains_opts,
+        check_could_reach_each_other_fails,
         unknown_down_message_is_ignored,
         unknown_message_is_ignored,
         unknown_cast_message_is_ignored,
@@ -1172,6 +1173,15 @@ info_contains_opts(Config) ->
     {ok, Pid} = start_local(T, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
 
+check_could_reach_each_other_fails(_Config) ->
+    matched =
+        try
+            cets_join:check_could_reach_each_other([self()], [bad_node_pid()])
+        catch
+            error:check_could_reach_each_other_failed ->
+                matched
+        end.
+
 %% Cases to improve code coverage
 
 unknown_down_message_is_ignored(Config) ->
@@ -1539,3 +1549,11 @@ not_leader(Leader, Other, Leader) ->
     Other;
 not_leader(Other, Leader, Leader) ->
     Other.
+
+bad_node_pid() ->
+    binary_to_term(bad_node_pid_binary()).
+
+bad_node_pid_binary() ->
+    %% Pid <0.90.0> on badnode@localhost
+    <<131, 88, 100, 0, 17, 98, 97, 100, 110, 111, 100, 101, 64, 108, 111, 99, 97, 108, 104, 111,
+        115, 116, 0, 0, 0, 90, 0, 0, 0, 0, 100, 206, 70, 92>>.

@@ -5,6 +5,10 @@
 -export([join/5]).
 -include_lib("kernel/include/logger.hrl").
 
+-ifdef(TEST).
+-export([check_could_reach_each_other/2]).
+-endif.
+
 -type lock_key() :: term().
 -type join_ref() :: reference().
 -type server_pid() :: cets:server_pid().
@@ -203,7 +207,15 @@ check_could_reach_each_other(LocPids, RemPids) ->
      || LocNode <- LocNodes, RemNode <- RemNodes, LocNode =/= RemNode
     ]),
     Results =
-        [{Node1, Node2, rpc:call(Node1, net_adm, ping, [Node2])} || {Node1, Node2} <- Pairs],
+        [
+            {Node1, Node2,
+                cets_long:run_tracked(
+                    #{task => ping_node, node1 => Node1, node2 => Node2}, fun() ->
+                        rpc:call(Node1, net_adm, ping, [Node2], 10000)
+                    end
+                )}
+         || {Node1, Node2} <- Pairs
+        ],
     NotConnected = [X || {_Node1, _Node2, Res} = X <- Results, Res =/= pong],
     case NotConnected of
         [] ->
