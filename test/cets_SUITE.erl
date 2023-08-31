@@ -1256,6 +1256,8 @@ send_leader_op_throws_noproc(_Config) ->
                 matched
         end.
 
+%% Netsplit cases (run in sequence)
+
 insert_returns_when_netsplit(Config) ->
     #{ct5 := Node2} = proplists:get_value(peers, Config),
     Node1 = node(),
