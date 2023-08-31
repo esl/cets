@@ -317,10 +317,10 @@ choose_retry_type(_) ->
 %% Returns timeout in milliseconds to retry calling the get_nodes function.
 %% get_nodes is called after add_table without waiting.
 %% It is also would be retried without waiting if should_retry_get_nodes set to true.
--spec retry_type_to_timeout(retry_type()) -> 5000 | 1000 | 180000.
-retry_type_to_timeout(initial) -> 5000;
-retry_type_to_timeout(after_error) -> 1000;
-retry_type_to_timeout(regular) -> 180000.
+-spec retry_type_to_timeout(retry_type()) -> non_neg_integer().
+retry_type_to_timeout(initial) -> timer:seconds(5);
+retry_type_to_timeout(after_error) -> timer:seconds(1);
+retry_type_to_timeout(regular) -> timer:minutes(5).
 
 -spec cancel_old_timer(state()) -> ok.
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
