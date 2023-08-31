@@ -14,7 +14,7 @@ all() ->
 
 groups() ->
     [
-        {cets, [parallel, {repeat_until_any_fail, 3}], cases()},
+        {cets, [parallel, {repeat_until_any_fail, 3}], cases() ++ only_for_logger_cases()},
         {cets_no_log, [parallel], cases()},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
@@ -114,6 +114,11 @@ cases() ->
         send_leader_op_throws_noproc
     ].
 
+only_for_logger_cases() ->
+    [
+        run_tracked_logged_check_logger
+    ].
+
 seq_cases() ->
     [
         insert_returns_when_netsplit,
@@ -161,7 +166,7 @@ end_per_testcase(_, _Config) ->
 
 %% Modules that use a multiline LOG_ macro
 log_modules() ->
-    [cets, cets_call, cets_join].
+    [cets, cets_call, cets_long, cets_join].
 
 inserted_records_could_be_read_back(Config) ->
     Tab = make_name(Config),
@@ -1252,6 +1257,10 @@ run_tracked_failed(_Config) ->
         end.
 
 run_tracked_logged(_Config) ->
+    F = fun() -> timer:sleep(100) end,
+    cets_long:run_tracked(#{report_interval => 10}, F).
+
+run_tracked_logged_check_logger(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     F = fun() -> timer:sleep(5000) end,
     %% Run it in a separate process, so we can check logs in the test process
