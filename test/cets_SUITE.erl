@@ -111,7 +111,9 @@ cases() ->
         run_tracked_failed,
         run_tracked_logged,
         long_call_to_unknown_name_throws_pid_not_found,
-        send_leader_op_throws_noproc
+        send_leader_op_throws_noproc,
+        pinfo_returns_value,
+        pinfo_returns_undefined
     ].
 
 only_for_logger_cases() ->
@@ -1295,6 +1297,12 @@ send_leader_op_throws_noproc(_Config) ->
                 matched
         end.
 
+pinfo_returns_value(_Config) ->
+    true = is_list(cets_long:pinfo(self(), messages)).
+
+pinfo_returns_undefined(_Config) ->
+    undefined = cets_long:pinfo(stopped_pid(), messages).
+
 %% Netsplit cases (run in sequence)
 
 insert_returns_when_netsplit(Config) ->
@@ -1553,7 +1561,8 @@ stopped_pid() ->
     {Pid, Mon} = spawn_monitor(fun() -> ok end),
     receive
         {'DOWN', Mon, process, Pid, _Reason} -> ok
-    end.
+    end,
+    Pid.
 
 get_pd(Pid, Key) ->
     {dictionary, Dict} = erlang:process_info(Pid, dictionary),

@@ -2,6 +2,10 @@
 -module(cets_long).
 -export([run_spawn/2, run_tracked/2]).
 
+-ifdef(TEST).
+-export([pinfo/2]).
+-endif.
+
 -include_lib("kernel/include/logger.hrl").
 
 %% Extra logging information
