@@ -80,6 +80,7 @@
 -type opts() :: #{name := atom(), _ := _}.
 -type start_result() :: {ok, pid()} | {error, term()}.
 -type server() :: pid() | atom().
+-type system_info() :: map().
 
 -callback init(map()) -> backend_state().
 -callback get_nodes(backend_state()) -> {get_nodes_result(), backend_state()}.
@@ -115,7 +116,7 @@ info(Server) ->
     {ok, Tables} = get_tables(Server),
     [cets:info(Tab) || Tab <- Tables].
 
--spec system_info(server()) -> map().
+-spec system_info(server()) -> system_info().
 system_info(Server) ->
     gen_server:call(Server, system_info).
 
@@ -411,8 +412,10 @@ verify_tried_joining(State = #{nodes := Nodes, tables := Tables}) ->
         _ -> [{waiting_for_join_result, Missing}]
     end.
 
+-spec has_join_result_for(Node :: node(), Table :: atom(), state()) -> boolean().
 has_join_result_for(Node, Table, #{results := Results}) ->
     [] =/= [R || R = #{node := N, table := T} <- Results, N =:= Node, T =:= Table].
 
+-spec handle_system_info(state()) -> system_info().
 handle_system_info(State) ->
     State#{verify_ready => verify_ready(State)}.
