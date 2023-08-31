@@ -1333,7 +1333,8 @@ joining_not_fully_connected_node_is_not_allowed(Config) ->
         %% Pid2 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid2 cannot contact Pid1.
-        {error, _} = rpc(Node2, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
+        {error, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}} =
+            rpc(Node2, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
         {ok, [{r1}]} = cets:remote_dump(Pid3),
@@ -1359,7 +1360,9 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         %% Pid2 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid2 cannot contact Pid1.
-        {error, _} = rpc(Node3, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
+        {error, check_could_reach_each_other_failed} = rpc(Node3, cets_join, join, [
+            lock_name(Config), #{}, Pid2, Pid3
+        ]),
         %% Still connected
         cets:insert(Pid1, {r1}),
         {ok, [{r1}]} = cets:remote_dump(Pid3),

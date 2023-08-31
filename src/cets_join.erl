@@ -191,7 +191,30 @@ check_pids(LocPids, RemPids, JoinOpts) ->
     check_do_not_overlap(LocPids, RemPids),
     checkpoint(before_check_fully_connected, JoinOpts),
     check_fully_connected(LocPids),
-    check_fully_connected(RemPids).
+    check_fully_connected(RemPids),
+    check_could_reach_each_other(LocPids, RemPids).
+
+-spec check_could_reach_each_other(cets:servers(), cets:servers()) -> ok.
+check_could_reach_each_other(LocPids, RemPids) ->
+    LocNodes = lists:usort(lists:map(fun node/1, LocPids)),
+    RemNodes = lists:usort(lists:map(fun node/1, RemPids)),
+    Pairs = lists:usort([
+        {min(LocNode, RemNode), max(LocNode, RemNode)}
+     || LocNode <- LocNodes, RemNode <- RemNodes, LocNode =/= RemNode
+    ]),
+    Results =
+        [{Node1, Node2, rpc:call(Node1, net_adm, ping, [Node2])} || {Node1, Node2} <- Pairs],
+    NotConnected = [X || {_Node1, _Node2, Res} = X <- Results, Res =/= pong],
+    case NotConnected of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_ERROR(#{
+                what => check_could_reach_each_other_failed,
+                node_pairs_not_connected => NotConnected
+            }),
+            error(check_could_reach_each_other_failed)
+    end.
 
 -spec check_do_not_overlap(cets:servers(), cets:servers()) -> ok.
 check_do_not_overlap(LocPids, RemPids) ->
