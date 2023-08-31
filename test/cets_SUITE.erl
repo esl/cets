@@ -116,7 +116,9 @@ seq_cases() ->
     [
         insert_returns_when_netsplit,
         inserts_after_netsplit_reconnects,
-        disco_connects_to_unconnected_node
+        disco_connects_to_unconnected_node,
+        joining_not_fully_connected_node_is_not_allowed,
+        joining_not_fully_connected_node_is_not_allowed2
     ].
 
 init_per_suite(Config) ->
@@ -1315,6 +1317,59 @@ disco_connects_to_unconnected_node(Config) ->
     cets_discovery:add_table(Disco, Tab),
     ok = cets_discovery:wait_for_ready(Disco, 5000).
 
+%% Joins from a bad (not fully connected) node
+%% Join process should check if nodes could contact each other before allowing to join
+joining_not_fully_connected_node_is_not_allowed(Config) ->
+    #{ct3 := Node3, ct5 := Node2} = proplists:get_value(peers, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    %% No connection between Node2 and Node1
+    block_node(Node2),
+    try
+        %% Pid2 and Pid3 could contact each other.
+        %% Pid3 could contact Pid1 (they are joined).
+        %% But Pid2 cannot contact Pid1.
+        {error, _} = rpc(Node2, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
+        %% Still connected
+        cets:insert(Pid1, {r1}),
+        {ok, [{r1}]} = cets:remote_dump(Pid3),
+        [Pid3] = cets:other_pids(Pid1),
+        [Pid1] = cets:other_pids(Pid3)
+    after
+        reconnect_node(Node2)
+    end,
+    [] = cets:other_pids(Pid2).
+
+%% Joins from a good (fully connected) node
+joining_not_fully_connected_node_is_not_allowed2(Config) ->
+    #{ct3 := Node3, ct5 := Node2} = proplists:get_value(peers, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    %% No connection between Node2 and Node1
+    block_node(Node2),
+    try
+        %% Pid2 and Pid3 could contact each other.
+        %% Pid3 could contact Pid1 (they are joined).
+        %% But Pid2 cannot contact Pid1.
+        {error, _} = rpc(Node3, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
+        %% Still connected
+        cets:insert(Pid1, {r1}),
+        {ok, [{r1}]} = cets:remote_dump(Pid3),
+        [Pid3] = cets:other_pids(Pid1),
+        [Pid1] = cets:other_pids(Pid3)
+    after
+        reconnect_node(Node2)
+    end,
+    [] = cets:other_pids(Pid2).
+
 %% Helper functions
 
 still_works(Pid) ->
@@ -1469,11 +1524,12 @@ wait_till_test_stage(Pid, Stage) ->
 
 %% Disconnect node until manually connected
 block_node(Node) ->
-    rpc(Node, erlang, set_cookie, [invalid_cookie]),
-    rpc(Node, erlang, disconnect_node, [node()]).
+    rpc(Node, erlang, set_cookie, [node(), invalid_cookie]),
+    rpc(Node, erlang, disconnect_node, [node()]),
+    ok.
 
 reconnect_node(Node) ->
-    rpc(Node, erlang, set_cookie, [erlang:get_cookie()]),
+    rpc(Node, erlang, set_cookie, [node(), erlang:get_cookie()]),
     pong = rpc(Node, net_adm, ping, [node()]).
 
 not_leader(Leader, Other, Leader) ->
