@@ -253,7 +253,7 @@ try_joining(State = #{join_status := not_running, nodes := Nodes, tables := Tabl
     AvailableNodes = nodes(),
     spawn_link(fun() ->
         %% We only care about connected nodes here
-        %% We do not wanna try to connect here - we do it in ping_not_connected_nodes/1
+        %% We do not want to try to connect here - we do it in ping_not_connected_nodes/1
         Results = [
             do_join(Tab, Node)
          || Node <- Nodes, lists:member(Node, AvailableNodes), Tab <- Tables

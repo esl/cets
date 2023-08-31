@@ -322,7 +322,7 @@ insert_new_is_retried_when_leader_is_reelected(Config) ->
 
 %% We could retry automatically, but in this case return value from insert_new
 %% could be incorrect.
-%% If you wanna make insert_new more robust:
+%% If you want to make insert_new more robust:
 %% - handle cets_down exception
 %% - call insert_new one more time
 %% - read the data back using ets:lookup to ensure it is your record written
