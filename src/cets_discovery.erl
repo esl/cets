@@ -114,7 +114,7 @@ get_tables(Server) ->
 -spec info(server()) -> [cets:info()].
 info(Server) ->
     {ok, Tables} = get_tables(Server),
-    [cets:info(Tab) || Tab <- Tables].
+    cets_pmap:map(fun cets:info/1, Tables).
 
 -spec system_info(server()) -> system_info().
 system_info(Server) ->

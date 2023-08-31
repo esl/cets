@@ -109,7 +109,9 @@ cases() ->
         run_spawn_forwards_errors,
         run_tracked_failed,
         long_call_to_unknown_name_throws_pid_not_found,
-        send_leader_op_throws_noproc
+        send_leader_op_throws_noproc,
+        pmap_works,
+        pmap_crashes
     ].
 
 seq_cases() ->
@@ -157,7 +159,7 @@ end_per_testcase(_, _Config) ->
 
 %% Modules that use a multiline LOG_ macro
 log_modules() ->
-    [cets, cets_call, cets_join].
+    [cets, cets_call, cets_join, cets_pmap].
 
 inserted_records_could_be_read_back(Config) ->
     Tab = make_name(Config),
@@ -1253,6 +1255,18 @@ send_leader_op_throws_noproc(_Config) ->
             cets_call:send_leader_op(unknown_name_please, {op, {insert, {1}}})
         catch
             exit:{noproc, {gen_server, call, [unknown_name_please, get_leader]}} ->
+                matched
+        end.
+
+pmap_works(_Config) ->
+    [2, 4, 6] = cets_pmap:map(fun(X) -> X * 2 end, [1, 2, 3]).
+
+pmap_crashes(_Config) ->
+    matched =
+        try
+            cets_pmap:map(fun(X) -> X * 2 end, [1, x, 3])
+        catch
+            error:badarith ->
                 matched
         end.
 

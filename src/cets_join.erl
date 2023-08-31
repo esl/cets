@@ -212,7 +212,7 @@ check_do_not_overlap(LocPids, RemPids) ->
 %% If they are not matching - the node removal process could be in progress
 -spec check_fully_connected(cets:servers()) -> ok.
 check_fully_connected(Pids) ->
-    Lists = [get_pids(Pid) || Pid <- Pids],
+    Lists = cets_pmap:map(fun get_pids/1, Pids),
     case lists:usort([Pids | Lists]) of
         [_] ->
             check_same_join_ref(Pids);
@@ -230,7 +230,7 @@ check_fully_connected(Pids) ->
 %% If not - we don't want to continue joining
 -spec check_same_join_ref(cets:servers()) -> ok.
 check_same_join_ref(Pids) ->
-    Refs = [pid_to_join_ref(Pid) || Pid <- Pids],
+    Refs = cets_pmap:map(fun pid_to_join_ref/1, Pids),
     case lists:usort(Refs) of
         [_] ->
             ok;
