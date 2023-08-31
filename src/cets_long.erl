@@ -69,23 +69,24 @@ spawn_mon(Info, Parent, Start) ->
 
 run_monitor(Info, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
-    monitor_loop(Mon, Info, Parent, Start).
+    Interval = maps:get(report_interval, Info, 5000),
+    monitor_loop(Mon, Info, Parent, Start, Interval).
 
-monitor_loop(Mon, Info, Parent, Start) ->
+monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
             ok;
         stop ->
             ok
-    after 5000 ->
+    after Interval ->
         Diff = diff(Start),
         ?LOG_WARNING(Info#{
             what => long_task_progress,
             time_ms => Diff,
             current_stacktrace => pinfo(Parent, current_stacktrace)
         }),
-        monitor_loop(Mon, Info, Parent, Start)
+        monitor_loop(Mon, Info, Parent, Start, Interval)
     end.
 
 diff(Start) ->

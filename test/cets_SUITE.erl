@@ -109,6 +109,7 @@ cases() ->
         code_change_returns_ok_for_ack,
         run_spawn_forwards_errors,
         run_tracked_failed,
+        run_tracked_logged,
         long_call_to_unknown_name_throws_pid_not_found,
         send_leader_op_throws_noproc
     ].
@@ -1249,6 +1250,23 @@ run_tracked_failed(_Config) ->
             error:oops ->
                 matched
         end.
+
+run_tracked_logged(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    F = fun() -> timer:sleep(5000) end,
+    %% Run it in a separate process, so we can check logs in the test process
+    %% Overwrite default five seconds interval with 10 milliseconds
+    spawn_link(fun() -> cets_long:run_tracked(#{report_interval => 10}, F) end),
+    %% Exit test after first log event
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := warning,
+            msg := {report, #{what := long_task_progress}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
 
 long_call_to_unknown_name_throws_pid_not_found(_Config) ->
     matched =
