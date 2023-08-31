@@ -954,8 +954,7 @@ disco_handles_node_up_and_down(Config) ->
     Disco ! {nodeup, BadNode},
     Disco ! {nodedown, BadNode},
     %% Check that wait_for_ready still works
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
-    ok.
+    ok = cets_discovery:wait_for_ready(Disco, 5000).
 
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
@@ -1229,7 +1228,7 @@ run_spawn_forwards_errors(_Config) ->
                 matched
         end.
 
-run_tracked_failed(Config) ->
+run_tracked_failed(_Config) ->
     matched =
         try
             F = fun() -> error(oops) end,
@@ -1386,9 +1385,11 @@ extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
 extra_args(_) -> "".
 
 start_node(Sname) ->
-    {ok, Peer, Node} = peer:start(#{
+    {ok, Peer, Node} = ?CT_PEER(#{
         name => Sname, connection => standard_io, args => extra_args(Sname)
     }),
+    %% Keep nodes running after init_per_suite is finished
+    unlink(Peer),
     %% Do RPC using alternative connection method
     ok = peer:call(Peer, code, add_paths, [code:get_path()]),
     {Node, Peer}.
@@ -1467,8 +1468,7 @@ wait_till_test_stage(Pid, Stage) ->
 %% Disconnect node until manually connected
 block_node(Node) ->
     rpc(Node, erlang, set_cookie, [invalid_cookie]),
-    rpc(Node, erlang, disconnect_node, [node()]),
-    ok.
+    rpc(Node, erlang, disconnect_node, [node()]).
 
 reconnect_node(Node) ->
     rpc(Node, erlang, set_cookie, [erlang:get_cookie()]),
