@@ -257,6 +257,7 @@ checkpoint(CheckPointName, #{checkpoint_handler := F}) ->
 checkpoint(_CheckPointName, _Opts) ->
     ok.
 -else.
+-compile({inline, [checkpoint/2]}).
 checkpoint(_CheckPointName, _Opts) ->
     ok.
 -endif.
