@@ -251,7 +251,13 @@ pid_to_join_ref(Pid) ->
 %% Checkpoints are used for testing
 %% Checkpoints do nothing in production
 -spec checkpoint(checkpoint(), join_opts()) -> ok.
+-ifdef(TEST).
 checkpoint(CheckPointName, #{checkpoint_handler := F}) ->
     F(CheckPointName);
 checkpoint(_CheckPointName, _Opts) ->
     ok.
+-else.
+-compile({inline, [checkpoint/2]}).
+checkpoint(_CheckPointName, _Opts) ->
+    ok.
+-endif.
