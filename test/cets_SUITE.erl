@@ -1,5 +1,6 @@
 -module(cets_SUITE).
 -include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -compile([export_all, nowarn_export_all]).
 
@@ -1182,13 +1183,11 @@ info_contains_opts(Config) ->
     #{opts := #{type := bag}} = cets:info(Pid).
 
 check_could_reach_each_other_fails(_Config) ->
-    matched =
-        try
-            cets_join:check_could_reach_each_other([self()], [bad_node_pid()])
-        catch
-            error:check_could_reach_each_other_failed ->
-                matched
-        end.
+    ?assertException(
+        error,
+        check_could_reach_each_other_failed,
+        cets_join:check_could_reach_each_other([self()], [bad_node_pid()])
+    ).
 
 %% Cases to improve code coverage
 
@@ -1240,23 +1239,19 @@ code_change_returns_ok_for_ack(Config) ->
     sys:resume(AckPid).
 
 run_spawn_forwards_errors(_Config) ->
-    matched =
-        try
-            cets_long:run_spawn(#{}, fun() -> error(oops) end)
-        catch
-            error:oops ->
-                matched
-        end.
+    ?assertException(
+        error,
+        oops,
+        cets_long:run_spawn(#{}, fun() -> error(oops) end)
+    ).
 
 run_tracked_failed(_Config) ->
-    matched =
-        try
-            F = fun() -> error(oops) end,
-            cets_long:run_tracked(#{}, F)
-        catch
-            error:oops ->
-                matched
-        end.
+    F = fun() -> error(oops) end,
+    ?assertException(
+        error,
+        oops,
+        cets_long:run_tracked(#{}, F)
+    ).
 
 run_tracked_logged(_Config) ->
     F = fun() -> timer:sleep(100) end,
@@ -1280,22 +1275,18 @@ run_tracked_logged_check_logger(_Config) ->
     end.
 
 long_call_to_unknown_name_throws_pid_not_found(_Config) ->
-    matched =
-        try
-            cets_call:long_call(unknown_name_please, test)
-        catch
-            error:{pid_not_found, unknown_name_please} ->
-                matched
-        end.
+    ?assertException(
+        error,
+        {pid_not_found, unknown_name_please},
+        cets_call:long_call(unknown_name_please, test)
+    ).
 
 send_leader_op_throws_noproc(_Config) ->
-    matched =
-        try
-            cets_call:send_leader_op(unknown_name_please, {op, {insert, {1}}})
-        catch
-            exit:{noproc, {gen_server, call, [unknown_name_please, get_leader]}} ->
-                matched
-        end.
+    ?assertException(
+        exit,
+        {noproc, {gen_server, call, [unknown_name_please, get_leader]}},
+        cets_call:send_leader_op(unknown_name_please, {op, {insert, {1}}})
+    ).
 
 pinfo_returns_value(_Config) ->
     true = is_list(cets_long:pinfo(self(), messages)).
@@ -1306,56 +1297,56 @@ pinfo_returns_undefined(_Config) ->
 %% Netsplit cases (run in sequence)
 
 insert_returns_when_netsplit(Config) ->
-    #{ct5 := Node2} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(peers, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    sys:suspend(Pid2),
+    {ok, Pid5} = start(Node5, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
+    sys:suspend(Pid5),
     R = cets:insert_request(Tab, {1, test}),
-    block_node(Node2),
+    block_node(Node5),
     try
         {reply, ok} = cets:wait_response(R, 5000)
     after
-        reconnect_node(Node2)
+        reconnect_node(Node5)
     end.
 
 inserts_after_netsplit_reconnects(Config) ->
-    #{ct5 := Node2} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(peers, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    sys:suspend(Pid2),
+    {ok, Pid5} = start(Node5, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
+    sys:suspend(Pid5),
     R = cets:insert_request(Tab, {1, v1}),
-    block_node(Node2),
+    block_node(Node5),
     try
         {reply, ok} = cets:wait_response(R, 5000)
     after
-        reconnect_node(Node2)
+        reconnect_node(Node5)
     end,
-    sys:resume(Pid2),
+    sys:resume(Pid5),
     cets:insert(Pid1, {1, v2}),
-    cets:insert(Pid2, {1, v3}),
+    cets:insert(Pid5, {1, v3}),
     %% No automatic recovery
     [{1, v2}] = dump(Node1, Tab),
-    [{1, v3}] = dump(Node2, Tab).
+    [{1, v3}] = dump(Node5, Tab).
 
 disco_connects_to_unconnected_node(Config) ->
     Node1 = node(),
-    #{ct5 := Peer2} = proplists:get_value(peers, Config),
-    #{ct5 := Node2} = proplists:get_value(nodes, Config),
-    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    #{ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
+    rpc(Peer5, erlang, disconnect_node, [Node1]),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Peer2, Tab),
+    {ok, _} = start(Peer5, Tab),
     F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
+        {{ok, [Node1, Node5]}, State}
     end,
     cets_test_wait:wait_until(
-        fun() -> lists:member(Node2, nodes()) end,
+        fun() -> lists:member(Node5, nodes()) end,
         false
     ),
     {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
@@ -1365,48 +1356,48 @@ disco_connects_to_unconnected_node(Config) ->
 %% Joins from a bad (not fully connected) node
 %% Join process should check if nodes could contact each other before allowing to join
 joining_not_fully_connected_node_is_not_allowed(Config) ->
-    #{ct3 := Node3, ct5 := Node2} = proplists:get_value(peers, Config),
+    #{ct3 := Node3, ct5 := Node5} = proplists:get_value(peers, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid5} = start(Node5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Node2 and Node1
-    block_node(Node2),
+    %% No connection between Node5 and Node1
+    block_node(Node5),
     try
-        %% Pid2 and Pid3 could contact each other.
+        %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
-        %% But Pid2 cannot contact Pid1.
+        %% But Pid5 cannot contact Pid1.
         {error, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}} =
-            rpc(Node2, cets_join, join, [lock_name(Config), #{}, Pid2, Pid3]),
+            rpc(Node5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
         {ok, [{r1}]} = cets:remote_dump(Pid3),
         [Pid3] = cets:other_pids(Pid1),
         [Pid1] = cets:other_pids(Pid3)
     after
-        reconnect_node(Node2)
+        reconnect_node(Node5)
     end,
-    [] = cets:other_pids(Pid2).
+    [] = cets:other_pids(Pid5).
 
 %% Joins from a good (fully connected) node
 joining_not_fully_connected_node_is_not_allowed2(Config) ->
-    #{ct3 := Node3, ct5 := Node2} = proplists:get_value(peers, Config),
+    #{ct3 := Node3, ct5 := Node5} = proplists:get_value(peers, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
     {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid5} = start(Node5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Node2 and Node1
-    block_node(Node2),
+    %% No connection between Node5 and Node1
+    block_node(Node5),
     try
-        %% Pid2 and Pid3 could contact each other.
+        %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
-        %% But Pid2 cannot contact Pid1.
+        %% But Pid5 cannot contact Pid1.
         {error, check_could_reach_each_other_failed} = rpc(Node3, cets_join, join, [
-            lock_name(Config), #{}, Pid2, Pid3
+            lock_name(Config), #{}, Pid5, Pid3
         ]),
         %% Still connected
         cets:insert(Pid1, {r1}),
@@ -1414,9 +1405,9 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         [Pid3] = cets:other_pids(Pid1),
         [Pid1] = cets:other_pids(Pid3)
     after
-        reconnect_node(Node2)
+        reconnect_node(Node5)
     end,
-    [] = cets:other_pids(Pid2).
+    [] = cets:other_pids(Pid5).
 
 %% Helper functions
 
