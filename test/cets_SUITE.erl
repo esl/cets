@@ -1,3 +1,10 @@
+%% Code conventions:
+%% - Use PeerNum for peer pids (i.e. Peer2, Peer3...)
+%% - Use NodeNum for nodes (i.e. Node2, Node3...)
+%% - Node1 is the test node
+%% - Use assertException macro to test errors
+%% - Tests should cleanup after themself (we use repeat_until_any_fail to ensure this)
+%% - Use repeat_until_any_fail=100 to ensure new tests are not flaky
 -module(cets_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -21,7 +28,7 @@ groups() ->
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence], seq_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()}
     ].
 
 cases() ->
@@ -687,41 +694,41 @@ send_dump_contains_already_added_servers(Config) ->
 
 test_multinode(Config) ->
     Node1 = node(),
-    #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(peers, Config),
+    #{ct2 := Peer2, ct3 := Peer3, ct4 := Peer4} = proplists:get_value(peers, Config),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Node2, Tab),
-    {ok, Pid3} = start(Node3, Tab),
-    {ok, Pid4} = start(Node4, Tab),
+    {ok, Pid2} = start(Peer2, Tab),
+    {ok, Pid3} = start(Peer3, Tab),
+    {ok, Pid4} = start(Peer4, Tab),
     ok = join(Node1, Tab, Pid1, Pid3),
-    ok = join(Node2, Tab, Pid2, Pid4),
+    ok = join(Peer2, Tab, Pid2, Pid4),
     insert(Node1, Tab, {a}),
-    insert(Node2, Tab, {b}),
-    insert(Node3, Tab, {c}),
-    insert(Node4, Tab, {d}),
+    insert(Peer2, Tab, {b}),
+    insert(Peer3, Tab, {c}),
+    insert(Peer4, Tab, {d}),
     [{a}, {c}] = dump(Node1, Tab),
-    [{b}, {d}] = dump(Node2, Tab),
+    [{b}, {d}] = dump(Peer2, Tab),
     ok = join(Node1, Tab, Pid2, Pid1),
     [{a}, {b}, {c}, {d}] = dump(Node1, Tab),
-    [{a}, {b}, {c}, {d}] = dump(Node2, Tab),
+    [{a}, {b}, {c}, {d}] = dump(Peer2, Tab),
     insert(Node1, Tab, {f}),
-    insert(Node4, Tab, {e}),
+    insert(Peer4, Tab, {e}),
     Same = fun(X) ->
         X = dump(Node1, Tab),
-        X = dump(Node2, Tab),
-        X = dump(Node3, Tab),
-        X = dump(Node4, Tab),
+        X = dump(Peer2, Tab),
+        X = dump(Peer3, Tab),
+        X = dump(Peer4, Tab),
         ok
     end,
     Same([{a}, {b}, {c}, {d}, {e}, {f}]),
     delete(Node1, Tab, e),
     Same([{a}, {b}, {c}, {d}, {f}]),
-    delete(Node4, Tab, a),
+    delete(Peer4, Tab, a),
     Same([{b}, {c}, {d}, {f}]),
     %% Bulk operations are supported
-    insert_many(Node4, Tab, [{m}, {a}, {n}, {y}]),
+    insert_many(Peer4, Tab, [{m}, {a}, {n}, {y}]),
     Same([{a}, {b}, {c}, {d}, {f}, {m}, {n}, {y}]),
-    delete_many(Node4, Tab, [a, n]),
+    delete_many(Peer4, Tab, [a, n]),
     Same([{b}, {c}, {d}, {f}, {m}, {y}]),
     ok.
 
@@ -1297,42 +1304,44 @@ pinfo_returns_undefined(_Config) ->
 %% Netsplit cases (run in sequence)
 
 insert_returns_when_netsplit(Config) ->
-    #{ct5 := Node5} = proplists:get_value(peers, Config),
+    #{ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Node5, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
     sys:suspend(Pid5),
     R = cets:insert_request(Tab, {1, test}),
-    block_node(Node5),
+    block_node(Node5, Peer5),
     try
         {reply, ok} = cets:wait_response(R, 5000)
     after
-        reconnect_node(Node5)
+        reconnect_node(Node5, Peer5)
     end.
 
 inserts_after_netsplit_reconnects(Config) ->
-    #{ct5 := Node5} = proplists:get_value(peers, Config),
+    #{ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Node5, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
     sys:suspend(Pid5),
     R = cets:insert_request(Tab, {1, v1}),
-    block_node(Node5),
+    block_node(Node5, Peer5),
     try
         {reply, ok} = cets:wait_response(R, 5000)
     after
-        reconnect_node(Node5)
+        reconnect_node(Node5, Peer5)
     end,
     sys:resume(Pid5),
     cets:insert(Pid1, {1, v2}),
     cets:insert(Pid5, {1, v3}),
     %% No automatic recovery
     [{1, v2}] = dump(Node1, Tab),
-    [{1, v3}] = dump(Node5, Tab).
+    [{1, v3}] = dump(Peer5, Tab).
 
 disco_connects_to_unconnected_node(Config) ->
     Node1 = node(),
@@ -1356,47 +1365,49 @@ disco_connects_to_unconnected_node(Config) ->
 %% Joins from a bad (not fully connected) node
 %% Join process should check if nodes could contact each other before allowing to join
 joining_not_fully_connected_node_is_not_allowed(Config) ->
-    #{ct3 := Node3, ct5 := Node5} = proplists:get_value(peers, Config),
+    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid3} = start(Node3, Tab),
-    {ok, Pid5} = start(Node5, Tab),
+    {ok, Pid3} = start(Peer3, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Node5 and Node1
-    block_node(Node5),
+    %% No connection between Peer5 and Node1
+    block_node(Node5, Peer5),
     try
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
         {error, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}} =
-            rpc(Node5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
+            rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
         {ok, [{r1}]} = cets:remote_dump(Pid3),
         [Pid3] = cets:other_pids(Pid1),
         [Pid1] = cets:other_pids(Pid3)
     after
-        reconnect_node(Node5)
+        reconnect_node(Node5, Peer5)
     end,
     [] = cets:other_pids(Pid5).
 
 %% Joins from a good (fully connected) node
 joining_not_fully_connected_node_is_not_allowed2(Config) ->
-    #{ct3 := Node3, ct5 := Node5} = proplists:get_value(peers, Config),
+    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
     Node1 = node(),
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid3} = start(Node3, Tab),
-    {ok, Pid5} = start(Node5, Tab),
+    {ok, Pid3} = start(Peer3, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Node5 and Node1
-    block_node(Node5),
+    %% No connection between Peer5 and Node1
+    block_node(Node5, Peer5),
     try
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
-        {error, check_could_reach_each_other_failed} = rpc(Node3, cets_join, join, [
+        {error, check_could_reach_each_other_failed} = rpc(Peer3, cets_join, join, [
             lock_name(Config), #{}, Pid5, Pid3
         ]),
         %% Still connected
@@ -1405,7 +1416,7 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         [Pid3] = cets:other_pids(Pid1),
         [Pid1] = cets:other_pids(Pid3)
     after
-        reconnect_node(Node5)
+        reconnect_node(Node5, Peer5)
     end,
     [] = cets:other_pids(Pid5).
 
@@ -1563,14 +1574,18 @@ wait_till_test_stage(Pid, Stage) ->
     cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
 
 %% Disconnect node until manually connected
-block_node(Node) ->
-    rpc(Node, erlang, set_cookie, [node(), invalid_cookie]),
-    rpc(Node, erlang, disconnect_node, [node()]),
-    ok.
+block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
+    rpc(Peer, erlang, set_cookie, [node(), invalid_cookie]),
+    rpc(Peer, erlang, disconnect_node, [node()]),
+    %% Wait till node() is notified about the disconnect
+    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pang),
+    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pang).
 
-reconnect_node(Node) ->
-    rpc(Node, erlang, set_cookie, [node(), erlang:get_cookie()]),
-    pong = rpc(Node, net_adm, ping, [node()]).
+reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
+    rpc(Peer, erlang, set_cookie, [node(), erlang:get_cookie()]),
+    %% Very rarely it could return pang
+    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pong),
+    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pong).
 
 not_leader(Leader, Other, Leader) ->
     Other;
