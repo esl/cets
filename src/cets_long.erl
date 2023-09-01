@@ -2,6 +2,10 @@
 -module(cets_long).
 -export([run_spawn/2, run_tracked/2]).
 
+-ifdef(TEST).
+-export([pinfo/2]).
+-endif.
+
 -include_lib("kernel/include/logger.hrl").
 
 %% Extra logging information
@@ -69,20 +73,33 @@ spawn_mon(Info, Parent, Start) ->
 
 run_monitor(Info, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
-    monitor_loop(Mon, Info, Start).
+    Interval = maps:get(report_interval, Info, 5000),
+    monitor_loop(Mon, Info, Parent, Start, Interval).
 
-monitor_loop(Mon, Info, Start) ->
+monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
             ok;
         stop ->
             ok
-    after 5000 ->
+    after Interval ->
         Diff = diff(Start),
-        ?LOG_INFO(Info#{what => long_task_progress, time_ms => Diff}),
-        monitor_loop(Mon, Info, Start)
+        ?LOG_WARNING(Info#{
+            what => long_task_progress,
+            time_ms => Diff,
+            current_stacktrace => pinfo(Parent, current_stacktrace)
+        }),
+        monitor_loop(Mon, Info, Parent, Start, Interval)
     end.
 
 diff(Start) ->
     erlang:system_time(millisecond) - Start.
+
+pinfo(Pid, Key) ->
+    case erlang:process_info(Pid, Key) of
+        {Key, Val} ->
+            Val;
+        undefined ->
+            undefined
+    end.
