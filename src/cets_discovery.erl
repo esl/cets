@@ -27,7 +27,7 @@
 -module(cets_discovery).
 -behaviour(gen_server).
 
--export([start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2]).
+-export([start/1, start_link/1, add_table/2, get_tables/1, info/1, system_info/1, wait_for_ready/2]).
 -export([
     init/1,
     handle_call/3,
@@ -38,7 +38,14 @@
 ]).
 
 -ignore_xref([
-    start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2, behaviour_info/1
+    start/1,
+    start_link/1,
+    add_table/2,
+    get_tables/1,
+    info/1,
+    system_info/1,
+    wait_for_ready/2,
+    behaviour_info/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -47,7 +54,7 @@
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
 -type retry_type() :: initial | after_error | regular.
 
--export_type([get_nodes_result/0]).
+-export_type([get_nodes_result/0, system_info/0]).
 
 -type from() :: {pid(), reference()}.
 -type join_result() :: #{

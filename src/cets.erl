@@ -304,7 +304,7 @@ get_leader(Server) ->
     gen_server:call(Server, get_leader).
 
 %% Get a list of other nodes in the cluster that are connected together.
--spec other_nodes(server_ref()) -> [node()].
+-spec other_nodes(server_ref()) -> ordsets:ordset(node()).
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
 
