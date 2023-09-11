@@ -90,6 +90,7 @@ cases() ->
         status_remote_nodes_without_disco,
         status_joined_nodes,
         status_remote_nodes_with_unknown_tables,
+        status_remote_nodes_with_missing_nodes,
         status_discovery_works,
         status_conflict_nodes,
         test_locally,
@@ -1092,6 +1093,40 @@ status_remote_nodes_with_unknown_tables(Config) ->
     ),
     cets_test_wait:wait_until(
         fun() -> maps:get(remote_unknown_tables, cets_status:status(DiscoName)) end, [
+            Tab2
+        ]
+    ).
+
+status_remote_nodes_with_missing_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    %% Node2 does not have Tab2
+    {ok, _} = start(Node1, Tab1),
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab1),
+    cets_discovery:add_table(Disco1, Tab1),
+    cets_discovery:add_table(Disco1, Tab2),
+    cets_discovery:add_table(Disco2, Tab1),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_nodes_with_missing_tables, cets_status:status(DiscoName)) end, [
+            Node2
+        ]
+    ),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_missing_tables, cets_status:status(DiscoName)) end, [
             Tab2
         ]
     ).

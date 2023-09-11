@@ -3,7 +3,8 @@
 -ignore_xref([status/1]).
 -include_lib("kernel/include/logger.hrl").
 
--type tab_nodes() :: {Table :: atom(), Nodes :: ordsets:ordset(node())}.
+-type tab_nodes_map() :: #{Table :: atom() => Nodes :: ordsets:ordset(node())}.
+-type node_to_tab_nodes_map() :: #{node() => tab_nodes_map()}.
 -type table_name() :: cets:table_name().
 -type disco_name() :: atom().
 
@@ -44,18 +45,22 @@ status(Disco) when is_atom(Disco) ->
     OnlineNodes = [node() | nodes()],
     AvailNodes = available_nodes(Disco, OnlineNodes),
     NoDiscoNodes = remote_nodes_without_disco(DiscoNodesSorted, AvailNodes, OnlineNodes),
-    {Expected, OtherTabNodes} = gather_tables_and_replication_nodes(AvailNodes, Tables, Disco),
+    Expected = get_table_to_other_nodes_map(node(), Tables),
+    OtherTabNodes = gather_tables_and_replication_nodes(AvailNodes, Disco),
     JoinedNodes = joined_nodes(Expected, OtherTabNodes),
-    {ConflictTables, ConflictNodes} = conflict_tables(Expected, OtherTabNodes),
     AllTables = all_tables(Expected, OtherTabNodes),
+    {ConflictTables, ConflictNodes} = conflict_tables(Expected, OtherTabNodes),
     {UnknownTables, NodesWithUnknownTables} = unknown_tables(OtherTabNodes, Tables, AllTables),
+    {MissingTables, NodesWithMissingTables} = missing_tables(OtherTabNodes, Tables),
     #{
         unavailable_nodes => UnNodes,
         available_nodes => AvailNodes,
         remote_nodes_without_disco => NoDiscoNodes,
         joined_nodes => JoinedNodes,
-        remote_nodes_with_unknown_tables => NodesWithUnknownTables,
         remote_unknown_tables => UnknownTables,
+        remote_missing_tables => MissingTables,
+        remote_nodes_with_unknown_tables => NodesWithUnknownTables,
+        remote_nodes_with_missing_tables => NodesWithMissingTables,
         conflict_nodes => ConflictNodes,
         conflict_tables => ConflictTables,
         discovered_nodes => DiscoNodesSorted,
@@ -63,7 +68,7 @@ status(Disco) when is_atom(Disco) ->
     }.
 
 %% Nodes, that host the discovery process
--spec available_nodes(disco_name(), [node()]) -> [node()].
+-spec available_nodes(disco_name(), [node(), ...]) -> [node()].
 available_nodes(Disco, OnlineNodes) ->
     [Node || Node <- OnlineNodes, is_disco_running_on(Node, Disco)].
 
@@ -77,38 +82,74 @@ remote_nodes_without_disco(DiscoNodes, AvailNodes, OnlineNodes) ->
 is_disco_running_on(Node, Disco) ->
     is_pid(rpc:call(Node, erlang, whereis, [Disco])).
 
-gather_tables_and_replication_nodes(AvailNodes, Tables, Disco) ->
+-spec gather_tables_and_replication_nodes(
+    AvailNodes :: [node()], Disco :: disco_name()
+) ->
+    OtherTabNodes :: node_to_tab_nodes_map().
+gather_tables_and_replication_nodes(AvailNodes, Disco) ->
     OtherNodes = lists:delete(node(), AvailNodes),
-    Expected = node_list_for_tables(node(), Tables),
-    OtherTabNodes = [{Node, node_list_for_tables_from_disco(Node, Disco)} || Node <- OtherNodes],
-    {Expected, maps:from_list(OtherTabNodes)}.
+    OtherTabNodes = [
+        {Node, get_table_to_other_nodes_map_from_disco(Node, Disco)}
+     || Node <- OtherNodes
+    ],
+    maps:from_list(OtherTabNodes).
 
 %% Nodes that has our local tables running (but could also have some unknown tables).
 %% All joined nodes replicate data between each other.
+-spec joined_nodes(tab_nodes_map(), node_to_tab_nodes_map()) -> [node()].
 joined_nodes(Expected, OtherTabNodes) ->
     ExpectedTables = maps:keys(Expected),
-    OtherJoined = [
-        Node
-     || {Node, NodeTabs} <- maps:to_list(OtherTabNodes),
-        maps:with(ExpectedTables, NodeTabs) =:= Expected
-    ],
+    OtherJoined = maps:fold(
+        fun(Node, TabNodes, Acc) ->
+            case maps:with(ExpectedTables, TabNodes) =:= Expected of
+                true -> [Node | Acc];
+                false -> Acc
+            end
+        end,
+        [],
+        OtherTabNodes
+    ),
     lists:sort([node() | OtherJoined]).
 
 unknown_tables(OtherTabNodes, Tables, AllTables) ->
     UnknownTables = ordsets:subtract(AllTables, Tables),
-    NodesWithUnknownTables = [
-        Node
-     || {Node, TabNodes} <- maps:to_list(OtherTabNodes),
-        tabnodes_has_any_of(TabNodes, UnknownTables)
-    ],
+    NodesWithUnknownTables =
+        maps:fold(
+            fun(Node, TabNodes, Acc) ->
+                case tabnodes_has_any_of(TabNodes, UnknownTables) of
+                    true -> [Node | Acc];
+                    false -> Acc
+                end
+            end,
+            [],
+            OtherTabNodes
+        ),
     {UnknownTables, NodesWithUnknownTables}.
 
+-spec missing_tables(node_to_tab_nodes_map(), [table_name()]) -> {[table_name()], [node()]}.
+missing_tables(OtherTabNodes, LocalTables) ->
+    Zip = maps:fold(
+        fun(Node, TabNodes, Acc) ->
+            RemoteTables = maps:keys(TabNodes),
+            MissingTables = ordsets:subtract(LocalTables, RemoteTables),
+            case MissingTables of
+                [] -> Acc;
+                [_ | _] -> [{MissingTables, Node} | Acc]
+            end
+        end,
+        [],
+        OtherTabNodes
+    ),
+    {MissingTables, NodesWithMissingTables} = lists:unzip(Zip),
+    {lists:usort(lists:append(MissingTables)), NodesWithMissingTables}.
+
+-spec tabnodes_has_any_of([table_name()], [table_name()]) -> boolean().
 tabnodes_has_any_of(TabNodes, UnknownTables) ->
     lists:any(fun(Tab) -> maps:is_key(Tab, TabNodes) end, UnknownTables).
 
 %% Nodes that replicate at least one of our local tables to a different list of nodes
 %% (could temporary happen during a netsplit)
--spec conflict_tables([tab_nodes()], [{node(), [tab_nodes()]}]) -> {[table_name()], [table_name()]}.
+-spec conflict_tables(tab_nodes_map(), node_to_tab_nodes_map()) -> {[table_name()], [node()]}.
 conflict_tables(Expected, OtherTabNodes) ->
     F = fun(Node, NodeTabs, Acc) ->
         FF = fun(Table, OtherNodes, Acc2) ->
@@ -127,23 +168,22 @@ conflict_tables(Expected, OtherTabNodes) ->
     {ConflictTables, ConflictNodes} = lists:unzip(TabNodes),
     {lists:usort(ConflictTables), lists:usort(ConflictNodes)}.
 
--spec all_tables([tab_nodes()], [{node(), [tab_nodes()]}]) -> [table_name()].
+-spec all_tables(tab_nodes_map(), node_to_tab_nodes_map()) -> [table_name()].
 all_tables(Expected, OtherTabNodes) ->
     TableNodesVariants = [Expected | maps:values(OtherTabNodes)],
     TableVariants = lists:map(fun maps:keys/1, TableNodesVariants),
-    %   SharedTables = ordsets:intersection(TableVariants),
     ordsets:union(TableVariants).
 
 %% Returns nodes for each table hosted on node()
--spec node_list_for_tables_from_disco(node(), disco_name()) -> map().
-node_list_for_tables_from_disco(Node, Disco) ->
+-spec get_table_to_other_nodes_map_from_disco(node(), disco_name()) -> tab_nodes_map().
+get_table_to_other_nodes_map_from_disco(Node, Disco) ->
     Tables = get_tables_list_on_node(Node, Disco),
-    node_list_for_tables(Node, Tables).
+    get_table_to_other_nodes_map(Node, Tables).
 
 %% Returns nodes for each table in the Tables list
--spec node_list_for_tables(node(), [table_name()]) -> map().
-node_list_for_tables(Node, Tables) ->
-    maps:from_list([{Table, node_list_for_table(Node, Table)} || Table <- Tables]).
+-spec get_table_to_other_nodes_map(node(), [table_name()]) -> tab_nodes_map().
+get_table_to_other_nodes_map(Node, Tables) ->
+    maps:from_list([{Table, get_node_list_for_table(Node, Table)} || Table <- Tables]).
 
 -spec get_tables_list_on_node(Node :: node(), Disco :: disco_name()) -> [table_name()].
 get_tables_list_on_node(Node, Disco) ->
@@ -154,9 +194,9 @@ get_tables_list_on_node(Node, Disco) ->
             []
     end.
 
--spec node_list_for_table(Node :: node(), Table :: table_name()) ->
+-spec get_node_list_for_table(Node :: node(), Table :: table_name()) ->
     Nodes :: ordsets:ordset(node()).
-node_list_for_table(Node, Table) ->
+get_node_list_for_table(Node, Table) ->
     case catch rpc:call(Node, cets, other_nodes, [Table]) of
         List when is_list(List) ->
             ordsets:add_element(Node, List);
