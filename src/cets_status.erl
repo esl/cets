@@ -13,11 +13,16 @@
     available_nodes := [node()],
     %% Nodes that do not respond to our pings.
     unavailable_nodes := [node()],
-    %% Nodes with stopped disco
-    remote_nodes_without_disco := [node()],
     %% Nodes that has our local tables running (but could also have some unknown tables).
     %% All joined nodes replicate data between each other.
     joined_nodes := [node()],
+    %% Nodes that are extracted from the discovery backend.
+    discovered_nodes := [node()],
+    %% True, if discovery backend returned the list of nodes the last time we've tried
+    %% to call it.
+    discovery_works := boolean(),
+    %% Nodes with stopped disco
+    remote_nodes_without_disco := [node()],
     %% Nodes that have more tables registered than the local node.
     remote_nodes_with_unknown_tables := [node()],
     remote_unknown_tables := [table_name()],
@@ -27,12 +32,7 @@
     %% Nodes that replicate at least one of our local tables to a different list of nodes
     %% (could temporary happen during a netsplit)
     conflict_nodes := [node()],
-    conflict_tables := [table_name()],
-    %% Nodes that are extracted from the discovery backend.
-    discovered_nodes := [node()],
-    %% True, if discovery backend returned the list of nodes the last time we've tried
-    %% to call it.
-    discovery_works := boolean()
+    conflict_tables := [table_name()]
 }.
 
 -spec status(disco_name()) -> info().
@@ -49,22 +49,22 @@ status(Disco) when is_atom(Disco) ->
     OtherTabNodes = gather_tables_and_replication_nodes(AvailNodes, Disco),
     JoinedNodes = joined_nodes(Expected, OtherTabNodes),
     AllTables = all_tables(Expected, OtherTabNodes),
-    {ConflictTables, ConflictNodes} = conflict_tables(Expected, OtherTabNodes),
     {UnknownTables, NodesWithUnknownTables} = unknown_tables(OtherTabNodes, Tables, AllTables),
     {MissingTables, NodesWithMissingTables} = missing_tables(OtherTabNodes, Tables),
+    {ConflictTables, ConflictNodes} = conflict_tables(Expected, OtherTabNodes),
     #{
-        unavailable_nodes => UnNodes,
         available_nodes => AvailNodes,
-        remote_nodes_without_disco => NoDiscoNodes,
+        unavailable_nodes => UnNodes,
         joined_nodes => JoinedNodes,
+        discovered_nodes => DiscoNodesSorted,
+        discovery_works => discovery_works(Info),
+        remote_nodes_without_disco => NoDiscoNodes,
         remote_unknown_tables => UnknownTables,
         remote_missing_tables => MissingTables,
         remote_nodes_with_unknown_tables => NodesWithUnknownTables,
         remote_nodes_with_missing_tables => NodesWithMissingTables,
         conflict_nodes => ConflictNodes,
-        conflict_tables => ConflictTables,
-        discovered_nodes => DiscoNodesSorted,
-        discovery_works => discovery_works(Info)
+        conflict_tables => ConflictTables
     }.
 
 %% Nodes, that host the discovery process
