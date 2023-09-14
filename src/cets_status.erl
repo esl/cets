@@ -74,7 +74,8 @@ status(Disco) when is_atom(Disco) ->
 %% Nodes, that host the discovery process
 -spec available_nodes(disco_name(), [node(), ...]) -> [node()].
 available_nodes(Disco, OnlineNodes) ->
-    lists:filter(fun(Node) -> is_disco_running_on(Node, Disco) end, OnlineNodes).
+    Results = erpc:multicall(OnlineNodes, erlang, whereis, [Disco], infinity),
+    [Node || {Node, {ok, Pid}} <- lists:zip(OnlineNodes, Results), is_pid(Pid)].
 
 remote_nodes_without_disco(DiscoNodes, AvailNodes, OnlineNodes) ->
     lists:filter(fun(Node) -> is_node_without_disco(Node, AvailNodes, OnlineNodes) end, DiscoNodes).
@@ -82,20 +83,15 @@ remote_nodes_without_disco(DiscoNodes, AvailNodes, OnlineNodes) ->
 is_node_without_disco(Node, AvailNodes, OnlineNodes) ->
     lists:member(Node, OnlineNodes) andalso not lists:member(Node, AvailNodes).
 
--spec is_disco_running_on(node(), disco_name()) -> boolean().
-is_disco_running_on(Node, Disco) ->
-    is_pid(rpc:call(Node, erlang, whereis, [Disco])).
-
 -spec get_node_to_tab_nodes_map(AvailNodes, Disco) -> OtherTabNodes when
     AvailNodes :: [node()],
     Disco :: disco_name(),
     OtherTabNodes :: node_to_tab_nodes_map().
 get_node_to_tab_nodes_map(AvailNodes, Disco) ->
     OtherNodes = lists:delete(node(), AvailNodes),
-    OtherTabNodes = [
-        {Node, get_table_to_other_nodes_map_from_disco(Node, Disco)}
-     || Node <- OtherNodes
-    ],
+    F = get_local_table_to_other_nodes_map_from_disco,
+    Results = erpc:multicall(OtherNodes, ?MODULE, F, [Disco], infinity),
+    OtherTabNodes = [{Node, Result} || {Node, {ok, Result}} <- lists:zip(OtherNodes, Results)],
     maps:from_list(OtherTabNodes).
 
 %% Nodes that has our local tables running (but could also have some unknown tables).
@@ -179,21 +175,7 @@ all_tables(Expected, OtherTabNodes) ->
     ordsets:union(TableVariants).
 
 %% Returns nodes for each table hosted on node()
--spec get_table_to_other_nodes_map_from_disco(node(), disco_name()) -> tab_nodes_map().
-get_table_to_other_nodes_map_from_disco(Node, Disco) ->
-    try
-        erpc:call(Node, ?MODULE, get_local_table_to_other_nodes_map_from_disco, [Disco])
-    catch
-        Class:Reason ->
-            ?LOG_ERROR(#{
-                what => get_table_to_other_nodes_map_failed,
-                node => Node,
-                class => Class,
-                reason => Reason
-            }),
-            #{}
-    end.
-
+-spec get_local_table_to_other_nodes_map_from_disco(disco_name()) -> tab_nodes_map().
 get_local_table_to_other_nodes_map_from_disco(Disco) ->
     {ok, Tables} = cets_discovery:get_tables(Disco),
     get_local_table_to_other_nodes_map(Tables).
