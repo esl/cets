@@ -46,7 +46,7 @@ status(Disco) when is_atom(Disco) ->
     AvailNodes = available_nodes(Disco, OnlineNodes),
     NoDiscoNodes = remote_nodes_without_disco(DiscoNodesSorted, AvailNodes, OnlineNodes),
     Expected = get_table_to_other_nodes_map(node(), Tables),
-    OtherTabNodes = gather_tables_and_replication_nodes(AvailNodes, Disco),
+    OtherTabNodes = get_node_to_tab_nodes_map(AvailNodes, Disco),
     JoinedNodes = joined_nodes(Expected, OtherTabNodes),
     AllTables = all_tables(Expected, OtherTabNodes),
     {UnknownTables, NodesWithUnknownTables} = unknown_tables(OtherTabNodes, Tables, AllTables),
@@ -70,23 +70,23 @@ status(Disco) when is_atom(Disco) ->
 %% Nodes, that host the discovery process
 -spec available_nodes(disco_name(), [node(), ...]) -> [node()].
 available_nodes(Disco, OnlineNodes) ->
-    [Node || Node <- OnlineNodes, is_disco_running_on(Node, Disco)].
+    lists:filter(fun(Node) -> is_disco_running_on(Node, Disco) end, OnlineNodes).
 
 remote_nodes_without_disco(DiscoNodes, AvailNodes, OnlineNodes) ->
-    [
-        Node
-     || Node <- DiscoNodes, lists:member(Node, OnlineNodes), not lists:member(Node, AvailNodes)
-    ].
+    lists:filter(fun(Node) -> is_node_without_disco(Node, AvailNodes, OnlineNodes) end, DiscoNodes).
+
+is_node_without_disco(Node, AvailNodes, OnlineNodes) ->
+    lists:member(Node, OnlineNodes) andalso not lists:member(Node, AvailNodes).
 
 -spec is_disco_running_on(node(), disco_name()) -> boolean().
 is_disco_running_on(Node, Disco) ->
     is_pid(rpc:call(Node, erlang, whereis, [Disco])).
 
--spec gather_tables_and_replication_nodes(
-    AvailNodes :: [node()], Disco :: disco_name()
-) ->
+-spec get_node_to_tab_nodes_map(AvailNodes, Disco) -> OtherTabNodes when
+    AvailNodes :: [node()],
+    Disco :: disco_name(),
     OtherTabNodes :: node_to_tab_nodes_map().
-gather_tables_and_replication_nodes(AvailNodes, Disco) ->
+get_node_to_tab_nodes_map(AvailNodes, Disco) ->
     OtherNodes = lists:delete(node(), AvailNodes),
     OtherTabNodes = [
         {Node, get_table_to_other_nodes_map_from_disco(Node, Disco)}
