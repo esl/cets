@@ -94,6 +94,7 @@ cases() ->
         status_remote_nodes_with_unknown_tables,
         status_remote_nodes_with_missing_nodes,
         status_conflict_nodes,
+        get_nodes_request,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -107,6 +108,8 @@ cases() ->
         ack_calling_add_when_server_list_is_empty_is_not_allowed,
         sync_using_name_works,
         insert_many_request,
+        insert_many_requests,
+        insert_many_requests_timeouts,
         insert_into_bag,
         delete_from_bag,
         delete_many_from_bag,
@@ -1195,6 +1198,17 @@ status_conflict_nodes(Config) ->
         fun() -> maps:get(conflict_tables, cets_status:status(DiscoName)) end, [Tab2]
     ).
 
+get_nodes_request(Config) ->
+    #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid4} = start(Node4, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3),
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid4),
+    Res = cets:wait_response(cets:get_nodes_request(Pid2), 5000),
+    ?assertEqual({reply, [Node2, Node3, Node4]}, Res).
+
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
     cets:insert(T1, {1}),
@@ -1345,6 +1359,27 @@ insert_many_request(Config) ->
     R = cets:insert_many_request(Pid, [{a}, {b}]),
     {reply, ok} = cets:wait_response(R, 5000),
     [{a}, {b}] = ets:tab2list(Tab).
+
+insert_many_requests(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    R1 = cets:insert_many_request(Pid1, [{a}, {b}]),
+    R2 = cets:insert_many_request(Pid2, [{a}, {b}]),
+    [{reply, ok}, {reply, ok}] = cets:wait_responses([R1, R2], 5000).
+
+insert_many_requests_timeouts(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    cets:pause(Pid1),
+    R1 = cets:insert_many_request(Pid1, [{a}, {b}]),
+    R2 = cets:insert_many_request(Pid2, [{a}, {b}]),
+    %% We assume 100 milliseconds is more than enough to insert one record
+    %% (it is time sensitive testcase though)
+    [timeout, {reply, ok}] = cets:wait_responses([R1, R2], 100).
 
 insert_into_bag(Config) ->
     T = make_name(Config),

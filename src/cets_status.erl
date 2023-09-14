@@ -1,6 +1,10 @@
 -module(cets_status).
 -export([status/1]).
--ignore_xref([status/1]).
+
+%% RPC callbacks
+-export([get_local_table_to_other_nodes_map_from_disco/1]).
+-ignore_xref([status/1, get_local_table_to_other_nodes_map_from_disco/1]).
+
 -include_lib("kernel/include/logger.hrl").
 
 -type tab_nodes_map() :: #{Table :: atom() => Nodes :: ordsets:ordset(node())}.
@@ -45,7 +49,7 @@ status(Disco) when is_atom(Disco) ->
     OnlineNodes = [node() | nodes()],
     AvailNodes = available_nodes(Disco, OnlineNodes),
     NoDiscoNodes = remote_nodes_without_disco(DiscoNodesSorted, AvailNodes, OnlineNodes),
-    Expected = get_table_to_other_nodes_map(node(), Tables),
+    Expected = get_local_table_to_other_nodes_map(Tables),
     OtherTabNodes = get_node_to_tab_nodes_map(AvailNodes, Disco),
     JoinedNodes = joined_nodes(Expected, OtherTabNodes),
     AllTables = all_tables(Expected, OtherTabNodes),
@@ -177,35 +181,38 @@ all_tables(Expected, OtherTabNodes) ->
 %% Returns nodes for each table hosted on node()
 -spec get_table_to_other_nodes_map_from_disco(node(), disco_name()) -> tab_nodes_map().
 get_table_to_other_nodes_map_from_disco(Node, Disco) ->
-    Tables = get_tables_list_on_node(Node, Disco),
-    get_table_to_other_nodes_map(Node, Tables).
+    try
+        erpc:call(Node, ?MODULE, get_local_table_to_other_nodes_map_from_disco, [Disco])
+    catch
+        Class:Reason ->
+            ?LOG_ERROR(#{
+                what => get_table_to_other_nodes_map_failed,
+                node => Node,
+                class => Class,
+                reason => Reason
+            }),
+            #{}
+    end.
+
+get_local_table_to_other_nodes_map_from_disco(Disco) ->
+    {ok, Tables} = cets_discovery:get_tables(Disco),
+    get_local_table_to_other_nodes_map(Tables).
 
 %% Returns nodes for each table in the Tables list
--spec get_table_to_other_nodes_map(node(), [table_name()]) -> tab_nodes_map().
-get_table_to_other_nodes_map(Node, Tables) ->
-    maps:from_list([{Table, get_node_list_for_table(Node, Table)} || Table <- Tables]).
-
--spec get_tables_list_on_node(Node :: node(), Disco :: disco_name()) -> [table_name()].
-get_tables_list_on_node(Node, Disco) ->
-    case rpc:call(Node, cets_discovery, get_tables, [Disco]) of
-        {ok, Tables} ->
-            Tables;
-        _ ->
-            []
-    end.
-
--spec get_node_list_for_table(Node :: node(), Table :: table_name()) ->
-    Nodes :: ordsets:ordset(node()).
-get_node_list_for_table(Node, Table) ->
-    case catch rpc:call(Node, cets, other_nodes, [Table]) of
-        List when is_list(List) ->
-            ordsets:add_element(Node, List);
-        Other ->
-            ?LOG_ERROR(#{
-                what => cets_get_other_nodes_failed, node => Node, table => Table, reason => Other
-            }),
-            []
-    end.
+-spec get_local_table_to_other_nodes_map([table_name()]) -> tab_nodes_map().
+get_local_table_to_other_nodes_map(Tables) ->
+    RequestIds = lists:map(fun cets:get_nodes_request/1, Tables),
+    Responses = cets:wait_responses(RequestIds, infinity),
+    Zip = lists:zip(Tables, Responses),
+    [
+        begin
+            ?LOG_ERROR(#{what => get_nodes_request_failed, table => Table, reason => Reason}),
+            ok
+        end
+     || {Table, {error, Reason}} <- Zip
+    ],
+    %% Skip bad replies
+    maps:from_list([{Table, Nodes} || {Table, {reply, Nodes}} <- Zip, is_list(Nodes)]).
 
 -spec discovery_works(cets_discovery:system_info()) -> boolean().
 discovery_works(#{last_get_nodes_result := {ok, _}}) ->

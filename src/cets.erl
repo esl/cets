@@ -32,6 +32,7 @@
     send_dump/4,
     table_name/1,
     other_nodes/1,
+    get_nodes_request/1,
     other_pids/1,
     pause/1,
     unpause/2,
@@ -47,6 +48,7 @@
     delete_object_request/2,
     delete_objects_request/2,
     wait_response/2,
+    wait_responses/2,
     init/1,
     handle_call/3,
     handle_cast/2,
@@ -73,13 +75,15 @@
     ping/1,
     info/1,
     other_nodes/1,
+    get_nodes_request/1,
     insert_request/2,
     insert_many_request/2,
     delete_request/2,
     delete_many_request/2,
     delete_object_request/2,
     delete_objects_request/2,
-    wait_response/2
+    wait_response/2,
+    wait_responses/2
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -131,6 +135,7 @@
     | table_name
     | get_info
     | other_servers
+    | get_nodes
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
@@ -156,7 +161,9 @@
     handle_conflict => handle_conflict_fun(),
     handle_wrong_leader => handle_wrong_leader()
 }.
--type response_return() :: {reply, ok} | {error, term()} | timeout.
+%% Reply is usually ok
+-type response_return() :: {reply, Reply :: term()} | {error, {_, _}} | timeout.
+-type response_timeout() :: timeout() | {abs, integer()}.
 
 -export_type([
     request_id/0,
@@ -166,7 +173,9 @@
     long_msg/0,
     info/0,
     table_name/0,
-    servers/0
+    servers/0,
+    response_return/0,
+    response_timeout/0
 ]).
 
 %% API functions
@@ -284,8 +293,16 @@ delete_objects_request(Server, Objects) ->
     cets_call:async_operation(Server, {delete_objects, Objects}).
 
 -spec wait_response(request_id(), timeout()) -> response_return().
-wait_response(Mon, Timeout) ->
-    gen_server:wait_response(Mon, Timeout).
+wait_response(ReqId, Timeout) ->
+    gen_server:wait_response(ReqId, Timeout).
+
+%% @doc Waits for multiple responses
+%% Returns results in the same order as ReqIds
+%% Blocks for maximum Timeout milliseconds
+-spec wait_responses([request_id()], response_timeout()) ->
+    [response_return()].
+wait_responses(ReqIds, Timeout) ->
+    cets_call:wait_responses(ReqIds, Timeout).
 
 -spec get_leader(server_ref()) -> server_pid().
 get_leader(Tab) when is_atom(Tab) ->
@@ -307,6 +324,10 @@ get_leader(Server) ->
 -spec other_nodes(server_ref()) -> ordsets:ordset(node()).
 other_nodes(Server) ->
     lists:usort(pids_to_nodes(other_pids(Server))).
+
+-spec get_nodes_request(server_ref()) -> request_id().
+get_nodes_request(Server) ->
+    gen_server:send_request(Server, get_nodes).
 
 %% Get a list of other CETS processes that are handling this table.
 -spec other_pids(server_ref()) -> servers().
@@ -377,6 +398,8 @@ handle_call({op, Op}, From, State = #{pause_monitors := [_ | _], backlog := Back
     {noreply, State#{backlog := [{Op, From} | Backlog]}};
 handle_call(other_servers, _From, State = #{other_servers := Servers}) ->
     {reply, Servers, State};
+handle_call(get_nodes, _From, State = #{other_servers := Servers}) ->
+    {reply, lists:usort([node() | pids_to_nodes(Servers)]), State};
 handle_call(get_leader, _From, State = #{leader := Leader}) ->
     {reply, Leader, State};
 handle_call(sync, From, State = #{other_servers := Servers}) ->
