@@ -8,6 +8,7 @@
 -export([async_operation/2]).
 -export([sync_operation/2]).
 -export([send_leader_op/2]).
+-export([wait_responses/2]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -91,3 +92,16 @@ send_leader_op(Server, Op, Backoff) ->
         _ ->
             Res
     end.
+
+%% Waits for multiple responces at once
+-spec wait_responses([gen_server:request_id()], cets:response_timeout()) ->
+    [cets:response_return()].
+wait_responses([ReqId], Timeout) ->
+    [gen_server:receive_response(ReqId, Timeout)];
+wait_responses(ReqIds, Timeout) when is_integer(Timeout) ->
+    Start = erlang:monotonic_time(millisecond),
+    wait_responses(ReqIds, {abs, Start + Timeout});
+wait_responses(ReqIds, {abs, _} = Timeout) ->
+    [gen_server:receive_response(ReqId, Timeout) || ReqId <- ReqIds];
+wait_responses(ReqIds, infinity) ->
+    [gen_server:receive_response(ReqId, infinity) || ReqId <- ReqIds].

@@ -27,7 +27,16 @@
 -module(cets_discovery).
 -behaviour(gen_server).
 
--export([start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2]).
+-export([
+    start/1,
+    start_link/1,
+    add_table/2,
+    delete_table/2,
+    get_tables/1,
+    info/1,
+    system_info/1,
+    wait_for_ready/2
+]).
 -export([
     init/1,
     handle_call/3,
@@ -38,7 +47,15 @@
 ]).
 
 -ignore_xref([
-    start/1, start_link/1, add_table/2, info/1, system_info/1, wait_for_ready/2, behaviour_info/1
+    start/1,
+    start_link/1,
+    add_table/2,
+    delete_table/2,
+    get_tables/1,
+    info/1,
+    system_info/1,
+    wait_for_ready/2,
+    behaviour_info/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -47,7 +64,7 @@
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
 -type retry_type() :: initial | after_error | regular.
 
--export_type([get_nodes_result/0]).
+-export_type([get_nodes_result/0, system_info/0]).
 
 -type from() :: {pid(), reference()}.
 -type join_result() :: #{
@@ -106,6 +123,10 @@ start_common(F, Opts) ->
 -spec add_table(server(), cets:table_name()) -> ok.
 add_table(Server, Table) ->
     gen_server:cast(Server, {add_table, Table}).
+
+-spec delete_table(server(), cets:table_name()) -> ok.
+delete_table(Server, Table) ->
+    gen_server:cast(Server, {delete_table, Table}).
 
 -spec get_tables(server()) -> {ok, [cets:table_name()]}.
 get_tables(Server) ->
@@ -176,6 +197,14 @@ handle_cast({add_table, Table}, State = #{tables := Tables}) ->
             self() ! check,
             State2 = State#{tables := ordsets:add_element(Table, Tables)},
             {noreply, State2}
+    end;
+handle_cast({delete_table, Table}, State = #{tables := Tables}) ->
+    case lists:member(Table, Tables) of
+        true ->
+            State2 = State#{tables := ordsets:del_element(Table, Tables)},
+            {noreply, State2};
+        false ->
+            {noreply, State}
     end;
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),

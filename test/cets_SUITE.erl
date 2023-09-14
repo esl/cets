@@ -76,6 +76,9 @@ cases() ->
         node_list_is_correct,
         test_multinode_auto_discovery,
         test_disco_add_table,
+        test_disco_delete_table,
+        test_disco_delete_unknown_table,
+        test_disco_delete_table_twice,
         test_disco_file_appears,
         test_disco_handles_bad_node,
         cets_discovery_fun_backend_works,
@@ -84,6 +87,16 @@ cases() ->
         disco_retried_if_get_nodes_fail,
         disco_uses_regular_retry_interval_in_the_regular_phase,
         disco_handles_node_up_and_down,
+        status_available_nodes,
+        status_available_nodes_do_not_contain_nodes_with_stopped_disco,
+        status_unavailable_nodes,
+        status_joined_nodes,
+        status_discovery_works,
+        status_remote_nodes_without_disco,
+        status_remote_nodes_with_unknown_tables,
+        status_remote_nodes_with_missing_nodes,
+        status_conflict_nodes,
+        get_nodes_request,
         test_locally,
         handle_down_is_called,
         events_are_applied_in_the_correct_order_after_unpause,
@@ -97,6 +110,8 @@ cases() ->
         ack_calling_add_when_server_list_is_empty_is_not_allowed,
         sync_using_name_works,
         insert_many_request,
+        insert_many_requests,
+        insert_many_requests_timeouts,
         insert_into_bag,
         delete_from_bag,
         delete_many_from_bag,
@@ -800,6 +815,32 @@ test_disco_add_table(Config) ->
         cets_discovery:info(Disco),
     ok.
 
+test_disco_delete_table(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Tab = make_name(Config),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_unknown_table(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Tab = make_name(Config),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_table_twice(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Tab = make_name(Config),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
 test_disco_file_appears(Config) ->
     Node1 = node(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
@@ -975,6 +1016,218 @@ disco_handles_node_up_and_down(Config) ->
     %% Check that wait_for_ready still works
     ok = cets_discovery:wait_for_ready(Disco, 5000).
 
+status_available_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, []}, State}
+    end,
+    DiscoName = disco_name(Config),
+    start_disco(Node1, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    start_disco(Node2, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    ?assertMatch(#{available_nodes := [Node1, Node2]}, cets_status:status(DiscoName)).
+
+status_available_nodes_do_not_contain_nodes_with_stopped_disco(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    start_disco(Node1, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    %% Disco not running
+    ?assertMatch(#{available_nodes := [Node1]}, cets_status:status(DiscoName)).
+
+status_unavailable_nodes(Config) ->
+    Node1 = node(),
+    F = fun(State) ->
+        {{ok, [Node1, 'badnode@localhost']}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% Disco needs at least one table to start calling get_nodes function
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)).
+
+status_joined_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    %% Add table using pids (i.e. no need to do RPCs here)
+    cets_discovery:add_table(Disco1, Tab),
+    cets_discovery:add_table(Disco2, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    cets_test_wait:wait_until(fun() -> maps:get(joined_nodes, cets_status:status(DiscoName)) end, [
+        Node1, Node2
+    ]).
+
+status_discovery_works(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    %% Add table using pids (i.e. no need to do RPCs here)
+    cets_discovery:add_table(Disco1, Tab),
+    cets_discovery:add_table(Disco2, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ?assertMatch(#{discovery_works := true}, cets_status:status(DiscoName)).
+
+status_remote_nodes_without_disco(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ?assertMatch(#{remote_nodes_without_disco := [Node2]}, cets_status:status(DiscoName)).
+
+status_remote_nodes_with_unknown_tables(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    %% Node1 does not have Tab2
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab1),
+    {ok, _} = start(Node2, Tab2),
+    %% Add table using pids (i.e. no need to do RPCs here)
+    cets_discovery:add_table(Disco1, Tab1),
+    cets_discovery:add_table(Disco2, Tab1),
+    cets_discovery:add_table(Disco2, Tab2),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_nodes_with_unknown_tables, cets_status:status(DiscoName)) end, [
+            Node2
+        ]
+    ),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_unknown_tables, cets_status:status(DiscoName)) end, [
+            Tab2
+        ]
+    ).
+
+status_remote_nodes_with_missing_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    %% Node2 does not have Tab2
+    {ok, _} = start(Node1, Tab1),
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab1),
+    cets_discovery:add_table(Disco1, Tab1),
+    cets_discovery:add_table(Disco1, Tab2),
+    cets_discovery:add_table(Disco2, Tab1),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_nodes_with_missing_tables, cets_status:status(DiscoName)) end, [
+            Node2
+        ]
+    ),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(remote_missing_tables, cets_status:status(DiscoName)) end, [
+            Tab2
+        ]
+    ).
+
+status_conflict_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, _} = start(Node1, Tab1),
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab1),
+    {ok, Pid22} = start(Node2, Tab2),
+    cets_discovery:add_table(Disco1, Tab1),
+    cets_discovery:add_table(Disco1, Tab2),
+    cets_discovery:add_table(Disco2, Tab1),
+    cets_discovery:add_table(Disco2, Tab2),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    set_other_servers(Pid22, []),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(conflict_nodes, cets_status:status(DiscoName)) end, [Node2]
+    ),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(conflict_tables, cets_status:status(DiscoName)) end, [Tab2]
+    ).
+
+get_nodes_request(Config) ->
+    #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, Pid2} = start(Node2, Tab),
+    {ok, Pid3} = start(Node3, Tab),
+    {ok, Pid4} = start(Node4, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3),
+    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid4),
+    Res = cets:wait_response(cets:get_nodes_request(Pid2), 5000),
+    ?assertEqual({reply, [Node2, Node3, Node4]}, Res).
+
 test_locally(Config) ->
     #{tabs := [T1, T2]} = given_two_joined_tables(Config),
     cets:insert(T1, {1}),
@@ -1125,6 +1378,27 @@ insert_many_request(Config) ->
     R = cets:insert_many_request(Pid, [{a}, {b}]),
     {reply, ok} = cets:wait_response(R, 5000),
     [{a}, {b}] = ets:tab2list(Tab).
+
+insert_many_requests(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    R1 = cets:insert_many_request(Pid1, [{a}, {b}]),
+    R2 = cets:insert_many_request(Pid2, [{a}, {b}]),
+    [{reply, ok}, {reply, ok}] = cets:wait_responses([R1, R2], 5000).
+
+insert_many_requests_timeouts(Config) ->
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, Pid1} = start_local(Tab1),
+    {ok, Pid2} = start_local(Tab2),
+    cets:pause(Pid1),
+    R1 = cets:insert_many_request(Pid1, [{a}, {b}]),
+    R2 = cets:insert_many_request(Pid2, [{a}, {b}]),
+    %% We assume 100 milliseconds is more than enough to insert one record
+    %% (it is time sensitive testcase though)
+    [timeout, {reply, ok}] = cets:wait_responses([R1, R2], 100).
 
 insert_into_bag(Config) ->
     T = make_name(Config),
@@ -1451,6 +1725,11 @@ start(Node, Tab) ->
     schedule_cleanup(Pid),
     {ok, Pid}.
 
+start_disco(Node, Opts) ->
+    {ok, Pid} = rpc(Node, cets_discovery, start, [Opts]),
+    schedule_cleanup(Pid),
+    Pid.
+
 insert(Node, Tab, Rec) ->
     rpc(Node, cets, insert, [Tab, Rec]).
 
@@ -1517,6 +1796,10 @@ make_name(Config, Num) ->
 lock_name(Config) ->
     Testcase = proplists:get_value(testcase, Config),
     list_to_atom(atom_to_list(Testcase) ++ "_lock").
+
+disco_name(Config) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_disco").
 
 count_remote_ops_in_the_message_box(Pid) ->
     {messages, Messages} = erlang:process_info(Pid, messages),
