@@ -77,6 +77,8 @@ cases() ->
         test_multinode_auto_discovery,
         test_disco_add_table,
         test_disco_delete_table,
+        test_disco_delete_unknown_table,
+        test_disco_delete_table_twice,
         test_disco_file_appears,
         test_disco_handles_bad_node,
         cets_discovery_fun_backend_works,
@@ -819,6 +821,23 @@ test_disco_delete_table(Config) ->
     Tab = make_name(Config),
     cets_discovery:add_table(Disco, Tab),
     #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_unknown_table(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Tab = make_name(Config),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_table_twice(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    Tab = make_name(Config),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
     cets_discovery:delete_table(Disco, Tab),
     #{tables := []} = cets_discovery:system_info(Disco).
 
