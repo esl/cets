@@ -23,6 +23,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
+    insert_serial/2,
     delete/2,
     delete_many/2,
     delete_object/2,
@@ -63,6 +64,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
+    insert_serial/2,
     delete/2,
     delete_many/2,
     delete_object/2,
@@ -243,11 +245,21 @@ insert_many(Server, Records) when is_list(Records) ->
 %% extra messaging is required.
 -spec insert_new(server_ref(), tuple()) -> WasInserted :: boolean().
 insert_new(Server, Rec) when is_tuple(Rec) ->
-    Res = cets_call:send_leader_op(Server, {insert_new, Rec}),
+    Res = cets_call:send_leader_op(Server, {leader_op, {insert_new, Rec}}),
     handle_insert_new_result(Res).
 
 handle_insert_new_result(ok) -> true;
 handle_insert_new_result({error, rejected}) -> false.
+
+%% @doc Serialized version of `insert/2'.
+%%
+%% All `insert_serial' calls are sent to the leader node first.
+%%
+%% Similar to `insert_new/2', but overwrites the data silently on conflict.
+%% It could be used to update entries, which use not node-specific keys.
+-spec insert_serial(server_ref(), tuple()) -> ok.
+insert_serial(Server, Rec) when is_tuple(Rec) ->
+    ok = cets_call:send_leader_op(Server, {insert, Rec}).
 
 %% Removes an object with the key from all nodes in the cluster.
 %% Ideally, nodes should only remove data that they've inserted, not data from other node.

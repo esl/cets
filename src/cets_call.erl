@@ -70,7 +70,7 @@ send_leader_op(Server, Op) ->
 
 send_leader_op(Server, Op, Backoff) ->
     Leader = cets:get_leader(Server),
-    Res = maybe_sync_operation(Leader, {leader_op, Op}),
+    Res = maybe_sync_operation(Leader, Op),
     case Res of
         {error, {wrong_leader, ExpectedLeader}} ->
             ?LOG_WARNING(#{

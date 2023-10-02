@@ -56,6 +56,8 @@ cases() ->
         insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
         insert_new_fails_if_the_local_server_is_dead,
+        insert_serial_works,
+        insert_serial_overwrites_data,
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
         join_ref_is_same_after_join,
@@ -380,6 +382,19 @@ insert_new_fails_if_the_local_server_is_dead(_Config) ->
     catch
         exit:{noproc, {gen_server, call, _}} -> ok
     end.
+
+insert_serial_works(Config) ->
+    #{pid1 := Pid1, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    ok = cets:insert_serial(Pid1, {a, 1}),
+    [{a, 1}] = cets:dump(Tab1),
+    [{a, 1}] = cets:dump(Tab2).
+
+insert_serial_overwrites_data(Config) ->
+    #{pid1 := Pid1, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    ok = cets:insert_serial(Pid1, {a, 1}),
+    ok = cets:insert_serial(Pid1, {a, 2}),
+    [{a, 2}] = cets:dump(Tab1),
+    [{a, 2}] = cets:dump(Tab2).
 
 leader_is_the_same_in_metadata_after_join(Config) ->
     #{tabs := [T1, T2], pids := [Pid1, Pid2]} = given_two_joined_tables(Config),
