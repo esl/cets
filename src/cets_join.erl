@@ -6,7 +6,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 -ifdef(TEST).
--export([check_could_reach_each_other/2]).
+-export([check_could_reach_each_other/3]).
 -endif.
 
 -type lock_key() :: term().
@@ -77,7 +77,8 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
         %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
         %% Do joining in a separate process to reduce GC
-        cets_long:run_spawn(Info, fun() -> join2(LocalPid, RemotePid, JoinOpts) end)
+        FF = handle_throw(fun() -> join2(Info, LocalPid, RemotePid, JoinOpts) end),
+        cets_long:run_spawn(Info, FF)
     end,
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
@@ -94,8 +95,8 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
 
 %% Exchanges data and a list of servers.
 %% Pauses new operations during the exchange.
--spec join2(server_pid(), server_pid(), join_opts()) -> ok.
-join2(LocalPid, RemotePid, JoinOpts) ->
+-spec join2(cets_long:log_info(), server_pid(), server_pid(), join_opts()) -> ok.
+join2(Info, LocalPid, RemotePid, JoinOpts) ->
     checkpoint(join_start, JoinOpts),
     JoinRef = make_ref(),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
@@ -105,7 +106,7 @@ join2(LocalPid, RemotePid, JoinOpts) ->
     checkpoint(before_get_pids, JoinOpts),
     LocPids = get_pids(LocalPid),
     RemPids = get_pids(RemotePid),
-    check_pids(LocPids, RemPids, JoinOpts),
+    check_pids(Info, LocPids, RemPids, JoinOpts),
     AllPids = LocPids ++ RemPids,
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
     %% Merges data from two partitions together.
@@ -118,8 +119,8 @@ join2(LocalPid, RemotePid, JoinOpts) ->
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         %% Check that still fully connected after getting the dumps
         %% and before making any changes
-        check_fully_connected(LocPids),
-        check_fully_connected(RemPids),
+        check_fully_connected(Info, LocPids),
+        check_fully_connected(Info, RemPids),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, ServerOpts),
         RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
         LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
@@ -190,16 +191,16 @@ apply_resolver_for_sorted(LocalDump, RemoteDump, _F, _Pos, LocalAcc, RemoteAcc) 
 get_pids(Pid) ->
     ordsets:add_element(Pid, cets:other_pids(Pid)).
 
--spec check_pids(cets:servers(), cets:servers(), join_opts()) -> ok.
-check_pids(LocPids, RemPids, JoinOpts) ->
-    check_do_not_overlap(LocPids, RemPids),
+-spec check_pids(cets_long:log_info(), cets:servers(), cets:servers(), join_opts()) -> ok.
+check_pids(Info, LocPids, RemPids, JoinOpts) ->
+    check_do_not_overlap(Info, LocPids, RemPids),
     checkpoint(before_check_fully_connected, JoinOpts),
-    check_fully_connected(LocPids),
-    check_fully_connected(RemPids),
-    check_could_reach_each_other(LocPids, RemPids).
+    check_fully_connected(Info, LocPids),
+    check_fully_connected(Info, RemPids),
+    check_could_reach_each_other(Info, LocPids, RemPids).
 
--spec check_could_reach_each_other(cets:servers(), cets:servers()) -> ok.
-check_could_reach_each_other(LocPids, RemPids) ->
+-spec check_could_reach_each_other(cets_long:log_info(), cets:servers(), cets:servers()) -> ok.
+check_could_reach_each_other(Info, LocPids, RemPids) ->
     LocNodes = lists:usort(lists:map(fun node/1, LocPids)),
     RemNodes = lists:usort(lists:map(fun node/1, RemPids)),
     Pairs = lists:usort([
@@ -221,20 +222,23 @@ check_could_reach_each_other(LocPids, RemPids) ->
         [] ->
             ok;
         _ ->
-            ?LOG_ERROR(#{
+            ?LOG_ERROR(Info#{
                 what => check_could_reach_each_other_failed,
                 node_pairs_not_connected => NotConnected
             }),
             error(check_could_reach_each_other_failed)
     end.
 
--spec check_do_not_overlap(cets:servers(), cets:servers()) -> ok.
-check_do_not_overlap(LocPids, RemPids) ->
+-spec check_do_not_overlap(cets_long:log_info(), cets:servers(), cets:servers()) -> ok.
+check_do_not_overlap(_Info, Pids, Pids) ->
+    %% Same pids, looks like cluster is fully connected, just exit
+    throw(skip_join_when_pids_are_the_same);
+check_do_not_overlap(Info, LocPids, RemPids) ->
     case ordsets:intersection(LocPids, RemPids) of
         [] ->
             ok;
         Overlap ->
-            ?LOG_ERROR(#{
+            ?LOG_ERROR(Info#{
                 what => check_do_not_overlap_failed,
                 local_servers => LocPids,
                 remote_servers => RemPids,
@@ -243,16 +247,26 @@ check_do_not_overlap(LocPids, RemPids) ->
             error(check_do_not_overlap_failed)
     end.
 
+handle_throw(F) ->
+    fun() ->
+        try
+            F()
+        catch
+            throw:skip_join_when_pids_are_the_same ->
+                ok
+        end
+    end.
+
 %% Checks that other_pids lists match for all nodes
 %% If they are not matching - the node removal process could be in progress
--spec check_fully_connected(cets:servers()) -> ok.
-check_fully_connected(Pids) ->
+-spec check_fully_connected(cets_long:log_info(), cets:servers()) -> ok.
+check_fully_connected(Info, Pids) ->
     Lists = [get_pids(Pid) || Pid <- Pids],
     case lists:usort([Pids | Lists]) of
         [_] ->
-            check_same_join_ref(Pids);
+            check_same_join_ref(Info, Pids);
         UniqueLists ->
-            ?LOG_ERROR(#{
+            ?LOG_ERROR(Info#{
                 what => check_fully_connected_failed,
                 expected_pids => Pids,
                 server_lists => Lists,
@@ -263,14 +277,14 @@ check_fully_connected(Pids) ->
 
 %% Check if all nodes have the same join_ref
 %% If not - we don't want to continue joining
--spec check_same_join_ref(cets:servers()) -> ok.
-check_same_join_ref(Pids) ->
+-spec check_same_join_ref(cets_long:log_info(), cets:servers()) -> ok.
+check_same_join_ref(Info, Pids) ->
     Refs = [pid_to_join_ref(Pid) || Pid <- Pids],
     case lists:usort(Refs) of
         [_] ->
             ok;
         UniqueRefs ->
-            ?LOG_ERROR(#{
+            ?LOG_ERROR(Info#{
                 what => check_same_join_ref_failed,
                 refs => lists:zip(Pids, Refs),
                 unique_refs => UniqueRefs

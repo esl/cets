@@ -141,7 +141,9 @@ cases() ->
 
 only_for_logger_cases() ->
     [
-        run_tracked_logged_check_logger
+        run_tracked_logged_check_logger,
+        logs_are_printed_when_join_fails_because_servers_overlap,
+        join_done_already_while_waiting_for_lock_so_do_nothing_silently
     ].
 
 seq_cases() ->
@@ -657,6 +659,26 @@ join_fails_because_servers_overlap(Config) ->
     {error, check_do_not_overlap_failed} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
 
+%% join_fails_because_servers_overlap testcase, but we check the logging.
+%% We check that `?LOG_ERROR(#{what => check_do_not_overlap_failed})' is called.
+logs_are_printed_when_join_fails_because_servers_overlap(Config) ->
+    LogRef = make_ref(),
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
+    set_other_servers(Pid1, [Pid3]),
+    set_other_servers(Pid2, [Pid3]),
+    {error, check_do_not_overlap_failed} =
+        cets_join:join(lock_name(Config), #{log_ref => LogRef}, Pid1, Pid2, #{}),
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := error,
+            msg := {report, #{what := check_do_not_overlap_failed, log_ref := LogRef}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
+
 remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
     {ok, Pid1} = start_local(make_name(Config, 1)),
     {ok, Pid2} = start_local(make_name(Config, 2)),
@@ -695,6 +717,65 @@ join_retried_if_lock_is_busy(Config) ->
         ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
     end),
     receive_message(before_retry).
+
+join_done_already_while_waiting_for_lock_so_do_nothing_silently(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Me = self(),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
+    {ok, Pid3} = start_local(make_name(Config, 3)),
+    {ok, Pid4} = start_local(make_name(Config, 4)),
+    Lock = lock_name(Config),
+    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{}),
+    ok = cets_join:join(Lock, #{}, Pid3, Pid4, #{}),
+    SleepyF = fun
+        (join_start) ->
+            Me ! {join_start, self()},
+            receive
+                continue_joining ->
+                    ok
+            end;
+        (_) ->
+            ok
+    end,
+    F = fun(_) -> ok end,
+    %% It is to just match logs
+    LogRef = make_ref(),
+    Info = #{log_ref => LogRef},
+    %% Get the lock in a separate process
+    spawn_link(fun() ->
+        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => SleepyF}),
+        Me ! second_join_returns
+    end),
+    JoinPid =
+        receive
+            {join_start, JoinPid1} ->
+                JoinPid1
+        after 5000 ->
+            ct:fail(join_start_timeout)
+        end,
+    spawn_link(fun() ->
+        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F}),
+        Me ! second_join_returns
+    end),
+    JoinPid ! continue_joining,
+    %% At this point our first join would finish, after that our second join should exit too.
+    receive_message(second_join_returns),
+    %% Ensure all logs are received by removing the handler, it is a sync operation.
+    %% (we do not expect any logs anyway).
+    logger:remove_handler(?FUNCTION_NAME),
+    %% Ensure there is nothing logged, we use log_ref to ignore logs from other tests.
+    %% The counter example for no logging is
+    %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := Level,
+            msg := {report, #{log_ref := LogRef}}
+        }} when Level =:= warning; Level =:= error ->
+            ct:fail(got_logging_but_should_not)
+    after 0 ->
+        ok
+    end.
 
 send_dump_contains_already_added_servers(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
@@ -1467,7 +1548,7 @@ check_could_reach_each_other_fails(_Config) ->
     ?assertException(
         error,
         check_could_reach_each_other_failed,
-        cets_join:check_could_reach_each_other([self()], [bad_node_pid()])
+        cets_join:check_could_reach_each_other(#{}, [self()], [bad_node_pid()])
     ).
 
 %% Cases to improve code coverage
@@ -1540,15 +1621,16 @@ run_tracked_logged(_Config) ->
 
 run_tracked_logged_check_logger(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
     F = fun() -> timer:sleep(5000) end,
     %% Run it in a separate process, so we can check logs in the test process
     %% Overwrite default five seconds interval with 10 milliseconds
-    spawn_link(fun() -> cets_long:run_tracked(#{report_interval => 10}, F) end),
+    spawn_link(fun() -> cets_long:run_tracked(#{report_interval => 10, log_ref => LogRef}, F) end),
     %% Exit test after first log event
     receive
         {log, ?FUNCTION_NAME, #{
             level := warning,
-            msg := {report, #{what := long_task_progress}}
+            msg := {report, #{what := long_task_progress, log_ref := LogRef}}
         }} ->
             ok
     after 5000 ->
