@@ -90,8 +90,10 @@ cases() ->
         status_available_nodes,
         status_available_nodes_do_not_contain_nodes_with_stopped_disco,
         status_unavailable_nodes,
+        status_unavailable_nodes_is_subset_of_discovery_nodes,
         status_joined_nodes,
         status_discovery_works,
+        status_discovered_nodes,
         status_remote_nodes_without_disco,
         status_remote_nodes_with_unknown_tables,
         status_remote_nodes_with_missing_nodes,
@@ -1054,6 +1056,34 @@ status_unavailable_nodes(Config) ->
     ok = cets_discovery:wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)).
 
+status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
+    Node1 = node(),
+    Me = self(),
+    %% We use our process dictionary to set disco nodes dynamically
+    put(disco_nodes, [Node1, 'badnode@localhost']),
+    F = fun(State) ->
+        {dictionary, Dict} = erlang:process_info(Me, dictionary),
+        Nodes = proplists:get_value(disco_nodes, Dict),
+        {{ok, Nodes}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% Disco needs at least one table to start calling get_nodes function
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)),
+    %% Remove badnode from disco
+    put(disco_nodes, [Node1]),
+    %% Force check.
+    Disco ! check,
+    %% The unavailable_nodes list is updated
+    CondF = fun() -> maps:get(unavailable_nodes, cets_status:status(DiscoName)) end,
+    cets_test_wait:wait_until(CondF, []).
+
 status_joined_nodes(Config) ->
     Node1 = node(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
@@ -1099,6 +1129,24 @@ status_discovery_works(Config) ->
     cets_discovery:add_table(Disco2, Tab),
     ok = cets_discovery:wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{discovery_works := true}, cets_status:status(DiscoName)).
+
+status_discovered_nodes(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    %% Add table using pids (i.e. no need to do RPCs here)
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ?assertMatch(#{discovered_nodes := [Node1, Node2]}, cets_status:status(DiscoName)).
 
 status_remote_nodes_without_disco(Config) ->
     Node1 = node(),
