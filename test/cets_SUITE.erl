@@ -1091,12 +1091,11 @@ status_joined_nodes(Config) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    DiscoOpts = #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco2 = start_disco(Node2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
+    },
+    Disco1 = start_disco(Node1, DiscoOpts),
+    Disco2 = start_disco(Node2, DiscoOpts),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
@@ -1115,12 +1114,11 @@ status_discovery_works(Config) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    DiscoOpts = #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco2 = start_disco(Node2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
+    },
+    Disco1 = start_disco(Node1, DiscoOpts),
+    Disco2 = start_disco(Node2, DiscoOpts),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
@@ -1171,12 +1169,11 @@ status_remote_nodes_with_unknown_tables(Config) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    DiscoOpts = #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco2 = start_disco(Node2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
+    },
+    Disco1 = start_disco(Node1, DiscoOpts),
+    Disco2 = start_disco(Node2, DiscoOpts),
     Tab1 = make_name(Config, 1),
     Tab2 = make_name(Config, 2),
     %% Node1 does not have Tab2
@@ -1206,12 +1203,11 @@ status_remote_nodes_with_missing_nodes(Config) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    DiscoOpts = #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco2 = start_disco(Node2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
+    },
+    Disco1 = start_disco(Node1, DiscoOpts),
+    Disco2 = start_disco(Node2, DiscoOpts),
     Tab1 = make_name(Config, 1),
     Tab2 = make_name(Config, 2),
     %% Node2 does not have Tab2
@@ -1240,12 +1236,11 @@ status_conflict_nodes(Config) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    DiscoOpts = #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco2 = start_disco(Node2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
+    },
+    Disco1 = start_disco(Node1, DiscoOpts),
+    Disco2 = start_disco(Node2, DiscoOpts),
     Tab1 = make_name(Config, 1),
     Tab2 = make_name(Config, 2),
     {ok, _} = start(Node1, Tab1),
