@@ -143,7 +143,7 @@ only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
         logs_are_printed_when_join_fails_because_servers_overlap,
-        join_done_already_while_waiting_for_lock_so_do_nothing_silently
+        join_done_already_while_waiting_for_lock_so_do_nothing
     ].
 
 seq_cases() ->
@@ -718,48 +718,31 @@ join_retried_if_lock_is_busy(Config) ->
     end),
     receive_message(before_retry).
 
-join_done_already_while_waiting_for_lock_so_do_nothing_silently(Config) ->
+join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    {ok, Pid3} = start_local(make_name(Config, 3)),
-    {ok, Pid4} = start_local(make_name(Config, 4)),
+    #{pids := [Pid1, Pid2, Pid3, Pid4]} = given_n_servers(Config, 4, #{}),
     Lock = lock_name(Config),
     ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{}),
     ok = cets_join:join(Lock, #{}, Pid3, Pid4, #{}),
-    SleepyF = fun
-        (join_start) ->
-            Me ! {join_start, self()},
-            receive
-                continue_joining ->
-                    ok
-            end;
-        (_) ->
-            ok
-    end,
-    F = fun(_) -> ok end,
     %% It is to just match logs
     LogRef = make_ref(),
     Info = #{log_ref => LogRef},
+    F1 = send_join_start_back_and_wait_for_continue_joining(),
+    F2 = fun(_) -> ok end,
     %% Get the lock in a separate process
     spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => SleepyF}),
-        Me ! second_join_returns
+        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F1}),
+        Me ! first_join_returns
     end),
-    JoinPid =
-        receive
-            {join_start, JoinPid1} ->
-                JoinPid1
-        after 5000 ->
-            ct:fail(join_start_timeout)
-        end,
+    JoinPid = receive_message_with_arg(join_start),
     spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F}),
+        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F2}),
         Me ! second_join_returns
     end),
     JoinPid ! continue_joining,
     %% At this point our first join would finish, after that our second join should exit too.
+    receive_message(first_join_returns),
     receive_message(second_join_returns),
     %% Ensure all logs are received by removing the handler, it is a sync operation.
     %% (we do not expect any logs anyway).
@@ -767,15 +750,7 @@ join_done_already_while_waiting_for_lock_so_do_nothing_silently(Config) ->
     %% Ensure there is nothing logged, we use log_ref to ignore logs from other tests.
     %% The counter example for no logging is
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := Level,
-            msg := {report, #{log_ref := LogRef}}
-        }} when Level =:= warning; Level =:= error ->
-            ct:fail(got_logging_but_should_not)
-    after 0 ->
-        ok
-    end.
+    assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
 
 send_dump_contains_already_added_servers(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
@@ -1868,6 +1843,12 @@ receive_message(M) ->
     after 5000 -> error({receive_message_timeout, M})
     end.
 
+receive_message_with_arg(Tag) ->
+    receive
+        {Tag, Arg} -> Arg
+    after 5000 -> error({receive_message_with_arg_timeout, Tag})
+    end.
+
 make_name(Config) ->
     make_name(Config, 1).
 
@@ -1918,10 +1899,18 @@ given_3_servers(Config) ->
     given_3_servers(Config, #{}).
 
 given_3_servers(Config, Opts) ->
-    {ok, Pid1} = start_local(T1 = make_name(Config, 1), Opts),
-    {ok, Pid2} = start_local(T2 = make_name(Config, 2), Opts),
-    {ok, Pid3} = start_local(T3 = make_name(Config, 3), Opts),
-    #{pids => [Pid1, Pid2, Pid3], tabs => [T1, T2, T3]}.
+    given_n_servers(Config, 3, Opts).
+
+given_n_servers(Config, N, Opts) ->
+    Tabs = [make_name(Config, X) || X <- lists:seq(1, N)],
+    Pids = [
+        begin
+            {ok, Pid} = start_local(Tab, Opts),
+            Pid
+        end
+     || Tab <- Tabs
+    ],
+    #{pids => Pids, tabs => Tabs}.
 
 stopped_pid() ->
     %% Get a pid for a stopped process
@@ -1964,3 +1953,27 @@ bad_node_pid_binary() ->
     %% Pid <0.90.0> on badnode@localhost
     <<131, 88, 100, 0, 17, 98, 97, 100, 110, 111, 100, 101, 64, 108, 111, 99, 97, 108, 104, 111,
         115, 116, 0, 0, 0, 90, 0, 0, 0, 0, 100, 206, 70, 92>>.
+
+assert_nothing_is_logged(LogHandlerId, LogRef) ->
+    receive
+        {log, LogHandlerId, #{
+            level := Level,
+            msg := {report, #{log_ref := LogRef}}
+        }} when Level =:= warning; Level =:= error ->
+            ct:fail(got_logging_but_should_not)
+    after 0 ->
+        ok
+    end.
+
+send_join_start_back_and_wait_for_continue_joining() ->
+    Me = self(),
+    fun
+        (join_start) ->
+            Me ! {join_start, self()},
+            receive
+                continue_joining ->
+                    ok
+            end;
+        (_) ->
+            ok
+    end.
