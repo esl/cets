@@ -56,7 +56,7 @@ cases() ->
         insert_new_is_retried_when_leader_is_reelected,
         insert_new_fails_if_the_leader_dies,
         insert_new_fails_if_the_local_server_is_dead,
-        insert_new_or_read_works,
+        insert_new_or_lookup_works,
         insert_serial_works,
         insert_serial_overwrites_data,
         insert_overwrites_data_inconsistently,
@@ -389,16 +389,16 @@ insert_new_fails_if_the_local_server_is_dead(_Config) ->
         exit:{noproc, {gen_server, call, _}} -> ok
     end.
 
-insert_new_or_read_works(Config) ->
+insert_new_or_lookup_works(Config) ->
     #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     Rec1 = {alice, 32},
     Rec2 = {alice, 33},
-    {true, [Rec1]} = cets:insert_new_or_read(Pid1, Rec1),
+    {true, [Rec1]} = cets:insert_new_or_lookup(Pid1, Rec1),
     %% Duplicate found
-    {false, [Rec1]} = cets:insert_new_or_read(Pid1, Rec1),
-    {false, [Rec1]} = cets:insert_new_or_read(Pid2, Rec1),
-    {false, [Rec1]} = cets:insert_new_or_read(Pid1, Rec2),
-    {false, [Rec1]} = cets:insert_new_or_read(Pid2, Rec2).
+    {false, [Rec1]} = cets:insert_new_or_lookup(Pid1, Rec1),
+    {false, [Rec1]} = cets:insert_new_or_lookup(Pid2, Rec1),
+    {false, [Rec1]} = cets:insert_new_or_lookup(Pid1, Rec2),
+    {false, [Rec1]} = cets:insert_new_or_lookup(Pid2, Rec2).
 
 insert_serial_works(Config) ->
     #{pid1 := Pid1, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),

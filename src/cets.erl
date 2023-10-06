@@ -23,7 +23,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
-    insert_new_or_read/2,
+    insert_new_or_lookup/2,
     insert_serial/2,
     delete/2,
     delete_many/2,
@@ -65,7 +65,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
-    insert_new_or_read/2,
+    insert_new_or_lookup/2,
     insert_serial/2,
     delete/2,
     delete_many/2,
@@ -111,7 +111,7 @@
     | {delete_many, [term()]}
     | {delete_objects, [term()]}
     | {insert_new, tuple()}
-    | {insert_new_or_read, tuple()}
+    | {insert_new_or_lookup, tuple()}
     | {leader_op, op()}.
 -type remote_op() ::
     {remote_op, Op :: op(), From :: from(), AckPid :: ack_pid(), JoinRef :: join_ref()}.
@@ -259,16 +259,16 @@ handle_insert_new_result({error, rejected}) -> false.
 %% This would require a retry mechanism coded each time in the client code.
 %% This function asks the server to return the existing record, so the usage
 %% could be simplified
--spec insert_new_or_read(server_ref(), tuple()) -> {WasInserted, ReadRecords} when
+-spec insert_new_or_lookup(server_ref(), tuple()) -> {WasInserted, ReadRecords} when
     WasInserted :: boolean(),
     ReadRecords :: [tuple()].
-insert_new_or_read(Server, Rec) when is_tuple(Rec) ->
-    Res = cets_call:send_leader_op(Server, {insert_new_or_read, Rec}),
-    handle_insert_new_or_read(Res, Rec).
+insert_new_or_lookup(Server, Rec) when is_tuple(Rec) ->
+    Res = cets_call:send_leader_op(Server, {insert_new_or_lookup, Rec}),
+    handle_insert_new_or_lookup(Res, Rec).
 
-handle_insert_new_or_read(ok, Rec) ->
+handle_insert_new_or_lookup(ok, Rec) ->
     {true, [Rec]};
-handle_insert_new_or_read({error, {rejected, Recs}}, _CandidateRec) ->
+handle_insert_new_or_lookup({error, {rejected, Recs}}, _CandidateRec) ->
     {false, Recs}.
 
 %% @doc Serialized version of `insert/2'.
@@ -617,7 +617,7 @@ do_table_op({delete_objects, Objects}, Tab) ->
     ets_delete_objects(Tab, Objects);
 do_table_op({insert_new, Rec}, Tab) ->
     ets:insert_new(Tab, Rec);
-do_table_op({insert_new_or_read, Rec}, Tab) ->
+do_table_op({insert_new_or_lookup, Rec}, Tab) ->
     ets:insert_new(Tab, Rec).
 
 %% Handle operation locally and replicate it across the cluster
@@ -631,7 +631,7 @@ handle_op(Op, From, State) ->
 -spec rejected_result(op(), state()) -> term().
 rejected_result({insert_new, _Rec}, _State) ->
     {error, rejected};
-rejected_result({insert_new_or_read, Rec}, #{keypos := KeyPos, tab := Tab}) ->
+rejected_result({insert_new_or_lookup, Rec}, #{keypos := KeyPos, tab := Tab}) ->
     Key = element(KeyPos, Rec),
     %% Return a list of records, because the table could be a bag
     Recs = ets:lookup(Tab, Key),
