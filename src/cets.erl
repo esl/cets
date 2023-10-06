@@ -548,15 +548,17 @@ set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
--spec ets_delete_keys(table_name(), [term()]) -> ok.
+%% ETS returns booleans instead of ok, because ETS API is old and inspired by Prolog.
+%% So, match the API logic here.
+-spec ets_delete_keys(table_name(), [term()]) -> true.
 ets_delete_keys(Tab, Keys) ->
     [ets:delete(Tab, Key) || Key <- Keys],
-    ok.
+    true.
 
--spec ets_delete_objects(table_name(), [tuple()]) -> ok.
+-spec ets_delete_objects(table_name(), [tuple()]) -> true.
 ets_delete_objects(Tab, Objects) ->
     [ets:delete_object(Tab, Object) || Object <- Objects],
-    ok.
+    true.
 
 %% Handle operation from a remote node
 -spec handle_remote_op(op(), from(), ack_pid(), join_ref(), state()) -> ok.
@@ -575,11 +577,11 @@ handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
     cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
--spec do_op(op(), state()) -> ok | boolean().
+-spec do_op(op(), state()) -> boolean().
 do_op(Op, #{tab := Tab}) ->
     do_table_op(Op, Tab).
 
--spec do_table_op(op(), table_name()) -> ok | boolean().
+-spec do_table_op(op(), table_name()) -> boolean().
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
@@ -611,8 +613,6 @@ handle_leader_op(Op, From, State = #{is_leader := true}) ->
             gen_server:reply(From, {error, rejected}),
             ok;
         true ->
-            replicate(Op, From, State);
-        ok ->
             replicate(Op, From, State)
     end;
 handle_leader_op(Op, From, State = #{leader := Leader}) ->
