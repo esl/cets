@@ -58,6 +58,9 @@ cases() ->
         insert_new_fails_if_the_local_server_is_dead,
         insert_serial_works,
         insert_serial_overwrites_data,
+        insert_overwrites_data_inconsistently,
+        insert_new_does_not_overwrite_data,
+        insert_serial_overwrites_data_consistently,
         insert_serial_works_when_leader_is_back,
         insert_serial_blocks_when_leader_is_not_back,
         leader_is_the_same_in_metadata_after_join,
@@ -395,6 +398,135 @@ insert_serial_overwrites_data(Config) ->
     #{pid1 := Pid1, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
     ok = cets:insert_serial(Pid1, {a, 1}),
     ok = cets:insert_serial(Pid1, {a, 2}),
+    [{a, 2}] = cets:dump(Tab1),
+    [{a, 2}] = cets:dump(Tab2).
+
+%% Test case when both servers receive a request to update the same key.
+%% Compare with insert_serial_overwrites_data_consistently
+%% and insert_new_does_not_overwrite_data.
+insert_overwrites_data_inconsistently(Config) ->
+    Me = self(),
+    #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} =
+        given_two_joined_tables(Config),
+    spawn_link(fun() ->
+        sys:replace_state(Pid1, fun(State) ->
+            Me ! replacing_state1,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    spawn_link(fun() ->
+        sys:replace_state(Pid2, fun(State) ->
+            Me ! replacing_state2,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    receive_message(replacing_state1),
+    receive_message(replacing_state2),
+    %% Insert at the same time
+    spawn_link(fun() ->
+        ok = cets:insert(Tab1, {a, 1}),
+        Me ! inserted1
+    end),
+    spawn_link(fun() ->
+        ok = cets:insert(Tab2, {a, 2}),
+        Me ! inserted2
+    end),
+    %% Wait till got an insert op in the queue
+    wait_till_message_queue_length(Pid1, 1),
+    wait_till_message_queue_length(Pid2, 1),
+    Pid1 ! continue_test,
+    Pid2 ! continue_test,
+    receive_message(inserted1),
+    receive_message(inserted2),
+    %% Different values due to a race condition
+    [{a, 2}] = cets:dump(Tab1),
+    [{a, 1}] = cets:dump(Tab2).
+
+insert_new_does_not_overwrite_data(Config) ->
+    Me = self(),
+    #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    Leader = cets:get_leader(Pid1),
+    spawn_link(fun() ->
+        sys:replace_state(Pid1, fun(State) ->
+            Me ! replacing_state1,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    spawn_link(fun() ->
+        sys:replace_state(Pid2, fun(State) ->
+            Me ! replacing_state2,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    receive_message(replacing_state1),
+    receive_message(replacing_state2),
+    %% Insert at the same time
+    spawn_link(fun() ->
+        true = cets:insert_new(Tab1, {a, 1}),
+        Me ! inserted1
+    end),
+    wait_till_message_queue_length(Leader, 1),
+    spawn_link(fun() ->
+        false = cets:insert_new(Tab2, {a, 2}),
+        Me ! inserted2
+    end),
+    %% Wait till got the insert ops in the queue.
+    %% Leader gets both requests.
+    wait_till_message_queue_length(Leader, 2),
+    Pid1 ! continue_test,
+    Pid2 ! continue_test,
+    receive_message(inserted1),
+    receive_message(inserted2),
+    [{a, 1}] = cets:dump(Tab1),
+    [{a, 1}] = cets:dump(Tab2).
+
+%% We have to use table names instead of pids to insert, because
+%% get_leader is an ETS call, if ServerRef is a table name.
+%% And get_leader is a gen_server call, if ServerRef is a pid.
+insert_serial_overwrites_data_consistently(Config) ->
+    Me = self(),
+    #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
+    Leader = cets:get_leader(Pid1),
+    spawn_link(fun() ->
+        sys:replace_state(Pid1, fun(State) ->
+            Me ! replacing_state1,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    spawn_link(fun() ->
+        sys:replace_state(Pid2, fun(State) ->
+            Me ! replacing_state2,
+            receive_message(continue_test),
+            State
+        end)
+    end),
+    receive_message(replacing_state1),
+    receive_message(replacing_state2),
+    %% Insert at the same time
+    spawn_link(fun() ->
+        ok = cets:insert_serial(Tab1, {a, 1}),
+        Me ! inserted1
+    end),
+    %% Ensure, that first insert comes before the second
+    %% (just to get a predictable value. The value would be still
+    %%  consistent in case first insert comes after the second).
+    wait_till_message_queue_length(Leader, 1),
+    spawn_link(fun() ->
+        ok = cets:insert_serial(Tab2, {a, 2}),
+        Me ! inserted2
+    end),
+    %% Wait till got the insert ops in the queue.
+    %% Leader gets both requests.
+    wait_till_message_queue_length(Leader, 2),
+    Pid1 ! continue_test,
+    Pid2 ! continue_test,
+    receive_message(inserted1),
+    receive_message(inserted2),
     [{a, 2}] = cets:dump(Tab1),
     [{a, 2}] = cets:dump(Tab2).
 
@@ -1910,6 +2042,13 @@ get_pd(Pid, Key) ->
 
 wait_till_test_stage(Pid, Stage) ->
     cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
+
+wait_till_message_queue_length(Pid, Len) ->
+    cets_test_wait:wait_until(fun() -> get_message_queue_length(Pid) end, Len).
+
+get_message_queue_length(Pid) ->
+    {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
+    Len.
 
 %% Disconnect node until manually connected
 block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
