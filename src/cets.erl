@@ -245,7 +245,7 @@ insert_many(Server, Records) when is_list(Records) ->
 %% extra messaging is required.
 -spec insert_new(server_ref(), tuple()) -> WasInserted :: boolean().
 insert_new(Server, Rec) when is_tuple(Rec) ->
-    Res = cets_call:send_leader_op(Server, {leader_op, {insert_new, Rec}}),
+    Res = cets_call:send_leader_op(Server, {insert_new, Rec}),
     handle_insert_new_result(Res).
 
 handle_insert_new_result(ok) -> true;
@@ -259,7 +259,7 @@ handle_insert_new_result({error, rejected}) -> false.
 %% It could be used to update entries, which use not node-specific keys.
 -spec insert_serial(server_ref(), tuple()) -> ok.
 insert_serial(Server, Rec) when is_tuple(Rec) ->
-    ok = cets_call:send_leader_op(Server, {leader_op, {insert, Rec}}).
+    ok = cets_call:send_leader_op(Server, {insert, Rec}).
 
 %% Removes an object with the key from all nodes in the cluster.
 %% Ideally, nodes should only remove data that they've inserted, not data from other node.
