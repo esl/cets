@@ -58,6 +58,8 @@ cases() ->
         insert_new_fails_if_the_local_server_is_dead,
         insert_serial_works,
         insert_serial_overwrites_data,
+        insert_serial_works_when_leader_is_back,
+        insert_serial_blocks_when_leader_is_not_back,
         leader_is_the_same_in_metadata_after_join,
         join_with_the_same_pid,
         join_ref_is_same_after_join,
@@ -395,6 +397,44 @@ insert_serial_overwrites_data(Config) ->
     ok = cets:insert_serial(Pid1, {a, 2}),
     [{a, 2}] = cets:dump(Tab1),
     [{a, 2}] = cets:dump(Tab2).
+
+%% Similar to insert_new_works_when_leader_is_back
+insert_serial_works_when_leader_is_back(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    Leader = cets:get_leader(Pid1),
+    NotLeader = not_leader(Pid1, Pid2, Leader),
+    cets:set_leader(Leader, false),
+    spawn(fun() ->
+        timer:sleep(100),
+        cets:set_leader(Leader, true)
+    end),
+    %% Blocks, until cets:set_leader sets leader back to true.
+    ok = cets:insert_serial(NotLeader, {alice, 32}).
+
+insert_serial_blocks_when_leader_is_not_back(Config) ->
+    Me = self(),
+    F = fun(X) ->
+        put(test_stage, detected),
+        Me ! {wrong_leader_detected, X}
+    end,
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config, #{handle_wrong_leader => F}),
+    Leader = cets:get_leader(Pid1),
+    NotLeader = not_leader(Pid1, Pid2, Leader),
+    cets:set_leader(Leader, false),
+    InserterPid = spawn(fun() ->
+        %% Will block indefinetely, because we set is_leader flag manually.
+        ok = cets:insert_serial(NotLeader, {alice, 32})
+    end),
+    receive
+        {wrong_leader_detected, Info} ->
+            ct:log("wrong_leader_detected ~p", [Info])
+    after 5000 ->
+        ct:fail(wrong_leader_not_detected)
+    end,
+    %% Still alive and blocking
+    pong = cets:ping(Pid1),
+    pong = cets:ping(Pid2),
+    ?assert(erlang:is_process_alive(InserterPid)).
 
 leader_is_the_same_in_metadata_after_join(Config) ->
     #{tabs := [T1, T2], pids := [Pid1, Pid2]} = given_two_joined_tables(Config),

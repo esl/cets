@@ -259,7 +259,7 @@ handle_insert_new_result({error, rejected}) -> false.
 %% It could be used to update entries, which use not node-specific keys.
 -spec insert_serial(server_ref(), tuple()) -> ok.
 insert_serial(Server, Rec) when is_tuple(Rec) ->
-    ok = cets_call:send_leader_op(Server, {insert, Rec}).
+    ok = cets_call:send_leader_op(Server, {leader_op, {insert, Rec}}).
 
 %% Removes an object with the key from all nodes in the cluster.
 %% Ideally, nodes should only remove data that they've inserted, not data from other node.
@@ -611,6 +611,8 @@ handle_leader_op(Op, From, State = #{is_leader := true}) ->
             gen_server:reply(From, {error, rejected}),
             ok;
         true ->
+            replicate(Op, From, State);
+        ok ->
             replicate(Op, From, State)
     end;
 handle_leader_op(Op, From, State = #{leader := Leader}) ->
