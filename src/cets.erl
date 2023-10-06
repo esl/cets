@@ -23,6 +23,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
+    insert_serial/2,
     delete/2,
     delete_many/2,
     delete_object/2,
@@ -63,6 +64,7 @@
     insert/2,
     insert_many/2,
     insert_new/2,
+    insert_serial/2,
     delete/2,
     delete_many/2,
     delete_object/2,
@@ -248,6 +250,16 @@ insert_new(Server, Rec) when is_tuple(Rec) ->
 
 handle_insert_new_result(ok) -> true;
 handle_insert_new_result({error, rejected}) -> false.
+
+%% @doc Serialized version of `insert/2'.
+%%
+%% All `insert_serial' calls are sent to the leader node first.
+%%
+%% Similar to `insert_new/2', but overwrites the data silently on conflict.
+%% It could be used to update entries, which use not node-specific keys.
+-spec insert_serial(server_ref(), tuple()) -> ok.
+insert_serial(Server, Rec) when is_tuple(Rec) ->
+    ok = cets_call:send_leader_op(Server, {insert, Rec}).
 
 %% Removes an object with the key from all nodes in the cluster.
 %% Ideally, nodes should only remove data that they've inserted, not data from other node.
@@ -536,15 +548,17 @@ set_other_servers(Servers, State = #{tab := Tab, ack_pid := AckPid}) ->
 pids_to_nodes(Pids) ->
     lists:map(fun node/1, Pids).
 
--spec ets_delete_keys(table_name(), [term()]) -> ok.
+%% ETS returns booleans instead of ok, because ETS API is old and inspired by Prolog.
+%% So, match the API logic here.
+-spec ets_delete_keys(table_name(), [term()]) -> true.
 ets_delete_keys(Tab, Keys) ->
     [ets:delete(Tab, Key) || Key <- Keys],
-    ok.
+    true.
 
--spec ets_delete_objects(table_name(), [tuple()]) -> ok.
+-spec ets_delete_objects(table_name(), [tuple()]) -> true.
 ets_delete_objects(Tab, Objects) ->
     [ets:delete_object(Tab, Object) || Object <- Objects],
-    ok.
+    true.
 
 %% Handle operation from a remote node
 -spec handle_remote_op(op(), from(), ack_pid(), join_ref(), state()) -> ok.
@@ -563,11 +577,11 @@ handle_remote_op(Op, From, AckPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
     cets_ack:ack(AckPid, From, self()).
 
 %% Apply operation for one local table only
--spec do_op(op(), state()) -> ok | boolean().
+-spec do_op(op(), state()) -> boolean().
 do_op(Op, #{tab := Tab}) ->
     do_table_op(Op, Tab).
 
--spec do_table_op(op(), table_name()) -> ok | boolean().
+-spec do_table_op(op(), table_name()) -> boolean().
 do_table_op({insert, Rec}, Tab) ->
     ets:insert(Tab, Rec);
 do_table_op({delete, Key}, Tab) ->
