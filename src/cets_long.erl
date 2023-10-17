@@ -58,7 +58,8 @@ run_tracked(Info, Fun) ->
                 what => long_task_failed,
                 class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace
+                stacktrace => Stacktrace,
+                caller_pid => Parent
             },
             ?LOG_ERROR(Log),
             erlang:raise(Class, Reason, Stacktrace)
@@ -79,7 +80,7 @@ run_monitor(Info, Parent, Start) ->
 monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-            ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
+            ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason, caller_pid => Parent}),
             ok;
         stop ->
             ok
@@ -87,6 +88,7 @@ monitor_loop(Mon, Info, Parent, Start, Interval) ->
         Diff = diff(Start),
         ?LOG_WARNING(Info#{
             what => long_task_progress,
+            caller_pid => Parent,
             time_ms => Diff,
             current_stacktrace => pinfo(Parent, current_stacktrace)
         }),
