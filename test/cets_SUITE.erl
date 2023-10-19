@@ -1058,17 +1058,16 @@ status_unavailable_nodes(Config) ->
 
 status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
     Node1 = node(),
-    Me = self(),
-    %% We use our process dictionary to set disco nodes dynamically
-    put(disco_nodes, [Node1, 'badnode@localhost']),
-    F = fun(State) ->
-        {dictionary, Dict} = erlang:process_info(Me, dictionary),
-        Nodes = proplists:get_value(disco_nodes, Dict),
-        {{ok, Nodes}, State}
-    end,
+    GetFn1 = fun(State) -> {{ok, [Node1, 'badnode@localhost']}, State} end,
+    GetFn2 = fun(State) -> {{ok, [Node1]}, State} end,
+    %% Setup meck
+    BackendModule = make_name(Config, disco_backend),
+    meck:new(BackendModule, [non_strict]),
+    meck:expect(BackendModule, init, fun(_Opts) -> undefined end),
+    meck:expect(BackendModule, get_nodes, GetFn1),
     DiscoName = disco_name(Config),
     Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+        name => DiscoName, backend_module => BackendModule
     }),
     %% Disco needs at least one table to start calling get_nodes function
     Tab = make_name(Config),
@@ -1077,7 +1076,7 @@ status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
     ok = cets_discovery:wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)),
     %% Remove badnode from disco
-    put(disco_nodes, [Node1]),
+    meck:expect(BackendModule, get_nodes, GetFn2),
     %% Force check.
     Disco ! check,
     %% The unavailable_nodes list is updated
@@ -1832,9 +1831,12 @@ receive_message(M) ->
 make_name(Config) ->
     make_name(Config, 1).
 
-make_name(Config, Num) ->
+make_name(Config, Num) when is_integer(Num) ->
     Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num)).
+    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num));
+make_name(Config, Atom) when is_atom(Atom) ->
+    Testcase = proplists:get_value(testcase, Config),
+    list_to_atom(atom_to_list(Testcase) ++ "_" ++ atom_to_list(Atom)).
 
 lock_name(Config) ->
     Testcase = proplists:get_value(testcase, Config),
