@@ -162,7 +162,9 @@ seq_cases() ->
         inserts_after_netsplit_reconnects,
         disco_connects_to_unconnected_node,
         joining_not_fully_connected_node_is_not_allowed,
-        joining_not_fully_connected_node_is_not_allowed2
+        joining_not_fully_connected_node_is_not_allowed2,
+        %% Cannot be run in parallel with other tests because checks all logging messages.
+        logging_when_failing_join_with_disco
     ].
 
 init_per_suite(Config) ->
@@ -1991,6 +1993,31 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         reconnect_node(Node5, Peer5)
     end,
     [] = cets:other_pids(Pid5).
+
+logging_when_failing_join_with_disco(Config) ->
+    %% Simulate cets:other_pids/1 failing with reason:
+    %%  {{nodedown,'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'},
+    %%   {gen_server,call,[<30887.438.0>,other_servers,infinity]}}
+    %% We use peer module to still have a connection after a disconnect from the remote node.
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco1 = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco2 = start_disco(Peer2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    block_node(Node2, Peer2),
+    ok.
 
 %% Helper functions
 
