@@ -2004,20 +2004,40 @@ logging_when_failing_join_with_disco(Config) ->
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
+    {ok, _Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Peer2, Tab),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets, other_pids, fun
+        (Server) when Server =:= Pid2 ->
+            block_node(Node2, Peer2),
+            wait_for_down(Pid2),
+            meck:passthrough([Server]);
+        (Server) ->
+            meck:passthrough([Server])
+    end),
     F = fun(State) ->
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),
-    Disco1 = start_disco(Node1, #{
+    Disco = start_disco(Node1, #{
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
     }),
-    Disco2 = start_disco(Peer2, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    block_node(Node2, Peer2),
+    try
+        cets_discovery:add_table(Disco, Tab),
+        timer:sleep(100),
+        ct:fail(receive_all_logs(?FUNCTION_NAME))
+    after
+        reconnect_node(Node2, Peer2)
+    end,
     ok.
+
+receive_all_logs(Id) ->
+    receive
+        {log, Id, Log} ->
+            [Log | receive_all_logs(Id)]
+    after 100 ->
+        []
+    end.
 
 %% Helper functions
 
@@ -2204,6 +2224,13 @@ wait_till_message_queue_length(Pid, Len) ->
 get_message_queue_length(Pid) ->
     {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
     Len.
+
+wait_for_down(Pid) ->
+    Mon = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Mon, process, Pid, Reason} -> Reason
+    after 5000 -> ct:fail({wait_for_down_timeout, Pid})
+    end.
 
 %% Disconnect node until manually connected
 block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
