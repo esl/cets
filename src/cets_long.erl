@@ -48,24 +48,24 @@ run_spawn(Info, F) ->
 run_tracked(Info, Fun) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
-    ?LOG_INFO(Info#{what => long_task_started}),
+    ?LOG_INFO(Info#{what => task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
         Fun()
     catch
-        Class:Reason:Stacktrace ->
+        Class:Reason:Stacktrace when element(1, Reason) =/= task_failed ->
             Log = Info#{
-                what => long_task_failed,
+                what => task_failed,
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
                 caller_pid => Parent
             },
             ?LOG_ERROR(Log),
-            erlang:raise(Class, Reason, Stacktrace)
+            erlang:raise(Class, {task_failed, Reason, Info}, Stacktrace)
     after
         Diff = diff(Start),
-        ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
+        ?LOG_INFO(Info#{what => task_finished, time_ms => Diff}),
         Pid ! stop
     end.
 
@@ -80,7 +80,7 @@ run_monitor(Info, Parent, Start) ->
 monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-            ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason, caller_pid => Parent}),
+            ?LOG_ERROR(Info#{what => task_failed, reason => Reason, caller_pid => Parent}),
             ok;
         stop ->
             ok

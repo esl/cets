@@ -705,7 +705,7 @@ join_fails_because_server_process_not_found(Config) ->
         (_) ->
             ok
     end,
-    {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
+    {error, {task_failed, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}, _}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
@@ -717,7 +717,7 @@ join_fails_because_server_process_not_found_before_get_pids(Config) ->
         (_) ->
             ok
     end,
-    {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
+    {error, {task_failed, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}, _}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_before_send_dump(Config) ->
@@ -1953,7 +1953,8 @@ joining_not_fully_connected_node_is_not_allowed(Config) ->
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
-        {error, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}} =
+        {error,
+            {task_failed, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}, _}} =
             rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
@@ -2025,7 +2026,22 @@ logging_when_failing_join_with_disco(Config) ->
     try
         cets_discovery:add_table(Disco, Tab),
         timer:sleep(100),
-        ct:fail(receive_all_logs(?FUNCTION_NAME))
+        Logs = receive_all_logs(?FUNCTION_NAME),
+        Reason = {{nodedown, Node2}, {gen_server, call, [Pid2, other_servers, infinity]}},
+        MatchedLogs = [
+            Log
+         || #{
+                level := error,
+                msg :=
+                    {report, #{
+                        what := task_failed,
+                        reason := Reason2
+                    }}
+            } = Log <- Logs,
+            Reason =:= Reason2
+        ],
+        %% Only one message is logged
+        [_] = MatchedLogs
     after
         reconnect_node(Node2, Peer2)
     end,
