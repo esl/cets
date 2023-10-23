@@ -77,9 +77,9 @@
 -type state() :: #{
     phase := initial | regular,
     results := [join_result()],
-    nodes := [node()],
+    nodes := ordsets:ordset(node()),
     %% The nodes that returned pang, sorted
-    unavailable_nodes := [node()],
+    unavailable_nodes := ordsets:ordset(node()),
     tables := [atom()],
     backend_module := module(),
     backend_state := state(),
@@ -269,8 +269,9 @@ handle_get_nodes_result(Result, BackendState, State) ->
 set_nodes({error, _Reason}, State) ->
     State;
 set_nodes({ok, Nodes}, State) ->
-    ping_not_connected_nodes(Nodes),
-    try_joining(State#{nodes := Nodes}).
+    Nodes2 = lists:usort(Nodes),
+    ping_not_connected_nodes(Nodes2),
+    prune_unavailable_nodes_if_needed(try_joining(State#{nodes := Nodes2})).
 
 %% Called when:
 %% - a list of connected nodes changes (i.e. nodes() call result)
@@ -303,6 +304,11 @@ handle_joining_finished(Results, State = #{should_retry_join := Retry}) ->
         false ->
             State2
     end.
+
+-spec prune_unavailable_nodes_if_needed(state()) -> state().
+prune_unavailable_nodes_if_needed(State = #{nodes := Nodes, unavailable_nodes := UnNodes}) ->
+    %% Unavailable nodes is a subset of discovered nodes
+    State#{unavailable_nodes := ordsets:intersection(Nodes, UnNodes)}.
 
 -spec ping_not_connected_nodes([node()]) -> ok.
 ping_not_connected_nodes(Nodes) ->
