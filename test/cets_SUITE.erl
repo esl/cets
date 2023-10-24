@@ -2043,7 +2043,9 @@ logging_when_failing_join_with_disco(Config) ->
         %% Only one message is logged
         [_] = MatchedLogs
     after
-        reconnect_node(Node2, Peer2)
+        meck:unload(),
+        reconnect_node(Node2, Peer2),
+        cets:stop(Pid2)
     end,
     ok.
 
