@@ -438,7 +438,9 @@ handle_call(get_leader, _From, State = #{leader := Leader}) ->
 handle_call(sync, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-        lists:foreach(fun ping/1, Servers),
+        %% If ping crashes, the caller would not receive a reply.
+        %% So, we have to use catch to still able to reply with ok.
+        lists:foreach(fun(Server) -> catch ping(Server) end, Servers),
         gen_server:reply(From, ok)
     end),
     {noreply, State};

@@ -162,7 +162,8 @@ seq_cases() ->
         inserts_after_netsplit_reconnects,
         disco_connects_to_unconnected_node,
         joining_not_fully_connected_node_is_not_allowed,
-        joining_not_fully_connected_node_is_not_allowed2
+        joining_not_fully_connected_node_is_not_allowed2,
+        cets_sync_returns_when_ping_crashes
     ].
 
 init_per_suite(Config) ->
@@ -1991,6 +1992,15 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         reconnect_node(Node5, Peer5)
     end,
     [] = cets:other_pids(Pid5).
+
+cets_sync_returns_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    ok = cets:sync(Pid1).
 
 %% Helper functions
 
