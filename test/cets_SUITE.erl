@@ -152,6 +152,7 @@ cases() ->
 only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
+        long_call_fails_because_linked_process_dies,
         logs_are_printed_when_join_fails_because_servers_overlap,
         join_done_already_while_waiting_for_lock_so_do_nothing
     ].
@@ -1855,6 +1856,28 @@ run_tracked_logged_check_logger(_Config) ->
         ct:fail(timeout)
     end.
 
+%% Improves code coverage, checks logs
+long_call_fails_because_linked_process_dies(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    F = fun() -> timer:sleep(5000) end,
+    RunPid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    spawn(fun() ->
+        link(RunPid),
+        error(sim_error_in_linked_process)
+    end),
+    wait_for_down(RunPid),
+    %% Exit test after first log event
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := error,
+            msg := {report, #{what := task_failed, log_ref := LogRef, caller_pid := RunPid}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
+
 long_call_to_unknown_name_throws_pid_not_found(_Config) ->
     ?assertException(
         error,
@@ -2049,6 +2072,8 @@ logging_when_failing_join_with_disco(Config) ->
     end,
     ok.
 
+%% Helper functions
+
 receive_all_logs(Id) ->
     receive
         {log, Id, Log} ->
@@ -2056,8 +2081,6 @@ receive_all_logs(Id) ->
     after 100 ->
         []
     end.
-
-%% Helper functions
 
 still_works(Pid) ->
     pong = cets:ping(Pid),

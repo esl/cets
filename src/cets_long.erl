@@ -70,7 +70,8 @@ run_tracked(Info, Fun) ->
     end.
 
 spawn_mon(Info, Parent, Start) ->
-    spawn_link(fun() -> run_monitor(Info, Parent, Start) end).
+    %% We do not link, because we want to log if the Parent dies
+    spawn(fun() -> run_monitor(Info, Parent, Start) end).
 
 run_monitor(Info, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
