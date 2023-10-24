@@ -169,7 +169,8 @@ seq_cases() ->
         joining_not_fully_connected_node_is_not_allowed,
         joining_not_fully_connected_node_is_not_allowed2,
         %% Cannot be run in parallel with other tests because checks all logging messages.
-        logging_when_failing_join_with_disco
+        logging_when_failing_join_with_disco,
+        cets_sync_returns_when_ping_crashes
     ].
 
 init_per_suite(Config) ->
@@ -2174,6 +2175,15 @@ logging_when_failing_join_with_disco(Config) ->
         cets:stop(Pid2)
     end,
     ok.
+
+cets_sync_returns_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    ok = cets:sync(Pid1).
 
 %% Helper functions
 
