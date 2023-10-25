@@ -53,7 +53,10 @@ run_tracked(Info, Fun) ->
     try
         Fun()
     catch
-        Class:Reason:Stacktrace when element(1, Reason) =/= task_failed ->
+        %% Skip nested task_failed errors
+        Class:{task_failed, Reason, Info2}:Stacktrace ->
+            erlang:raise(Class, {task_failed, Reason, Info2}, Stacktrace);
+        Class:Reason:Stacktrace ->
             Log = Info#{
                 what => task_failed,
                 class => Class,
@@ -81,7 +84,12 @@ run_monitor(Info, Parent, Start) ->
 monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-            ?LOG_ERROR(Info#{what => task_failed, reason => Reason, caller_pid => Parent}),
+            ?LOG_ERROR(Info#{
+                what => task_failed,
+                reason => Reason,
+                caller_pid => Parent,
+                reported_by => monitor_process
+            }),
             ok;
         stop ->
             ok
