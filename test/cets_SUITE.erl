@@ -23,7 +23,7 @@ all() ->
 
 groups() ->
     [
-        {cets, [parallel, {repeat_until_any_fail, 300}], cases() ++ only_for_logger_cases()},
+        {cets, [parallel, {repeat_until_any_fail, 3}], cases() ++ only_for_logger_cases()},
         {cets_no_log, [parallel], cases()},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
