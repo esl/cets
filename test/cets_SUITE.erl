@@ -118,7 +118,7 @@ cases() ->
         ack_process_handles_unknown_remote_server,
         ack_process_handles_unknown_from,
         ack_calling_add_when_server_list_is_empty_is_not_allowed,
-        sync_using_name_works,
+        ping_all_using_name_works,
         insert_many_request,
         insert_many_requests,
         insert_many_requests_timeouts,
@@ -163,7 +163,8 @@ seq_cases() ->
         disco_connects_to_unconnected_node,
         joining_not_fully_connected_node_is_not_allowed,
         joining_not_fully_connected_node_is_not_allowed2,
-        cets_sync_returns_when_ping_crashes
+        cets_ping_all_returns_when_ping_crashes,
+        join_interrupted_when_ping_crashes
     ].
 
 init_per_suite(Config) ->
@@ -741,8 +742,8 @@ join_fails_before_send_dump(Config) ->
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     %% Not joined, some data exchanged
-    cets:sync(Pid1),
-    cets:sync(Pid2),
+    cets:ping_all(Pid1),
+    cets:ping_all(Pid2),
     [] = cets:other_pids(Pid1),
     [] = cets:other_pids(Pid2),
     %% Pid1 applied new version of dump
@@ -1665,10 +1666,10 @@ ack_calling_add_when_server_list_is_empty_is_not_allowed(Config) ->
     after 5000 -> ct:fail(timeout)
     end.
 
-sync_using_name_works(Config) ->
+ping_all_using_name_works(Config) ->
     T = make_name(Config),
     {ok, _Pid1} = start_local(T),
-    cets:sync(T).
+    cets:ping_all(T).
 
 insert_many_request(Config) ->
     Tab = make_name(Config),
@@ -1993,14 +1994,25 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
     end,
     [] = cets:other_pids(Pid5).
 
-cets_sync_returns_when_ping_crashes(Config) ->
+cets_ping_all_returns_when_ping_crashes(Config) ->
     #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     meck:new(cets, [passthrough]),
     meck:expect(cets_call, long_call, fun
         (Server, ping) when Server == Pid2 -> error(simulate_crash);
         (Server, Msg) -> meck:passthrough([Server, Msg])
     end),
-    ok = cets:sync(Pid1).
+    ?assertMatch({error, [{Pid2, {'EXIT', {simulate_crash, _}}}]}, cets:ping_all(Pid1)).
+
+join_interrupted_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    Tab3 = make_name(Config, 3),
+    {ok, Pid3} = start_local(Tab3, #{}),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    ?assertMatch({error, ping_all_failed}, cets_join:join(lock_name(Config), #{}, Pid1, Pid3)).
 
 %% Helper functions
 
