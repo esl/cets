@@ -18,7 +18,8 @@ all() ->
         %% To improve the code coverage we need to test with logging disabled
         %% More info: https://github.com/erlang/otp/issues/7531
         {group, cets_no_log},
-        {group, cets_seq}
+        {group, cets_seq},
+        {group, cets_seq_no_log}
     ].
 
 groups() ->
@@ -29,7 +30,8 @@ groups() ->
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()},
+        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}], cets_seq_no_log_cases()}
     ].
 
 cases() ->
@@ -168,14 +170,15 @@ seq_cases() ->
         disco_connects_to_unconnected_node,
         joining_not_fully_connected_node_is_not_allowed,
         joining_not_fully_connected_node_is_not_allowed2,
-<<<<<<< HEAD
         %% Cannot be run in parallel with other tests because checks all logging messages.
         logging_when_failing_join_with_disco,
-        cets_sync_returns_when_ping_crashes
-=======
         cets_ping_all_returns_when_ping_crashes,
         join_interrupted_when_ping_crashes
->>>>>>> e511cb6 (Rename cets:sync to cets:ping_all)
+    ].
+
+cets_seq_no_log_cases() ->
+    [
+        join_interrupted_when_ping_crashes
     ].
 
 init_per_suite(Config) ->
@@ -190,13 +193,13 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_group(cets_no_log, Config) ->
+init_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:set_module_level(M, none) || M <- log_modules()],
     Config;
 init_per_group(_Group, Config) ->
     Config.
 
-end_per_group(cets_no_log, Config) ->
+end_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:unset_module_level(M) || M <- log_modules()],
     Config;
 end_per_group(_Group, Config) ->
@@ -2127,7 +2130,6 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
     end,
     [] = cets:other_pids(Pid5).
 
-<<<<<<< HEAD
 logging_when_failing_join_with_disco(Config) ->
     %% Simulate cets:other_pids/1 failing with reason:
     %%  {{nodedown,'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'},
@@ -2182,10 +2184,7 @@ logging_when_failing_join_with_disco(Config) ->
     end,
     ok.
 
-cets_sync_returns_when_ping_crashes(Config) ->
-=======
 cets_ping_all_returns_when_ping_crashes(Config) ->
->>>>>>> e511cb6 (Rename cets:sync to cets:ping_all)
     #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     meck:new(cets, [passthrough]),
     meck:expect(cets_call, long_call, fun
