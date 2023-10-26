@@ -62,7 +62,8 @@ run_tracked(Info, Fun) ->
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
-                caller_pid => Parent
+                caller_pid => Parent,
+                long_ref => make_ref()
             },
             ?LOG_ERROR(Log),
             erlang:raise(Class, {task_failed, Reason, Info}, Stacktrace)
@@ -73,11 +74,18 @@ run_tracked(Info, Fun) ->
     end.
 
 spawn_mon(Info, Parent, Start) ->
+    Ref = make_ref(),
     %% We do not link, because we want to log if the Parent dies
-    spawn(fun() -> run_monitor(Info, Parent, Start) end).
+    Pid = spawn(fun() -> run_monitor(Info, Ref, Parent, Start) end),
+    %% Ensure there is no race conditions by waiting till the monitor is added
+    receive
+        {monitor_added, Ref} -> ok
+    end,
+    Pid.
 
-run_monitor(Info, Parent, Start) ->
+run_monitor(Info, Ref, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
+    Parent ! {monitor_added, Ref},
     Interval = maps:get(report_interval, Info, 5000),
     monitor_loop(Mon, Info, Parent, Start, Interval).
 

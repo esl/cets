@@ -23,7 +23,7 @@ all() ->
 
 groups() ->
     [
-        {cets, [parallel, {repeat_until_any_fail, 3}], cases() ++ only_for_logger_cases()},
+        {cets, [parallel, {repeat_until_any_fail, 300}], cases() ++ only_for_logger_cases()},
         {cets_no_log, [parallel], cases()},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
@@ -1936,7 +1936,7 @@ run_tracked_logged(_Config) ->
 run_tracked_logged_check_logger(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     LogRef = make_ref(),
-    F = fun() -> timer:sleep(5000) end,
+    F = fun() -> timer:sleep(infinity) end,
     %% Run it in a separate process, so we can check logs in the test process
     %% Overwrite default five seconds interval with 10 milliseconds
     spawn_link(fun() -> cets_long:run_tracked(#{report_interval => 10, log_ref => LogRef}, F) end),
@@ -1955,8 +1955,14 @@ run_tracked_logged_check_logger(_Config) ->
 long_call_fails_because_linked_process_dies(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     LogRef = make_ref(),
-    F = fun() -> timer:sleep(5000) end,
+    Me = self(),
+    F = fun() ->
+        Me ! task_started,
+        timer:sleep(infinity)
+    end,
     RunPid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    %% To avoid race conditions
+    receive_message(task_started),
     spawn(fun() ->
         link(RunPid),
         error(sim_error_in_linked_process)
@@ -2422,6 +2428,15 @@ send_join_start_back_and_wait_for_continue_joining() ->
     end.
 
 receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
+    ?LOG_ERROR(#{what => ensure_nothing_logged_before, log_ref => LogRef}),
+    receive
+        {log, LogHandlerId, #{
+            msg := {report, #{log_ref := LogRef, what := ensure_nothing_logged_before}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail({timeout, logger_is_broken})
+    end,
     %% Do a new logging call to check that it is the only log message
     ?LOG_ERROR(#{what => ensure_nothing_logged_after, log_ref => LogRef}),
     %% We only match messages with the matching log_ref here
@@ -2435,5 +2450,5 @@ receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
                     [Log | receive_all_logs_with_log_ref(LogHandlerId, LogRef)]
             end
     after 5000 ->
-        ct:fail(timeout)
+        ct:fail({timeout, receive_all_logs_with_log_ref})
     end.
