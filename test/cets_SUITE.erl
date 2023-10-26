@@ -17,7 +17,8 @@ all() ->
         %% To improve the code coverage we need to test with logging disabled
         %% More info: https://github.com/erlang/otp/issues/7531
         {group, cets_no_log},
-        {group, cets_seq}
+        {group, cets_seq},
+        {group, cets_seq_no_log}
     ].
 
 groups() ->
@@ -28,7 +29,8 @@ groups() ->
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()},
+        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}], cets_seq_no_log_cases()}
     ].
 
 cases() ->
@@ -167,6 +169,11 @@ seq_cases() ->
         join_interrupted_when_ping_crashes
     ].
 
+cets_seq_no_log_cases() ->
+    [
+        join_interrupted_when_ping_crashes
+    ].
+
 init_per_suite(Config) ->
     Names = [ct2, ct3, ct4, ct5],
     {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
@@ -179,13 +186,13 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_group(cets_no_log, Config) ->
+init_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:set_module_level(M, none) || M <- log_modules()],
     Config;
 init_per_group(_Group, Config) ->
     Config.
 
-end_per_group(cets_no_log, Config) ->
+end_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:unset_module_level(M) || M <- log_modules()],
     Config;
 end_per_group(_Group, Config) ->
