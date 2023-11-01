@@ -113,8 +113,8 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
     try
-        cets:sync(LocalPid),
-        cets:sync(RemotePid),
+        ping_all_ok(Info, LocalPid),
+        ping_all_ok(Info, RemotePid),
         {ok, LocalDump} = remote_or_local_dump(LocalPid),
         {ok, RemoteDump} = remote_or_local_dump(RemotePid),
         %% Check that still fully connected after getting the dumps
@@ -273,6 +273,21 @@ check_fully_connected(Info, Pids) ->
                 unique_lists => UniqueLists
             }),
             error(check_fully_connected_failed)
+    end.
+
+ping_all_ok(Info, Pid) ->
+    case cets:ping_all(Pid) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR(Info#{
+                what => ping_all_pings_failed,
+                text =>
+                    <<"Failed to ping all CETS servers, interrupt the table joining. Would retry later">>,
+                server_pid => Pid,
+                reason => Reason
+            }),
+            error(ping_all_failed)
     end.
 
 %% Check if all nodes have the same join_ref
