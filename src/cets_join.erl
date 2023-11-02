@@ -3,6 +3,8 @@
 -module(cets_join).
 -export([join/4]).
 -export([join/5]).
+-export([ping/1]).
+
 -include_lib("kernel/include/logger.hrl").
 
 -ifdef(TEST).
@@ -216,7 +218,7 @@ check_could_reach_each_other(Info, LocPids, RemPids) ->
             {Node1, Node2,
                 cets_long:run_tracked(
                     #{task => ping_node, node1 => Node1, node2 => Node2}, fun() ->
-                        rpc:call(Node1, net_adm, ping, [Node2], 10000)
+                        rpc:call(Node1, ?MODULE, ping, [Node2], 10000)
                     end
                 )}
          || {Node1, Node2} <- Pairs
@@ -329,3 +331,21 @@ checkpoint(_CheckPointName, _Opts) ->
 checkpoint(_CheckPointName, _Opts) ->
     ok.
 -endif.
+
+%% net_adm:ping/1 but without disconnect_node
+%% (because disconnect_node could introduce more chaos and it is not atomic)
+ping(Node) when is_atom(Node) ->
+    case
+        catch gen:call(
+            {net_kernel, Node},
+            '$gen_call',
+            {is_auth, node()},
+            infinity
+        )
+    of
+        {ok, yes} ->
+            pong;
+        _ ->
+            %           erlang:disconnect_node(Node),
+            pang
+    end.

@@ -315,7 +315,7 @@ ping_not_connected_nodes(Nodes) ->
     Self = self(),
     NotConNodes = Nodes -- [node() | nodes()],
     [
-        spawn(fun() -> Self ! {ping_result, Node, net_adm:ping(Node)} end)
+        spawn(fun() -> Self ! {ping_result, Node, cets_join:ping(Node)} end)
      || Node <- lists:sort(NotConNodes)
     ],
     ok.
