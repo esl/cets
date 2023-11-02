@@ -87,7 +87,11 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
             checkpoint(before_retry, JoinOpts),
-            ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
+            Sleep = rand:uniform(1000),
+            ?LOG_INFO(Info#{what => join_retry, reason => lock_aborted, sleep_ms => Sleep}),
+            %% Use random sleep to reduce a chance of deadlocks.
+            %% global.erl does something similar, but without logging.
+            timer:sleep(Sleep),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
             Result
