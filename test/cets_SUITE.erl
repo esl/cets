@@ -18,7 +18,8 @@ all() ->
         %% To improve the code coverage we need to test with logging disabled
         %% More info: https://github.com/erlang/otp/issues/7531
         {group, cets_no_log},
-        {group, cets_seq}
+        {group, cets_seq},
+        {group, cets_seq_no_log}
     ].
 
 groups() ->
@@ -29,7 +30,8 @@ groups() ->
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()},
+        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}], cets_seq_no_log_cases()}
     ].
 
 cases() ->
@@ -119,7 +121,7 @@ cases() ->
         ack_process_handles_unknown_remote_server,
         ack_process_handles_unknown_from,
         ack_calling_add_when_server_list_is_empty_is_not_allowed,
-        sync_using_name_works,
+        ping_all_using_name_works,
         insert_many_request,
         insert_many_requests,
         insert_many_requests_timeouts,
@@ -169,7 +171,14 @@ seq_cases() ->
         joining_not_fully_connected_node_is_not_allowed,
         joining_not_fully_connected_node_is_not_allowed2,
         %% Cannot be run in parallel with other tests because checks all logging messages.
-        logging_when_failing_join_with_disco
+        logging_when_failing_join_with_disco,
+        cets_ping_all_returns_when_ping_crashes,
+        join_interrupted_when_ping_crashes
+    ].
+
+cets_seq_no_log_cases() ->
+    [
+        join_interrupted_when_ping_crashes
     ].
 
 init_per_suite(Config) ->
@@ -184,13 +193,13 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_group(cets_no_log, Config) ->
+init_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:set_module_level(M, none) || M <- log_modules()],
     Config;
 init_per_group(_Group, Config) ->
     Config.
 
-end_per_group(cets_no_log, Config) ->
+end_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
     [ok = logger:unset_module_level(M) || M <- log_modules()],
     Config;
 end_per_group(_Group, Config) ->
@@ -749,8 +758,8 @@ join_fails_before_send_dump(Config) ->
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     %% Not joined, some data exchanged
-    cets:sync(Pid1),
-    cets:sync(Pid2),
+    cets:ping_all(Pid1),
+    cets:ping_all(Pid2),
     [] = cets:other_pids(Pid1),
     [] = cets:other_pids(Pid2),
     %% Pid1 applied new version of dump
@@ -1762,10 +1771,10 @@ ack_calling_add_when_server_list_is_empty_is_not_allowed(Config) ->
     after 5000 -> ct:fail(timeout)
     end.
 
-sync_using_name_works(Config) ->
+ping_all_using_name_works(Config) ->
     T = make_name(Config),
     {ok, _Pid1} = start_local(T),
-    cets:sync(T).
+    cets:ping_all(T).
 
 insert_many_request(Config) ->
     Tab = make_name(Config),
@@ -2174,6 +2183,29 @@ logging_when_failing_join_with_disco(Config) ->
         cets:stop(Pid2)
     end,
     ok.
+
+cets_ping_all_returns_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    ?assertMatch({error, [{Pid2, {'EXIT', {simulate_crash, _}}}]}, cets:ping_all(Pid1)),
+    meck:unload().
+
+join_interrupted_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    Tab3 = make_name(Config, 3),
+    {ok, Pid3} = start_local(Tab3, #{}),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
+    meck:unload().
 
 %% Helper functions
 

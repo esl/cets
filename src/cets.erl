@@ -40,7 +40,7 @@
     unpause/2,
     get_leader/1,
     set_leader/2,
-    sync/1,
+    ping_all/1,
     ping/1,
     info/1,
     insert_request/2,
@@ -75,7 +75,7 @@
     unpause/2,
     get_leader/1,
     set_leader/2,
-    sync/1,
+    ping_all/1,
     ping/1,
     info/1,
     other_nodes/1,
@@ -137,7 +137,7 @@
     pause
     | ping
     | remote_dump
-    | sync
+    | ping_all
     | table_name
     | get_info
     | other_servers
@@ -382,9 +382,9 @@ set_leader(Server, IsLeader) ->
     cets_call:long_call(Server, {set_leader, IsLeader}).
 
 %% Waits till all pending operations are applied.
--spec sync(server_ref()) -> ok.
-sync(Server) ->
-    cets_call:long_call(Server, sync).
+-spec ping_all(server_ref()) -> ok | {error, [{server_pid(), Reason :: term()}]}.
+ping_all(Server) ->
+    cets_call:long_call(Server, ping_all).
 
 -spec ping(server_ref()) -> pong.
 ping(Server) ->
@@ -435,11 +435,19 @@ handle_call(get_nodes, _From, State = #{other_servers := Servers}) ->
     {reply, lists:usort([node() | pids_to_nodes(Servers)]), State};
 handle_call(get_leader, _From, State = #{leader := Leader}) ->
     {reply, Leader, State};
-handle_call(sync, From, State = #{other_servers := Servers}) ->
+handle_call(ping_all, From, State = #{other_servers := Servers}) ->
     %% Do spawn to avoid any possible deadlocks
     proc_lib:spawn(fun() ->
-        lists:foreach(fun ping/1, Servers),
-        gen_server:reply(From, ok)
+        %% If ping crashes, the caller would not receive a reply.
+        %% So, we have to use catch to still able to reply with ok.
+        Results = lists:map(fun(Server) -> {Server, catch ping(Server)} end, Servers),
+        BadResults = [Res || {_Server, Result} = Res <- Results, Result =/= pong],
+        case BadResults of
+            [] ->
+                gen_server:reply(From, ok);
+            _ ->
+                gen_server:reply(From, {error, BadResults})
+        end
     end),
     {noreply, State};
 handle_call(ping, _From, State) ->
