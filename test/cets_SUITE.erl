@@ -8,6 +8,7 @@
 -module(cets_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -compile([export_all, nowarn_export_all]).
 
@@ -152,8 +153,12 @@ cases() ->
 only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
+        long_call_fails_because_linked_process_dies,
         logs_are_printed_when_join_fails_because_servers_overlap,
-        join_done_already_while_waiting_for_lock_so_do_nothing
+        join_done_already_while_waiting_for_lock_so_do_nothing,
+        atom_error_is_logged_in_tracked,
+        nested_calls_errors_are_logged_once_with_tuple_reason,
+        nested_calls_errors_are_logged_once_with_map_reason
     ].
 
 seq_cases() ->
@@ -162,7 +167,9 @@ seq_cases() ->
         inserts_after_netsplit_reconnects,
         disco_connects_to_unconnected_node,
         joining_not_fully_connected_node_is_not_allowed,
-        joining_not_fully_connected_node_is_not_allowed2
+        joining_not_fully_connected_node_is_not_allowed2,
+        %% Cannot be run in parallel with other tests because checks all logging messages.
+        logging_when_failing_join_with_disco
     ].
 
 init_per_suite(Config) ->
@@ -703,7 +710,7 @@ join_fails_because_server_process_not_found(Config) ->
         (_) ->
             ok
     end,
-    {error, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}} =
+    {error, {task_failed, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}, _}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_because_server_process_not_found_before_get_pids(Config) ->
@@ -715,7 +722,7 @@ join_fails_because_server_process_not_found_before_get_pids(Config) ->
         (_) ->
             ok
     end,
-    {error, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}} =
+    {error, {task_failed, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}, _}} =
         cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
 
 join_fails_before_send_dump(Config) ->
@@ -735,8 +742,10 @@ join_fails_before_send_dump(Config) ->
         (_) ->
             ok
     end,
-    {error, sim_error} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    ?assertMatch(
+        {error, {task_failed, sim_error, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
+    ),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     %% Not joined, some data exchanged
@@ -771,8 +780,10 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
         (_) ->
             ok
     end,
-    {error, sim_error2} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    ?assertMatch(
+        {error, {task_failed, sim_error2, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
+    ),
     %% Ensure we sent dump to Pid1
     receive_message(before_send_dump_called_for_pid1),
     cets:insert_request(Pid1, {1}),
@@ -829,8 +840,10 @@ join_fails_in_check_fully_connected(Config) ->
         (_) ->
             ok
     end,
-    {error, check_fully_connected_failed} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
+    ?assertMatch(
+        {error, {task_failed, check_fully_connected_failed, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
+    ),
     receive_message(before_check_fully_connected_called).
 
 join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
@@ -840,8 +853,10 @@ join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
     %% (probably could happen if it still haven't checked other nodes after a join)
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     set_join_ref(Pid3, make_ref()),
-    {error, check_same_join_ref_failed} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+    ?assertMatch(
+        {error, {task_failed, check_same_join_ref_failed, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
+    ).
 
 join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
     #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
@@ -850,15 +865,19 @@ join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
     %% (probably could happen if it still haven't checked other nodes after a join)
     ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
     set_other_servers(Pid3, []),
-    {error, check_fully_connected_failed} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+    ?assertMatch(
+        {error, {task_failed, check_fully_connected_failed, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
+    ).
 
 join_fails_because_servers_overlap(Config) ->
     #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     set_other_servers(Pid1, [Pid3]),
     set_other_servers(Pid2, [Pid3]),
-    {error, check_do_not_overlap_failed} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}).
+    ?assertMatch(
+        {error, {task_failed, check_do_not_overlap_failed, #{}}},
+        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
+    ).
 
 %% join_fails_because_servers_overlap testcase, but we check the logging.
 %% We check that `?LOG_ERROR(#{what => check_do_not_overlap_failed})' is called.
@@ -868,12 +887,17 @@ logs_are_printed_when_join_fails_because_servers_overlap(Config) ->
     #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
     set_other_servers(Pid1, [Pid3]),
     set_other_servers(Pid2, [Pid3]),
-    {error, check_do_not_overlap_failed} =
-        cets_join:join(lock_name(Config), #{log_ref => LogRef}, Pid1, Pid2, #{}),
+    ?assertMatch(
+        {error, {task_failed, check_do_not_overlap_failed, #{}}},
+        cets_join:join(lock_name(Config), #{log_ref => LogRef}, Pid1, Pid2, #{})
+    ),
     receive
         {log, ?FUNCTION_NAME, #{
             level := error,
-            msg := {report, #{what := check_do_not_overlap_failed, log_ref := LogRef}}
+            msg :=
+                {report, #{
+                    what := check_do_not_overlap_failed, log_ref := LogRef
+                }}
         }} ->
             ok
     after 5000 ->
@@ -952,6 +976,80 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     %% The counter example for no logging is
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
     assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
+
+atom_error_is_logged_in_tracked(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    F = fun() -> error(oops) end,
+    ?assertException(
+        error,
+        {task_failed, oops, #{log_ref := LogRef}},
+        cets_long:run_tracked(#{log_ref => LogRef}, F)
+    ),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := task_failed,
+                    log_ref := LogRef,
+                    reason := oops
+                }}
+        }
+    ] =
+        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+
+nested_calls_errors_are_logged_once_with_tuple_reason(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    F = fun() -> error({something_is_wrong, ?FUNCTION_NAME}) end,
+    FF = fun() -> cets_long:run_tracked(#{log_ref => LogRef, task => subtask}, F) end,
+    ?assertException(
+        error,
+        {task_failed, {something_is_wrong, nested_calls_errors_are_logged_once_with_tuple_reason},
+            #{log_ref := LogRef}},
+        cets_long:run_tracked(#{log_ref => LogRef, task => main}, FF)
+    ),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := task_failed,
+                    log_ref := LogRef,
+                    reason := {something_is_wrong, ?FUNCTION_NAME}
+                }}
+        }
+    ] =
+        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+
+nested_calls_errors_are_logged_once_with_map_reason(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    F = fun() -> error(#{something_is_wrong => ?FUNCTION_NAME}) end,
+    FF = fun() -> cets_long:run_tracked(#{log_ref => LogRef, task => subtask}, F) end,
+    ?assertException(
+        error,
+        {task_failed,
+            #{
+                something_is_wrong :=
+                    nested_calls_errors_are_logged_once_with_map_reason
+            },
+            #{log_ref := LogRef}},
+        cets_long:run_tracked(#{log_ref => LogRef, task => main}, FF)
+    ),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := task_failed,
+                    log_ref := LogRef,
+                    reason := #{something_is_wrong := ?FUNCTION_NAME}
+                }}
+        }
+    ] =
+        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 send_dump_contains_already_added_servers(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
@@ -1819,7 +1917,7 @@ code_change_returns_ok_for_ack(Config) ->
 run_spawn_forwards_errors(_Config) ->
     ?assertException(
         error,
-        oops,
+        {task_failed, oops, #{}},
         cets_long:run_spawn(#{}, fun() -> error(oops) end)
     ).
 
@@ -1827,7 +1925,7 @@ run_tracked_failed(_Config) ->
     F = fun() -> error(oops) end,
     ?assertException(
         error,
-        oops,
+        {task_failed, oops, #{}},
         cets_long:run_tracked(#{}, F)
     ).
 
@@ -1838,7 +1936,7 @@ run_tracked_logged(_Config) ->
 run_tracked_logged_check_logger(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     LogRef = make_ref(),
-    F = fun() -> timer:sleep(5000) end,
+    F = fun() -> timer:sleep(infinity) end,
     %% Run it in a separate process, so we can check logs in the test process
     %% Overwrite default five seconds interval with 10 milliseconds
     spawn_link(fun() -> cets_long:run_tracked(#{report_interval => 10, log_ref => LogRef}, F) end),
@@ -1847,6 +1945,34 @@ run_tracked_logged_check_logger(_Config) ->
         {log, ?FUNCTION_NAME, #{
             level := warning,
             msg := {report, #{what := long_task_progress, log_ref := LogRef}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
+
+%% Improves code coverage, checks logs
+long_call_fails_because_linked_process_dies(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    Me = self(),
+    F = fun() ->
+        Me ! task_started,
+        timer:sleep(infinity)
+    end,
+    RunPid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    %% To avoid race conditions
+    receive_message(task_started),
+    spawn(fun() ->
+        link(RunPid),
+        error(sim_error_in_linked_process)
+    end),
+    wait_for_down(RunPid),
+    %% Exit test after first log event
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := error,
+            msg := {report, #{what := task_failed, log_ref := LogRef, caller_pid := RunPid}}
         }} ->
             ok
     after 5000 ->
@@ -1951,7 +2077,8 @@ joining_not_fully_connected_node_is_not_allowed(Config) ->
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
-        {error, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}} =
+        {error,
+            {task_failed, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}, _}} =
             rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
@@ -1979,9 +2106,11 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
-        {error, check_could_reach_each_other_failed} = rpc(Peer3, cets_join, join, [
-            lock_name(Config), #{}, Pid5, Pid3
-        ]),
+        {error, {task_failed, check_could_reach_each_other_failed, _}} = rpc(
+            Peer3, cets_join, join, [
+                lock_name(Config), #{}, Pid5, Pid3
+            ]
+        ),
         %% Still connected
         cets:insert(Pid1, {r1}),
         {ok, [{r1}]} = cets:remote_dump(Pid3),
@@ -1992,7 +2121,69 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
     end,
     [] = cets:other_pids(Pid5).
 
+logging_when_failing_join_with_disco(Config) ->
+    %% Simulate cets:other_pids/1 failing with reason:
+    %%  {{nodedown,'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'},
+    %%   {gen_server,call,[<30887.438.0>,other_servers,infinity]}}
+    %% We use peer module to still have a connection after a disconnect from the remote node.
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Peer2, Tab),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets, other_pids, fun
+        (Server) when Server =:= Pid2 ->
+            block_node(Node2, Peer2),
+            wait_for_down(Pid2),
+            meck:passthrough([Server]);
+        (Server) ->
+            meck:passthrough([Server])
+    end),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    try
+        cets_discovery:add_table(Disco, Tab),
+        timer:sleep(100),
+        Logs = receive_all_logs(?FUNCTION_NAME),
+        Reason = {{nodedown, Node2}, {gen_server, call, [Pid2, other_servers, infinity]}},
+        MatchedLogs = [
+            Log
+         || #{
+                level := error,
+                msg :=
+                    {report, #{
+                        what := task_failed,
+                        reason := Reason2
+                    }}
+            } = Log <- Logs,
+            Reason =:= Reason2
+        ],
+        %% Only one message is logged
+        [_] = MatchedLogs
+    after
+        meck:unload(),
+        reconnect_node(Node2, Peer2),
+        cets:stop(Pid2)
+    end,
+    ok.
+
 %% Helper functions
+
+receive_all_logs(Id) ->
+    receive
+        {log, Id, Log} ->
+            [Log | receive_all_logs(Id)]
+    after 100 ->
+        []
+    end.
 
 still_works(Pid) ->
     pong = cets:ping(Pid),
@@ -2178,6 +2369,13 @@ get_message_queue_length(Pid) ->
     {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
     Len.
 
+wait_for_down(Pid) ->
+    Mon = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Mon, process, Pid, Reason} -> Reason
+    after 5000 -> ct:fail({wait_for_down_timeout, Pid})
+    end.
+
 %% Disconnect node until manually connected
 block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
     rpc(Peer, erlang, set_cookie, [node(), invalid_cookie]),
@@ -2227,4 +2425,30 @@ send_join_start_back_and_wait_for_continue_joining() ->
             end;
         (_) ->
             ok
+    end.
+
+receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
+    ?LOG_ERROR(#{what => ensure_nothing_logged_before, log_ref => LogRef}),
+    receive
+        {log, LogHandlerId, #{
+            msg := {report, #{log_ref := LogRef, what := ensure_nothing_logged_before}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail({timeout, logger_is_broken})
+    end,
+    %% Do a new logging call to check that it is the only log message
+    ?LOG_ERROR(#{what => ensure_nothing_logged_after, log_ref => LogRef}),
+    %% We only match messages with the matching log_ref here
+    %% to ignore messages from the other parallel tests
+    receive
+        {log, LogHandlerId, Log = #{msg := {report, Report = #{log_ref := LogRef}}}} ->
+            case Report of
+                #{what := ensure_nothing_logged_after} ->
+                    [];
+                _ ->
+                    [Log | receive_all_logs_with_log_ref(LogHandlerId, LogRef)]
+            end
+    after 5000 ->
+        ct:fail({timeout, receive_all_logs_with_log_ref})
     end.

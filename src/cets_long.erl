@@ -48,38 +48,56 @@ run_spawn(Info, F) ->
 run_tracked(Info, Fun) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
-    ?LOG_INFO(Info#{what => long_task_started}),
+    ?LOG_INFO(Info#{what => task_started}),
     Pid = spawn_mon(Info, Parent, Start),
     try
         Fun()
     catch
+        %% Skip nested task_failed errors
+        Class:{task_failed, Reason, Info2}:Stacktrace ->
+            erlang:raise(Class, {task_failed, Reason, Info2}, Stacktrace);
         Class:Reason:Stacktrace ->
             Log = Info#{
-                what => long_task_failed,
+                what => task_failed,
                 class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace
+                stacktrace => Stacktrace,
+                caller_pid => Parent,
+                long_ref => make_ref()
             },
             ?LOG_ERROR(Log),
-            erlang:raise(Class, Reason, Stacktrace)
+            erlang:raise(Class, {task_failed, Reason, Info}, Stacktrace)
     after
         Diff = diff(Start),
-        ?LOG_INFO(Info#{what => long_task_finished, time_ms => Diff}),
+        ?LOG_INFO(Info#{what => task_finished, time_ms => Diff}),
         Pid ! stop
     end.
 
 spawn_mon(Info, Parent, Start) ->
-    spawn_link(fun() -> run_monitor(Info, Parent, Start) end).
+    Ref = make_ref(),
+    %% We do not link, because we want to log if the Parent dies
+    Pid = spawn(fun() -> run_monitor(Info, Ref, Parent, Start) end),
+    %% Ensure there is no race conditions by waiting till the monitor is added
+    receive
+        {monitor_added, Ref} -> ok
+    end,
+    Pid.
 
-run_monitor(Info, Parent, Start) ->
+run_monitor(Info, Ref, Parent, Start) ->
     Mon = erlang:monitor(process, Parent),
+    Parent ! {monitor_added, Ref},
     Interval = maps:get(report_interval, Info, 5000),
     monitor_loop(Mon, Info, Parent, Start, Interval).
 
 monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-            ?LOG_ERROR(Info#{what => long_task_failed, reason => Reason}),
+            ?LOG_ERROR(Info#{
+                what => task_failed,
+                reason => Reason,
+                caller_pid => Parent,
+                reported_by => monitor_process
+            }),
             ok;
         stop ->
             ok
@@ -87,6 +105,7 @@ monitor_loop(Mon, Info, Parent, Start, Interval) ->
         Diff = diff(Start),
         ?LOG_WARNING(Info#{
             what => long_task_progress,
+            caller_pid => Parent,
             time_ms => Diff,
             current_stacktrace => pinfo(Parent, current_stacktrace)
         }),
