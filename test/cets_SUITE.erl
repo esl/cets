@@ -2203,7 +2203,8 @@ join_interrupted_when_ping_crashes(Config) ->
         (Server, ping) when Server == Pid2 -> error(simulate_crash);
         (Server, Msg) -> meck:passthrough([Server, Msg])
     end),
-    ?assertMatch({error, ping_all_failed}, cets_join:join(lock_name(Config), #{}, Pid1, Pid3)),
+    Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
     meck:unload().
 
 %% Helper functions
