@@ -207,16 +207,7 @@ check_could_reach_each_other(Info, LocPids, RemPids) ->
         {min(LocNode, RemNode), max(LocNode, RemNode)}
      || LocNode <- LocNodes, RemNode <- RemNodes, LocNode =/= RemNode
     ]),
-    Results =
-        [
-            {Node1, Node2,
-                cets_long:run_tracked(
-                    #{task => ping_node, node1 => Node1, node2 => Node2}, fun() ->
-                        rpc:call(Node1, net_adm, ping, [Node2], 10000)
-                    end
-                )}
-         || {Node1, Node2} <- Pairs
-        ],
+    Results = cets_ping:ping_pairs(Pairs),
     NotConnected = [X || {_Node1, _Node2, Res} = X <- Results, Res =/= pong],
     case NotConnected of
         [] ->
