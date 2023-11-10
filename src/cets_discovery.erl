@@ -470,12 +470,27 @@ handle_system_info(State) ->
 -spec wait_for_dns(dns_inet_family()) -> ok.
 wait_for_dns(Family) ->
     {node, _Name, Host} = dist_util:split_node(node()),
-    wait_for_dns(Family, Host, 1).
+    {ok, N} = wait_for_dns(Family, Host, 1),
+    case N > 50 of
+        true ->
+            %% Report if it took long time to get the node name resolvable
+            ?LOG_WARNING(#{
+                what => dns_is_ready,
+                text => <<"Successfully resolved our node name after a long waiting">>,
+                node => node(),
+                host => Host,
+                tries => N
+            });
+         false ->
+              ok
+    end,
+    ok.
+    
 
 wait_for_dns(Family, Host, N) ->
     case inet_res:gethostbyname(Host, Family) of
         {ok, _} ->
-            ok;
+            {ok, N};
         {error, Reason} ->
             case N rem 50 of
                 0 ->
@@ -483,7 +498,8 @@ wait_for_dns(Family, Host, N) ->
                         what => wait_for_dns,
                         node => node(),
                         host => Host,
-                        reason => Reason
+                        reason => Reason,
+                        tries => N
                     });
                 _ ->
                     ok
