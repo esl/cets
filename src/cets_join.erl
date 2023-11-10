@@ -195,9 +195,9 @@ get_pids(Pid) ->
 check_pids(Info, LocPids, RemPids, JoinOpts) ->
     check_do_not_overlap(Info, LocPids, RemPids),
     checkpoint(before_check_fully_connected, JoinOpts),
+    check_could_reach_each_other(Info, LocPids, RemPids),
     check_fully_connected(Info, LocPids),
-    check_fully_connected(Info, RemPids),
-    check_could_reach_each_other(Info, LocPids, RemPids).
+    check_fully_connected(Info, RemPids).
 
 -spec check_could_reach_each_other(cets_long:log_info(), cets:servers(), cets:servers()) -> ok.
 check_could_reach_each_other(Info, LocPids, RemPids) ->
