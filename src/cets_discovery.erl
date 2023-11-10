@@ -481,11 +481,10 @@ wait_for_dns(Family) ->
                 host => Host,
                 tries => N
             });
-         false ->
-              ok
+        false ->
+            ok
     end,
     ok.
-    
 
 wait_for_dns(Family, Host, N) ->
     case inet_res:gethostbyname(Host, Family) of

@@ -2087,8 +2087,7 @@ joining_not_fully_connected_node_is_not_allowed(Config) ->
         %% Pid5 and Pid3 could contact each other.
         %% Pid3 could contact Pid1 (they are joined).
         %% But Pid5 cannot contact Pid1.
-        {error,
-            {task_failed, {{nodedown, Node1}, {gen_server, call, [_, other_servers, infinity]}}, _}} =
+        {error, {task_failed, check_could_reach_each_other_failed, _}} =
             rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
         %% Still connected
         cets:insert(Pid1, {r1}),
