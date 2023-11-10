@@ -1,5 +1,5 @@
 -module(cets_ping).
--export([ping/1]).
+-export([ping/1, ping_pairs/1]).
 ping(Node) when is_atom(Node) ->
     %% It is important to understand, that initial setup for dist connections
     %% is done by the single net_kernel process.
@@ -20,25 +20,49 @@ ping(Node) when is_atom(Node) ->
                         {{error, _}, {error, _}} ->
                             pang;
                         _ ->
-                            ping_without_disconnect(Node)
+                            connect_ping(Node)
                     end;
                 _ ->
                     pang
             end
     end.
 
-%% net_adm:ping/1 but without disconnect_node
-%% (because disconnect_node could introduce more chaos and it is not atomic)
-ping_without_disconnect(Node) ->
-    Msg = {is_auth, node()},
-    Dst = {net_kernel, Node},
-    try gen:call(Dst, '$gen_call', Msg, infinity) of
-        {ok, yes} ->
+connect_ping(Node) ->
+    %% We could use net_adm:ping/1 but it does:
+    %% - disconnect node on pang - we don't want that
+    %%   (because it could disconnect already connected node because of race conditions)
+    %% - it calls net_kernel's gen_server of the remote server,
+    %%   but it could be busy doing something,
+    %%   which means slower response time.
+    case net_kernel:connect_node(Node) of
+        true ->
             pong;
         _ ->
-            % erlang:disconnect_node(Node),
-            pang
-    catch
-        _:_ ->
             pang
     end.
+
+-spec ping_pairs([{node(), node()}]) -> [{node(), node(), pong | Reason :: term()}].
+ping_pairs(Pairs) ->
+    %% We could use rpc:multicall(Nodes, cets_ping, ping, Args).
+    %% But it means more chance of nodes trying to contact each other.
+    ping_pairs_stop_on_pang(Pairs).
+
+ping_pairs_stop_on_pang([{Node1, Node2} | Pairs]) ->
+    F = fun() -> rpc:call(Node1, cets_ping, ping, [Node2], 10000) end,
+    Info = #{task => ping_node, node1 => Node1, node2 => Node2},
+    Res = cets_long:run_tracked(Info, F),
+    case Res of
+        pong ->
+            [{Node1, Node2, pong} | ping_pairs_stop_on_pang(Pairs)];
+        Other ->
+            %% We do not need to ping the rest of nodes -
+            %% one node returning pang is enough to cancel join.
+            %% We could exit earlier and safe some time
+            %% (connect_node to the dead node could be time consuming)
+            [{Node1, Node2, Other} | fail_pairs(Pairs, skipped)]
+    end;
+ping_pairs_stop_on_pang([]) ->
+    [].
+
+fail_pairs(Pairs, Reason) ->
+    [{Node1, Node2, Reason} || {Node1, Node2} <- Pairs].
