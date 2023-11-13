@@ -1,0 +1,52 @@
+#{
+    system_info =>
+        #{
+            nodes =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+                ],
+            tables => [cets_bosh, cets_external_component],
+            unavailable_nodes => []
+        },
+    available_nodes =>
+        [
+            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+        ],
+    local_table_to_other_nodes_map =>
+        #{
+            cets_external_component =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+                ],
+            cets_bosh =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+                ]
+        },
+    node_to_tab_nodes_map =>
+        #{
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+                        ]
+                }
+        },
+    online_nodes =>
+        [
+            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'
+        ],
+    this_node => 'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local'
+}.
