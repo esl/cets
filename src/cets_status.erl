@@ -3,7 +3,12 @@
 
 %% RPC callbacks
 -export([get_local_table_to_other_nodes_map_from_disco/1]).
--ignore_xref([status/1, get_local_table_to_other_nodes_map_from_disco/1]).
+%% Export for debugging/testing
+-export([gather_data/1, format_data/1]).
+
+-ignore_xref([
+    status/1, get_local_table_to_other_nodes_map_from_disco/1, gather_data/1, format_data/1
+]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -39,19 +44,56 @@
     conflict_tables := [table_name()]
 }.
 
+-type status_data() :: #{
+    this_node := node(),
+    online_nodes := [node()],
+    system_info := cets_discovery:system_info(),
+    available_nodes := [node()],
+    local_table_to_other_nodes_map := tab_nodes_map(),
+    node_to_tab_nodes_map := node_to_tab_nodes_map()
+}.
+
 -spec status(disco_name()) -> info().
 status(Disco) when is_atom(Disco) ->
-    %% The node lists could not match for different nodes
-    %% because they are updated periodically
-    #{unavailable_nodes := UnNodes, nodes := DiscoNodes, tables := Tables} =
-        Info = cets_discovery:system_info(Disco),
-    DiscoNodesSorted = lists:sort(DiscoNodes),
-    OnlineNodes = [node() | nodes()],
+    %% Gathering and formatting data is separated to simplify testing/debugging
+    Data = gather_data(Disco),
+    format_data(Data).
+
+-spec gather_data(disco_name()) -> status_data().
+gather_data(Disco) ->
+    ThisNode = node(),
+    Info = cets_discovery:system_info(Disco),
+    #{tables := Tables} = Info,
+    OnlineNodes = [ThisNode | nodes()],
     AvailNodes = available_nodes(Disco, OnlineNodes),
-    NoDiscoNodes = remote_nodes_without_disco(DiscoNodesSorted, AvailNodes, OnlineNodes),
     Expected = get_local_table_to_other_nodes_map(Tables),
     OtherTabNodes = get_node_to_tab_nodes_map(AvailNodes, Disco),
-    JoinedNodes = joined_nodes(Expected, OtherTabNodes),
+    #{
+        this_node => ThisNode,
+        online_nodes => OnlineNodes,
+        system_info => Info,
+        available_nodes => AvailNodes,
+        local_table_to_other_nodes_map => Expected,
+        node_to_tab_nodes_map => OtherTabNodes
+    }.
+
+%% Formats gathered data.
+%% Contains pure functions logic.
+-spec format_data(status_data()) -> info().
+format_data(#{
+    this_node := ThisNode,
+    online_nodes := OnlineNodes,
+    system_info := Info,
+    available_nodes := AvailNodes,
+    local_table_to_other_nodes_map := Expected,
+    node_to_tab_nodes_map := OtherTabNodes
+}) ->
+    %% The node lists could not match for different nodes
+    %% because they are updated periodically
+    #{unavailable_nodes := UnNodes, nodes := DiscoNodes, tables := Tables} = Info,
+    DiscoNodesSorted = lists:sort(DiscoNodes),
+    NoDiscoNodes = remote_nodes_without_disco(DiscoNodesSorted, AvailNodes, OnlineNodes),
+    JoinedNodes = joined_nodes(ThisNode, Expected, OtherTabNodes),
     AllTables = all_tables(Expected, OtherTabNodes),
     {UnknownTables, NodesWithUnknownTables} = unknown_tables(OtherTabNodes, Tables, AllTables),
     {MissingTables, NodesWithMissingTables} = missing_tables(OtherTabNodes, Tables),
@@ -96,8 +138,8 @@ get_node_to_tab_nodes_map(AvailNodes, Disco) ->
 
 %% Nodes that has our local tables running (but could also have some unknown tables).
 %% All joined nodes replicate data between each other.
--spec joined_nodes(tab_nodes_map(), node_to_tab_nodes_map()) -> [node()].
-joined_nodes(Expected, OtherTabNodes) ->
+-spec joined_nodes(node(), tab_nodes_map(), node_to_tab_nodes_map()) -> [node()].
+joined_nodes(ThisNode, Expected, OtherTabNodes) ->
     ExpectedTables = maps:keys(Expected),
     OtherJoined = maps:fold(
         fun(Node, TabNodes, Acc) ->
@@ -109,7 +151,7 @@ joined_nodes(Expected, OtherTabNodes) ->
         [],
         OtherTabNodes
     ),
-    lists:sort([node() | OtherJoined]).
+    lists:sort([ThisNode | OtherJoined]).
 
 unknown_tables(OtherTabNodes, Tables, AllTables) ->
     UnknownTables = ordsets:subtract(AllTables, Tables),
