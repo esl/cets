@@ -140,7 +140,7 @@ get_node_to_tab_nodes_map(AvailNodes, Disco) ->
 %% All joined nodes replicate data between each other.
 -spec joined_nodes(node(), tab_nodes_map(), node_to_tab_nodes_map()) -> [node()].
 joined_nodes(ThisNode, Expected, OtherTabNodes) ->
-    ExpectedTables = maps:keys(Expected),
+    ExpectedTables = lists:sort(maps:keys(Expected)),
     OtherJoined = maps:fold(
         fun(Node, TabNodes, Acc) ->
             case maps:with(ExpectedTables, TabNodes) =:= Expected of
@@ -172,7 +172,7 @@ unknown_tables(OtherTabNodes, Tables, AllTables) ->
 missing_tables(OtherTabNodes, LocalTables) ->
     Zip = maps:fold(
         fun(Node, TabNodes, Acc) ->
-            RemoteTables = maps:keys(TabNodes),
+            RemoteTables = lists:sort(maps:keys(TabNodes)),
             MissingTables = ordsets:subtract(LocalTables, RemoteTables),
             case MissingTables of
                 [] -> Acc;

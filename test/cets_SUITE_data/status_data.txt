@@ -1,0 +1,1470 @@
+#{
+    system_info =>
+        #{
+            nodes =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            phase => regular,
+            tables =>
+                [
+                    cets_bosh,
+                    cets_cluster_id,
+                    cets_external_component,
+                    cets_s2s_secret,
+                    cets_s2s_session,
+                    cets_session,
+                    cets_stream_management_session
+                ],
+            timer_ref => fake_ref,
+            backend_module => mongoose_cets_discovery_rdbms,
+            unavailable_nodes => [],
+            %% backend_state is replaced here
+            backend_state => #{},
+            dns_status => ready,
+            get_nodes_status => not_running,
+            join_status => not_running,
+            last_get_nodes_result =>
+                {ok, [
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local'
+                ]},
+            last_get_nodes_retry_type => regular,
+            pending_wait_for_ready => [],
+            results =>
+                [
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_bosh,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_cluster_id,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_external_component,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_secret,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_s2s_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    },
+                    #{
+                        node =>
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local',
+                        table => cets_stream_management_session,
+                        result => {error, already_joined},
+                        what => join_result
+                    }
+                ],
+            should_retry_get_nodes => false,
+            should_retry_join => false,
+            verify_ready => []
+        },
+    available_nodes =>
+        [
+            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+        ],
+    local_table_to_other_nodes_map =>
+        #{
+            cets_external_component =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_s2s_session =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_s2s_secret =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_session =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_bosh =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_stream_management_session =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ],
+            cets_cluster_id =>
+                [
+                    'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                    'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                ]
+        },
+    node_to_tab_nodes_map =>
+        #{
+            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                },
+            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local' =>
+                #{
+                    cets_external_component =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_s2s_secret =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_bosh =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_stream_management_session =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ],
+                    cets_cluster_id =>
+                        [
+                            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+                            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+                        ]
+                }
+        },
+    online_nodes =>
+        [
+            'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-2.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-3.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-4.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-5.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-6.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-7.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-8.mongooseim.default.svc.cluster.local',
+            'mongooseim@mongooseim-9.mongooseim.default.svc.cluster.local'
+        ],
+    this_node =>
+        'mongooseim@mongooseim-0.mongooseim.default.svc.cluster.local'
+}.
