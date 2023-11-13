@@ -140,7 +140,7 @@ get_node_to_tab_nodes_map(AvailNodes, Disco) ->
 %% All joined nodes replicate data between each other.
 -spec joined_nodes(node(), tab_nodes_map(), node_to_tab_nodes_map()) -> [node()].
 joined_nodes(ThisNode, Expected, OtherTabNodes) ->
-    ExpectedTables = maps:keys(Expected),
+    ExpectedTables = maps_keys_sorted(Expected),
     OtherJoined = maps:fold(
         fun(Node, TabNodes, Acc) ->
             case maps:with(ExpectedTables, TabNodes) =:= Expected of
@@ -172,7 +172,7 @@ unknown_tables(OtherTabNodes, Tables, AllTables) ->
 missing_tables(OtherTabNodes, LocalTables) ->
     Zip = maps:fold(
         fun(Node, TabNodes, Acc) ->
-            RemoteTables = maps:keys(TabNodes),
+            RemoteTables = maps_keys_sorted(TabNodes),
             MissingTables = ordsets:subtract(LocalTables, RemoteTables),
             case MissingTables of
                 [] -> Acc;
@@ -213,7 +213,7 @@ conflict_tables(Expected, OtherTabNodes) ->
 -spec all_tables(tab_nodes_map(), node_to_tab_nodes_map()) -> [table_name()].
 all_tables(Expected, OtherTabNodes) ->
     TableNodesVariants = [Expected | maps:values(OtherTabNodes)],
-    TableVariants = lists:map(fun maps:keys/1, TableNodesVariants),
+    TableVariants = lists:map(fun maps_keys_sorted/1, TableNodesVariants),
     ordsets:union(TableVariants).
 
 %% Returns nodes for each table hosted on node()
@@ -243,3 +243,6 @@ discovery_works(#{last_get_nodes_result := {ok, _}}) ->
     true;
 discovery_works(_) ->
     false.
+
+maps_keys_sorted(Map) ->
+    lists:sort(maps:keys(Map)).

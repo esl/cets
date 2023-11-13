@@ -149,7 +149,8 @@ cases() ->
         long_call_to_unknown_name_throws_pid_not_found,
         send_leader_op_throws_noproc,
         pinfo_returns_value,
-        pinfo_returns_undefined
+        pinfo_returns_undefined,
+        format_data_does_not_return_table_duplicates
     ].
 
 only_for_logger_cases() ->
@@ -2207,6 +2208,10 @@ join_interrupted_when_ping_crashes(Config) ->
     ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
     meck:unload().
 
+format_data_does_not_return_table_duplicates(Config) ->
+    Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
+    ?assertMatch(#{remote_unknown_tables := [], remote_nodes_with_missing_tables := []}, Res).
+
 %% Helper functions
 
 receive_all_logs(Id) ->
@@ -2484,3 +2489,19 @@ receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
     after 5000 ->
         ct:fail({timeout, receive_all_logs_with_log_ref})
     end.
+
+%% Gathered after Helm update
+%% with cets_status:gather_data(mongoose_cets_discovery).
+test_data_for_duplicate_missing_table_in_status(Config) ->
+    %% Create atoms in non sorted order
+    %% maps:keys returns keys in the atom-creation order (and not sorted).
+    %% Also, compiler is smart and would optimize list_to_atom("literal_string"),
+    %% so we do a module call to disable this optimization.
+    _ = list_to_atom(?MODULE:return_same("cets_external_component")),
+    _ = list_to_atom(?MODULE:return_same("cets_bosh")),
+    Name = filename:join(proplists:get_value(data_dir, Config), "status_data.txt"),
+    {ok, [Term]} = file:consult(Name),
+    Term.
+
+return_same(X) ->
+    X.
