@@ -233,16 +233,20 @@ handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
     {NodeDownTime, State2} = handle_nodeup(Node, State),
-    ?LOG_WARNING(#{
-        what => nodeup, remote_node => Node, downtime_millisecond_duration => NodeDownTime
-    }),
+    ?LOG_WARNING(
+        set_defined(downtime_millisecond_duration, NodeDownTime, #{
+            what => nodeup, remote_node => Node
+        })
+    ),
     State3 = remove_node_from_unavailable_list(Node, State2),
     {noreply, try_joining(State3)};
 handle_info({nodedown, Node}, State) ->
     {NodeUpTime, State2} = handle_nodedown(Node, State),
-    ?LOG_WARNING(#{
-        what => nodedown, remote_node => Node, connected_millisecond_duration => NodeUpTime
-    }),
+    ?LOG_WARNING(
+        set_defined(connected_millisecond_duration, NodeUpTime, #{
+            what => nodedown, remote_node => Node
+        })
+    ),
     %% Do another check to update unavailable_nodes list
     self() ! check,
     {noreply, State2};
@@ -576,3 +580,8 @@ get_downtime(Node, #{nodedown_timestamps := Map}) ->
             Time = erlang:system_time(millisecond),
             Time - WentDown
     end.
+
+set_defined(_Key, undefined, Map) ->
+    Map;
+set_defined(Key, Value, Map) ->
+    Map#{Key => Value}.
