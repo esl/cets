@@ -491,21 +491,21 @@ remember_nodedown_timestamp(Node, State = #{nodedown_timestamps := Map}) ->
     State#{nodedown_timestamps := Map2}.
 
 remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
-    StartTime = maps:get(Node, Map, unknown),
+    StartTime = maps:get(Node, Map, undefined),
     NodeUpTime = calculate_uptime(StartTime),
     Map2 = maps:remove(Node, State),
     {NodeUpTime, State#{nodeup_timestamps := Map2}}.
 
-calculate_uptime(unknown) ->
-    unknown;
+calculate_uptime(undefined) ->
+    undefined;
 calculate_uptime(StartTime) ->
     Time = erlang:system_time(millisecond),
     Time - StartTime.
 
 get_downtime(Node, #{nodedown_timestamps := Map}) ->
-    case maps:get(Node, Map, unknown) of
-        unknown ->
-            unknown;
+    case maps:get(Node, Map, undefined) of
+        undefined ->
+            undefined;
         WentDown ->
             Time = erlang:system_time(millisecond),
             Time - WentDown
