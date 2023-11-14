@@ -228,7 +228,7 @@ handle_info({nodeup, Node}, State) ->
     {NodeDownTime, State2} = handle_nodeup(Node, State),
     ?LOG_WARNING(
         set_defined(downtime_millisecond_duration, NodeDownTime, #{
-            what => nodeup, remote_node => Node
+            what => nodeup, remote_node => Node, alive_nodes => length(nodes()) + 1
         })
     ),
     State3 = remove_node_from_unavailable_list(Node, State2),
@@ -237,7 +237,7 @@ handle_info({nodedown, Node}, State) ->
     {NodeUpTime, State2} = handle_nodedown(Node, State),
     ?LOG_WARNING(
         set_defined(connected_millisecond_duration, NodeUpTime, #{
-            what => nodedown, remote_node => Node
+            what => nodedown, remote_node => Node, alive_nodes => length(nodes()) + 1
         })
     ),
     %% Do another check to update unavailable_nodes list
