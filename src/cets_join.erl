@@ -84,10 +84,12 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
     Retries = 1,
+    %% global could abort the transaction when one of the nodes goes down.
+    %% It could usually abort it during startup or update.
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
             checkpoint(before_retry, JoinOpts),
-            ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
+            ?LOG_INFO(Info#{what => join_retry, reason => lock_aborted}),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
             Result
