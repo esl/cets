@@ -93,7 +93,8 @@
     pending_wait_for_ready := [gen_server:from()],
     dns_status := dns_status(),
     nodeup_timestamps := #{node() => milliseconds()},
-    nodedown_timestamps := #{node() => milliseconds()}
+    nodedown_timestamps := #{node() => milliseconds()},
+    start_time := milliseconds()
 }.
 -type dns_status() :: ready | waiting.
 -type dns_inet_family() :: inet | inet6.
@@ -159,6 +160,7 @@ wait_for_ready(Server, Timeout) ->
 
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
+    StartTime = erlang:system_time(millisecond),
     %% Sends nodeup / nodedown
     ok = net_kernel:monitor_nodes(true),
     Mod = maps:get(backend_module, Opts, cets_discovery_file),
@@ -186,7 +188,8 @@ init(Opts) ->
         pending_wait_for_ready => [],
         dns_status => DNSStatus,
         nodeup_timestamps => #{},
-        nodedown_timestamps => #{}
+        nodedown_timestamps => #{},
+        start_time => StartTime
     },
     %% Set initial timestamps because we would not receive nodeup events for
     %% already connected nodes
@@ -235,7 +238,12 @@ handle_info({nodeup, Node}, State) ->
     {NodeDownTime, State2} = handle_nodeup(Node, State),
     ?LOG_WARNING(
         set_defined(downtime_millisecond_duration, NodeDownTime, #{
-            what => nodeup, remote_node => Node, alive_nodes => length(nodes()) + 1
+            what => nodeup,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            %% We report that time so we could work on minimizing that time.
+            %% It says how long it took to discover nodes after startup.
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
     State3 = remove_node_from_unavailable_list(Node, State2),
@@ -244,7 +252,10 @@ handle_info({nodedown, Node}, State) ->
     {NodeUpTime, State2} = handle_nodedown(Node, State),
     ?LOG_WARNING(
         set_defined(connected_millisecond_duration, NodeUpTime, #{
-            what => nodedown, remote_node => Node, alive_nodes => length(nodes()) + 1
+            what => nodedown,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
     %% Do another check to update unavailable_nodes list
@@ -569,19 +580,23 @@ remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
 calculate_uptime(undefined) ->
     undefined;
 calculate_uptime(StartTime) ->
-    Time = erlang:system_time(millisecond),
-    Time - StartTime.
+    time_since(StartTime).
 
 get_downtime(Node, #{nodedown_timestamps := Map}) ->
     case maps:get(Node, Map, undefined) of
         undefined ->
             undefined;
         WentDown ->
-            Time = erlang:system_time(millisecond),
-            Time - WentDown
+            time_since(WentDown)
     end.
 
 set_defined(_Key, undefined, Map) ->
     Map;
 set_defined(Key, Value, Map) ->
     Map#{Key => Value}.
+
+time_since_startup_in_milliseconds(#{start_time := StartTime}) ->
+    time_since(StartTime).
+
+time_since(StartTime) ->
+    erlang:system_time(millisecond) - StartTime.
