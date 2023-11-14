@@ -92,7 +92,8 @@
     timer_ref := reference() | undefined,
     pending_wait_for_ready := [gen_server:from()],
     dns_status := dns_status(),
-    nodeup_timestamps := #{node() => milliseconds()}
+    nodeup_timestamps := #{node() => milliseconds()},
+    nodedown_timestamps := #{node() => milliseconds()}
 }.
 -type dns_status() :: ready | waiting.
 -type dns_inet_family() :: inet | inet6.
@@ -184,7 +185,8 @@ init(Opts) ->
         timer_ref => undefined,
         pending_wait_for_ready => [],
         dns_status => DNSStatus,
-        nodeup_timestamps => #{}
+        nodeup_timestamps => #{},
+        nodedown_timestamps => #{}
     },
     %% Set initial timestamps because we would not receive nodeup events for
     %% already connected nodes
@@ -230,12 +232,17 @@ handle_info(check, State) ->
 handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
-    ?LOG_WARNING(#{what => nodeup, remote_node => Node}),
-    State2 = remove_node_from_unavailable_list(Node, State),
-    {noreply, remember_nodeup_timestamp(Node, try_joining(State2))};
+    {NodeDownTime, State2} = handle_nodeup(Node, State),
+    ?LOG_WARNING(#{
+        what => nodeup, remote_node => Node, downtime_millisecond_duration => NodeDownTime
+    }),
+    State3 = remove_node_from_unavailable_list(Node, State2),
+    {noreply, try_joining(State3)};
 handle_info({nodedown, Node}, State) ->
-    {NodeUpTime, State2} = remove_nodeup_timestamp(Node, State),
-    ?LOG_WARNING(#{what => nodedown, remote_node => Node, connected_for_milliseconds => NodeUpTime}),
+    {NodeUpTime, State2} = handle_nodedown(Node, State),
+    ?LOG_WARNING(#{
+        what => nodedown, remote_node => Node, connected_millisecond_duration => NodeUpTime
+    }),
     %% Do another check to update unavailable_nodes list
     self() ! check,
     {noreply, State2};
@@ -531,19 +538,41 @@ maybe_wait_for_dns_async(#{}) ->
     %% Skip waiting
     ready.
 
+handle_nodedown(Node, State) ->
+    State2 = remember_nodedown_timestamp(Node, State),
+    remove_nodeup_timestamp(Node, State2).
+
+handle_nodeup(Node, State) ->
+    State2 = remember_nodeup_timestamp(Node, State),
+    {get_downtime(Node, State2), State2}.
+
 remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
     Time = erlang:system_time(millisecond),
     Map2 = Map#{Node => Time},
     State#{nodeup_timestamps := Map2}.
 
+remember_nodedown_timestamp(Node, State = #{nodedown_timestamps := Map}) ->
+    Time = erlang:system_time(millisecond),
+    Map2 = Map#{Node => Time},
+    State#{nodedown_timestamps := Map2}.
+
 remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
     StartTime = maps:get(Node, Map, unknown),
     NodeUpTime = calculate_uptime(StartTime),
     Map2 = maps:remove(Node, State),
-    {NodeUpTime, Map2}.
+    {NodeUpTime, State#{nodeup_timestamps := Map2}}.
 
 calculate_uptime(unknown) ->
     unknown;
 calculate_uptime(StartTime) ->
     Time = erlang:system_time(millisecond),
     Time - StartTime.
+
+get_downtime(Node, #{nodedown_timestamps := Map}) ->
+    case maps:get(Node, Map, unknown) of
+        unknown ->
+            unknown;
+        WentDown ->
+            Time = erlang:system_time(millisecond),
+            Time - WentDown
+    end.
