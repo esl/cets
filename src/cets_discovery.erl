@@ -91,10 +91,12 @@
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
     pending_wait_for_ready := [gen_server:from()],
-    dns_status := dns_status()
+    dns_status := dns_status(),
+    nodeup_timestamps := #{node() => milliseconds()}
 }.
 -type dns_status() :: ready | waiting.
 -type dns_inet_family() :: inet | inet6.
+-type milliseconds() :: integer().
 
 %% Backend could define its own options
 -type opts() :: #{
@@ -165,7 +167,7 @@ init(Opts) ->
     %% Changes phase from initial to regular (affects the check interval)
     erlang:send_after(timer:minutes(5), self(), enter_regular_phase),
     DNSStatus = maybe_wait_for_dns_async(Opts),
-    {ok, #{
+    State = #{
         phase => initial,
         results => [],
         nodes => [],
@@ -181,8 +183,13 @@ init(Opts) ->
         should_retry_join => false,
         timer_ref => undefined,
         pending_wait_for_ready => [],
-        dns_status => DNSStatus
-    }}.
+        dns_status => DNSStatus,
+        nodeup_timestamps => #{}
+    },
+    %% Set initial timestamps because we would not receive nodeup events for
+    %% already connected nodes
+    State2 = lists:foldl(fun remember_nodeup_timestamp/2, State, nodes()),
+    {ok, State2}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()} | {noreply, state()}.
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
@@ -223,12 +230,15 @@ handle_info(check, State) ->
 handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
+    ?LOG_WARNING(#{what => nodeup, remote_node => Node}),
     State2 = remove_node_from_unavailable_list(Node, State),
-    {noreply, try_joining(State2)};
-handle_info({nodedown, _Node}, State) ->
+    {noreply, remember_nodeup_timestamp(Node, try_joining(State2))};
+handle_info({nodedown, Node}, State) ->
+    {NodeUpTime, State2} = remove_nodeup_timestamp(Node, State),
+    ?LOG_WARNING(#{what => nodedown, remote_node => Node, connected_for_milliseconds => NodeUpTime}),
     %% Do another check to update unavailable_nodes list
     self() ! check,
-    {noreply, State};
+    {noreply, State2};
 handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
 handle_info({ping_result, Node, Result}, State) ->
@@ -520,3 +530,20 @@ maybe_wait_for_dns_async(Opts = #{wait_for_dns := true}) ->
 maybe_wait_for_dns_async(#{}) ->
     %% Skip waiting
     ready.
+
+remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
+    Time = erlang:system_time(millisecond),
+    Map2 = Map#{Node => Time},
+    State#{nodeup_timestamps := Map2}.
+
+remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
+    StartTime = maps:get(Node, Map, unknown),
+    NodeUpTime = calculate_uptime(StartTime),
+    Map2 = maps:remove(Node, State),
+    {NodeUpTime, Map2}.
+
+calculate_uptime(unknown) ->
+    unknown;
+calculate_uptime(StartTime) ->
+    Time = erlang:system_time(millisecond),
+    Time - StartTime.
