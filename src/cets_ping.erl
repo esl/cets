@@ -15,8 +15,11 @@ ping(Node) when is_atom(Node) ->
             pong;
         false ->
             case dist_util:split_node(Node) of
-                {node, _Name, Host} ->
-                    case {inet:getaddr(Host, inet6), inet:getaddr(Host, inet)} of
+                {node, Name, Host} ->
+                    Epmd = net_kernel:epmd_module(),
+                    V4 = Epmd:address_please(Name, Host, inet),
+                    V6 = Epmd:address_please(Name, Host, inet6),
+                    case {V4, V6} of
                         {{error, _}, {error, _}} ->
                             pang;
                         _ ->
