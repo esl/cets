@@ -94,6 +94,7 @@
     dns_status := dns_status(),
     nodeup_timestamps := #{node() => milliseconds()},
     nodedown_timestamps := #{node() => milliseconds()},
+    node_start_timestamps := #{node() => milliseconds()},
     start_time := milliseconds()
 }.
 -type dns_status() :: ready | waiting.
@@ -188,6 +189,7 @@ init(Opts) ->
         pending_wait_for_ready => [],
         dns_status => DNSStatus,
         nodeup_timestamps => #{},
+        node_start_timestamps => #{},
         nodedown_timestamps => #{},
         start_time => StartTime
     },
@@ -258,9 +260,12 @@ handle_info({nodedown, Node}, State) ->
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
+    send_start_time_to(Node, State),
     %% Do another check to update unavailable_nodes list
     self() ! check,
     {noreply, State2};
+handle_info({start_time, Node, StartTime}, State) ->
+    {noreply, handle_receive_start_time(Node, StartTime, State)};
 handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
 handle_info({ping_result, Node, Result}, State) ->
@@ -600,3 +605,28 @@ time_since_startup_in_milliseconds(#{start_time := StartTime}) ->
 
 time_since(StartTime) ->
     erlang:system_time(millisecond) - StartTime.
+
+send_start_time_to(Node, #{start_time := StartTime}) ->
+    case erlang:process_info(self(), registered_name) of
+        {registered_name, Name} ->
+            erlang:send({Name, Node}, {start_time, node(), StartTime});
+        _ ->
+            ok
+    end.
+
+handle_receive_start_time(Node, StartTime, State = #{node_start_timestamps := Map}) ->
+    case maps:get(Node, Map, undefined) of
+        undefined ->
+            ok;
+        StartTime ->
+            ?LOG_WARNING(#{
+                what => node_reconnects,
+                remote_node => Node,
+                start_time => StartTime,
+                text => <<"Netsplit recovery. The remote node has been connected to us before.">>
+            });
+        _ ->
+            %% Restarted node reconnected, this is fine during the rolling updates
+            ok
+    end,
+    State#{node_start_timestamps := maps:put(Node, StartTime, Map)}.
