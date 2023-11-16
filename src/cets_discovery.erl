@@ -545,7 +545,7 @@ maybe_wait_for_dns_async(Opts = #{wait_for_dns := true}) ->
     %% or inet6
     Family = maps:get(dns_inet_family, Opts, inet),
     spawn_link(fun() ->
-        wait_for_dns(Family),
+        %       wait_for_dns(Family),
         Me ! dns_is_ready
     end),
     waiting;
