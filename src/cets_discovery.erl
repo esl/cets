@@ -91,19 +91,16 @@
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
     pending_wait_for_ready := [gen_server:from()],
-    dns_status := dns_status(),
     nodeup_timestamps := #{node() => milliseconds()},
     nodedown_timestamps := #{node() => milliseconds()},
     node_start_timestamps := #{node() => milliseconds()},
     start_time := milliseconds()
 }.
--type dns_status() :: ready | waiting.
--type dns_inet_family() :: inet | inet6.
 -type milliseconds() :: integer().
 
 %% Backend could define its own options
 -type opts() :: #{
-    name := atom(), wait_for_dns := boolean(), dns_inet_family := dns_inet_family(), _ := _
+    name := atom(), _ := _
 }.
 -type start_result() :: {ok, pid()} | {error, term()}.
 -type server() :: pid() | atom().
@@ -170,7 +167,6 @@ init(Opts) ->
     BackendState = Mod:init(Opts),
     %% Changes phase from initial to regular (affects the check interval)
     erlang:send_after(timer:minutes(5), self(), enter_regular_phase),
-    DNSStatus = maybe_wait_for_dns_async(Opts),
     State = #{
         phase => initial,
         results => [],
@@ -187,7 +183,6 @@ init(Opts) ->
         should_retry_join => false,
         timer_ref => undefined,
         pending_wait_for_ready => [],
-        dns_status => DNSStatus,
         nodeup_timestamps => #{},
         node_start_timestamps => #{},
         nodedown_timestamps => #{},
@@ -272,9 +267,6 @@ handle_info({ping_result, Node, Result}, State) ->
     {noreply, handle_ping_result(Node, Result, State)};
 handle_info(enter_regular_phase, State) ->
     {noreply, State#{phase := regular}};
-handle_info(dns_is_ready, State) ->
-    self() ! check,
-    {noreply, State#{dns_status := ready}};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -286,8 +278,6 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 -spec handle_check(state()) -> state().
-handle_check(State = #{dns_status := waiting}) ->
-    State;
 handle_check(State = #{tables := []}) ->
     %% No tables to track, skip
     State;
@@ -503,60 +493,6 @@ has_join_result_for(Node, Table, #{results := Results}) ->
 -spec handle_system_info(state()) -> system_info().
 handle_system_info(State) ->
     State#{verify_ready => verify_ready(State)}.
-
--spec wait_for_dns(dns_inet_family()) -> ok.
-wait_for_dns(Family) ->
-    {node, _Name, Host} = dist_util:split_node(node()),
-    {ok, N} = wait_for_dns(Family, Host, 1),
-    case N > 50 of
-        true ->
-            %% Report if it took long time to get the node name resolvable
-            ?LOG_WARNING(#{
-                what => dns_is_ready,
-                text => <<"Successfully resolved our node name after a long waiting">>,
-                node => node(),
-                host => Host,
-                tries => N
-            });
-        false ->
-            ok
-    end,
-    ok.
-
-wait_for_dns(Family, Host, N) ->
-    case inet_res:gethostbyname(Host, Family) of
-        {ok, _} ->
-            {ok, N};
-        {error, Reason} ->
-            case N rem 50 of
-                0 ->
-                    ?LOG_WARNING(#{
-                        what => wait_for_dns,
-                        node => node(),
-                        host => Host,
-                        reason => Reason,
-                        tries => N
-                    });
-                _ ->
-                    ok
-            end,
-            timer:sleep(100),
-            wait_for_dns(Family, Host, N + 1)
-    end.
-
--spec maybe_wait_for_dns_async(opts()) -> dns_status().
-maybe_wait_for_dns_async(Opts = #{wait_for_dns := true}) ->
-    Me = self(),
-    %% or inet6
-    Family = maps:get(dns_inet_family, Opts, inet),
-    spawn_link(fun() ->
-        %       wait_for_dns(Family),
-        Me ! dns_is_ready
-    end),
-    waiting;
-maybe_wait_for_dns_async(#{}) ->
-    %% Skip waiting
-    ready.
 
 handle_nodedown(Node, State) ->
     State2 = remember_nodedown_timestamp(Node, State),
