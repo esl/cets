@@ -130,7 +130,8 @@
     is_leader := boolean(),
     opts := start_opts(),
     backlog := [backlog_entry()],
-    pause_monitors := [pause_monitor()]
+    pause_monitors := [pause_monitor()],
+    node_down_history := [node()]
 }.
 
 -type long_msg() ::
@@ -154,7 +155,8 @@
     memory := non_neg_integer(),
     ack_pid := ack_pid(),
     join_ref := join_ref(),
-    opts := start_opts()
+    opts := start_opts(),
+    node_down_history := [node()]
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
@@ -417,7 +419,8 @@ init({Tab, Opts}) ->
         is_leader => true,
         opts => Opts,
         backlog => [],
-        pause_monitors => []
+        pause_monitors => [],
+        node_down_history => []
     }}.
 
 -spec handle_call(long_msg() | {op, op()}, from(), state()) ->
@@ -524,7 +527,7 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
             cets_ack:send_remote_down(AckPid, RemotePid),
             call_user_handle_down(RemotePid, State),
             Servers2 = lists:delete(RemotePid, Servers),
-            set_other_servers(Servers2, State);
+            update_node_down_history(RemotePid, set_other_servers(Servers2, State));
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -534,6 +537,9 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
             }),
             State
     end.
+
+update_node_down_history(RemotePid, State = #{node_down_history := History}) ->
+    State#{node_down_history := [node(RemotePid) | History]}.
 
 %% Merge two lists of pids, create the missing monitors.
 -spec add_servers(Servers, Servers) -> Servers when Servers :: servers().
@@ -742,6 +748,7 @@ handle_get_info(
         other_servers := Servers,
         ack_pid := AckPid,
         join_ref := JoinRef,
+        node_down_history := DownHistory,
         opts := Opts
     }
 ) ->
@@ -752,6 +759,7 @@ handle_get_info(
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
         join_ref => JoinRef,
+        node_down_history => DownHistory,
         opts => Opts
     }.
 
