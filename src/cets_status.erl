@@ -64,7 +64,7 @@ gather_data(Disco) ->
     ThisNode = node(),
     Info = cets_discovery:system_info(Disco),
     #{tables := Tables} = Info,
-    OnlineNodes = [ThisNode | nodes()],
+    OnlineNodes = lists:sort([ThisNode | nodes()]),
     AvailNodes = available_nodes(Disco, OnlineNodes),
     Expected = get_local_table_to_other_nodes_map(Tables),
     OtherTabNodes = get_node_to_tab_nodes_map(AvailNodes, Disco),
