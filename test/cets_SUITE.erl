@@ -178,15 +178,15 @@ seq_cases() ->
         disco_logs_nodeup,
         disco_logs_nodedown,
         disco_logs_nodeup_after_downtime,
-        disco_logs_node_reconnects_after_downtime
+        disco_logs_node_reconnects_after_downtime,
+        disco_node_up_timestamp_is_remembered,
+        disco_logs_nodedown_timestamp_is_remembered
     ].
 
 cets_seq_no_log_cases() ->
     [
         join_interrupted_when_ping_crashes,
-        node_down_history_is_updated_when_netsplit_happens,
-        disco_logs_nodeup_no_log,
-        disco_logs_nodedown_no_log
+        node_down_history_is_updated_when_netsplit_happens
     ].
 
 init_per_suite(Config) ->
@@ -2262,8 +2262,7 @@ disco_logs_nodeup(Config) ->
         ct:fail(timeout)
     end.
 
-%% disco_logs_nodeup, but logger is disabled (for code coverage)
-disco_logs_nodeup_no_log(Config) ->
+disco_node_up_timestamp_is_remembered(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
@@ -2320,7 +2319,7 @@ disco_logs_nodedown(Config) ->
         ct:fail(timeout)
     end.
 
-disco_logs_nodedown_no_log(Config) ->
+disco_logs_nodedown_timestamp_is_remembered(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),

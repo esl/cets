@@ -476,30 +476,29 @@ handle_system_info(State) ->
 handle_nodedown(Node, State) ->
     State2 = remember_nodedown_timestamp(Node, State),
     {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
-    ?LOG_WARNING(
-        set_defined(connected_millisecond_duration, NodeUpTime, #{
-            what => nodedown,
-            remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
-            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
-        })
-    ),
+    %% Not inside of the macro to make code coverage happy
+    Log = set_defined(connected_millisecond_duration, NodeUpTime, #{
+        what => nodedown,
+        remote_node => Node,
+        alive_nodes => length(nodes()) + 1,
+        time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+    }),
+    ?LOG_WARNING(Log),
     State3.
 
 handle_nodeup(Node, State) ->
     send_start_time_to(Node, State),
     State2 = remember_nodeup_timestamp(Node, State),
     NodeDownTime = get_downtime(Node, State2),
-    ?LOG_WARNING(
-        set_defined(downtime_millisecond_duration, NodeDownTime, #{
-            what => nodeup,
-            remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
-            %% We report that time so we could work on minimizing that time.
-            %% It says how long it took to discover nodes after startup.
-            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
-        })
-    ),
+    Log = set_defined(downtime_millisecond_duration, NodeDownTime, #{
+        what => nodeup,
+        remote_node => Node,
+        alive_nodes => length(nodes()) + 1,
+        %% We report that time so we could work on minimizing that time.
+        %% It says how long it took to discover nodes after startup.
+        time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+    }),
+    ?LOG_WARNING(Log),
     State2.
 
 remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
