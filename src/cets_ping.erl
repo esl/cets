@@ -19,17 +19,13 @@ ping(Node) when is_atom(Node) ->
         true ->
             pong;
         false ->
-            case dist_util:split_node(Node) of
-                {node, Name, Host} ->
-                    Epmd = net_kernel:epmd_module(),
-                    case Epmd:address_please(Name, Host, net_family()) of
-                        {error, _} ->
-                            pang;
-                        _ ->
-                            connect_ping(Node)
-                    end;
+            {node, Name, Host} = dist_util:split_node(Node),
+            Epmd = net_kernel:epmd_module(),
+            case Epmd:address_please(Name, Host, net_family()) of
+                {error, _} ->
+                    pang;
                 _ ->
-                    pang
+                    connect_ping(Node)
             end
     end.
 
