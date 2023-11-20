@@ -1,5 +1,10 @@
 -module(cets_ping).
 -export([ping/1, ping_pairs/1]).
+
+-ifdef(TEST).
+-export([net_family/1]).
+-endif.
+
 ping(Node) when is_atom(Node) ->
     %% It is important to understand, that initial setup for dist connections
     %% is done by the single net_kernel process.
