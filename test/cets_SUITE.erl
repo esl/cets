@@ -2414,10 +2414,11 @@ disco_logs_node_reconnects_after_downtime(Config) ->
             msg :=
                 {report, #{
                     what := node_reconnects,
+                    start_time := StartTime,
                     remote_node := Node2
                 }}
-        }} ->
-            ok
+        }} = M ->
+            ?assert(is_integer(StartTime), M)
     after 5000 ->
         ct:fail(timeout)
     end.
