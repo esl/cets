@@ -177,7 +177,8 @@ seq_cases() ->
         join_interrupted_when_ping_crashes,
         disco_logs_nodeup,
         disco_logs_nodedown,
-        disco_logs_nodeup_after_downtime
+        disco_logs_nodeup_after_downtime,
+        disco_logs_node_reconnects_after_downtime
     ].
 
 cets_seq_no_log_cases() ->
@@ -2322,6 +2323,45 @@ disco_logs_nodeup_after_downtime(Config) ->
         }} = M ->
             ?assert(is_integer(maps:get(alive_nodes, R)), M),
             ?assert(is_integer(Downtime), M)
+    after 5000 ->
+        ct:fail(timeout)
+    end.
+
+disco_logs_node_reconnects_after_downtime(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% We have to start discovery server on both nodes for that feature to work
+    _Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    %% Check that a start timestamp from a remote node is stored
+    Info = cets_discovery:system_info(Disco),
+    ?assertMatch(#{node_start_timestamps := #{Node2 := _}}, Info),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := warning,
+            msg :=
+                {report, #{
+                    what := node_reconnects,
+                    remote_node := Node2
+                }}
+        }} ->
+            ok
     after 5000 ->
         ct:fail(timeout)
     end.
