@@ -180,13 +180,15 @@ seq_cases() ->
         disco_logs_nodeup_after_downtime,
         disco_logs_node_reconnects_after_downtime,
         disco_node_up_timestamp_is_remembered,
-        disco_logs_nodedown_timestamp_is_remembered
+        disco_logs_nodedown_timestamp_is_remembered,
+        disco_nodeup_timestamp_is_updated_after_node_reconnects
     ].
 
 cets_seq_no_log_cases() ->
     [
         join_interrupted_when_ping_crashes,
-        node_down_history_is_updated_when_netsplit_happens
+        node_down_history_is_updated_when_netsplit_happens,
+        disco_nodeup_timestamp_is_updated_after_node_reconnects
     ].
 
 init_per_suite(Config) ->
@@ -2263,7 +2265,6 @@ disco_logs_nodeup(Config) ->
     end.
 
 disco_node_up_timestamp_is_remembered(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
@@ -2422,6 +2423,40 @@ disco_logs_node_reconnects_after_downtime(Config) ->
     after 5000 ->
         ct:fail(timeout)
     end.
+
+disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% We have to start discovery server on both nodes for that feature to work
+    _Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    %% Get an old nodeup timestamp
+    Info1 = cets_discovery:system_info(Disco),
+    #{nodeup_timestamps := #{Node2 := OldTimestamp}} = Info1,
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    cets_test_wait:wait_until(
+        fun() ->
+            Info2 = cets_discovery:system_info(Disco),
+            #{nodeup_timestamps := #{Node2 := NewTimestamp}} = Info2,
+            NewTimestamp =/= OldTimestamp
+        end,
+        true
+    ).
 
 format_data_does_not_return_table_duplicates(Config) ->
     Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
