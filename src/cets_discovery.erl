@@ -188,7 +188,7 @@ init(Opts) ->
     },
     %% Set initial timestamps because we would not receive nodeup events for
     %% already connected nodes
-    State2 = lists:foldl(fun remember_nodeup_timestamp/2, State, nodes()),
+    State2 = lists:foldl(fun handle_nodeup/2, State, nodes()),
     {ok, State2}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()} | {noreply, state()}.
@@ -230,30 +230,11 @@ handle_info(check, State) ->
 handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
-    {NodeDownTime, State2} = handle_nodeup(Node, State),
-    ?LOG_WARNING(
-        set_defined(downtime_millisecond_duration, NodeDownTime, #{
-            what => nodeup,
-            remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
-            %% We report that time so we could work on minimizing that time.
-            %% It says how long it took to discover nodes after startup.
-            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
-        })
-    ),
+    State2 = handle_nodeup(Node, State),
     State3 = remove_node_from_unavailable_list(Node, State2),
     {noreply, try_joining(State3)};
 handle_info({nodedown, Node}, State) ->
-    {NodeUpTime, State2} = handle_nodedown(Node, State),
-    ?LOG_WARNING(
-        set_defined(connected_millisecond_duration, NodeUpTime, #{
-            what => nodedown,
-            remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
-            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
-        })
-    ),
-    send_start_time_to(Node, State),
+    State2 = handle_nodedown(Node, State),
     %% Do another check to update unavailable_nodes list
     self() ! check,
     {noreply, State2};
@@ -494,11 +475,32 @@ handle_system_info(State) ->
 
 handle_nodedown(Node, State) ->
     State2 = remember_nodedown_timestamp(Node, State),
-    remove_nodeup_timestamp(Node, State2).
+    {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
+    ?LOG_WARNING(
+        set_defined(connected_millisecond_duration, NodeUpTime, #{
+            what => nodedown,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+        })
+    ),
+    State3.
 
 handle_nodeup(Node, State) ->
+    send_start_time_to(Node, State),
     State2 = remember_nodeup_timestamp(Node, State),
-    {get_downtime(Node, State2), State2}.
+    NodeDownTime = get_downtime(Node, State2),
+    ?LOG_WARNING(
+        set_defined(downtime_millisecond_duration, NodeDownTime, #{
+            what => nodeup,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            %% We report that time so we could work on minimizing that time.
+            %% It says how long it took to discover nodes after startup.
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+        })
+    ),
+    State2.
 
 remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
     Time = erlang:system_time(millisecond),
