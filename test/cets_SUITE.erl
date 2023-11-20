@@ -180,7 +180,7 @@ seq_cases() ->
         disco_logs_nodeup_after_downtime,
         disco_logs_node_reconnects_after_downtime,
         disco_node_up_timestamp_is_remembered,
-        disco_logs_nodedown_timestamp_is_remembered,
+        disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts
     ].
@@ -189,6 +189,8 @@ cets_seq_no_log_cases() ->
     [
         join_interrupted_when_ping_crashes,
         node_down_history_is_updated_when_netsplit_happens,
+        disco_node_up_timestamp_is_remembered,
+        disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts
     ].
@@ -231,7 +233,7 @@ end_per_testcase(_, _Config) ->
 
 %% Modules that use a multiline LOG_ macro
 log_modules() ->
-    [cets, cets_call, cets_long, cets_join].
+    [cets, cets_call, cets_long, cets_join, cets_discovery].
 
 inserted_records_could_be_read_back(Config) ->
     Tab = make_name(Config),
@@ -2322,7 +2324,7 @@ disco_logs_nodedown(Config) ->
         ct:fail(timeout)
     end.
 
-disco_logs_nodedown_timestamp_is_remembered(Config) ->
+disco_node_down_timestamp_is_remembered(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
