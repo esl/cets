@@ -473,6 +473,7 @@ has_join_result_for(Node, Table, #{results := Results}) ->
 handle_system_info(State) ->
     State#{verify_ready => verify_ready(State)}.
 
+-spec handle_nodedown(node(), state()) -> state().
 handle_nodedown(Node, State) ->
     State2 = remember_nodedown_timestamp(Node, State),
     {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
@@ -487,6 +488,7 @@ handle_nodedown(Node, State) ->
     ),
     State3.
 
+-spec handle_nodeup(node(), state()) -> state().
 handle_nodeup(Node, State) ->
     send_start_time_to(Node, State),
     State2 = remember_nodeup_timestamp(Node, State),
@@ -503,20 +505,23 @@ handle_nodeup(Node, State) ->
     ),
     State2.
 
+-spec remember_nodeup_timestamp(node(), state()) -> state().
 remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
     Time = erlang:system_time(millisecond),
     Map2 = Map#{Node => Time},
     State#{nodeup_timestamps := Map2}.
 
+-spec remember_nodedown_timestamp(node(), state()) -> state().
 remember_nodedown_timestamp(Node, State = #{nodedown_timestamps := Map}) ->
     Time = erlang:system_time(millisecond),
     Map2 = Map#{Node => Time},
     State#{nodedown_timestamps := Map2}.
 
+-spec remove_nodeup_timestamp(node(), state()) -> {integer(), state()}.
 remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
     StartTime = maps:get(Node, Map, undefined),
     NodeUpTime = calculate_uptime(StartTime),
-    Map2 = maps:remove(Node, State),
+    Map2 = maps:remove(Node, Map),
     {NodeUpTime, State#{nodeup_timestamps := Map2}}.
 
 calculate_uptime(undefined) ->

@@ -2111,17 +2111,15 @@ disco_connects_to_unconnected_node(Config) ->
     Node1 = node(),
     #{ct5 := Peer5} = proplists:get_value(peers, Config),
     #{ct5 := Node5} = proplists:get_value(nodes, Config),
+    ok = net_kernel:monitor_nodes(true),
     rpc(Peer5, erlang, disconnect_node, [Node1]),
+    receive_message({nodedown, Node5}),
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Peer5, Tab),
     F = fun(State) ->
         {{ok, [Node1, Node5]}, State}
     end,
-    cets_test_wait:wait_until(
-        fun() -> lists:member(Node5, nodes()) end,
-        false
-    ),
     {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
     cets_discovery:add_table(Disco, Tab),
     ok = cets_discovery:wait_for_ready(Disco, 5000).
@@ -2232,7 +2230,7 @@ logging_when_failing_join_with_disco(Config) ->
             Reason =:= Reason2
         ],
         %% Only one message is logged
-        [_] = MatchedLogs
+        ?assertMatch([_], MatchedLogs, Logs)
     after
         meck:unload(),
         reconnect_node(Node2, Peer2),
@@ -2300,9 +2298,12 @@ disco_logs_nodeup(Config) ->
         name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
     }),
     cets_discovery:add_table(Disco, Tab),
+    %% There could be several disco processes still running from the previous tests,
+    %% filter out logs by pid.
     receive
         {log, ?FUNCTION_NAME, #{
             level := warning,
+            meta := #{pid := Disco},
             msg := {report, #{what := nodeup, remote_node := Node2} = R}
         }} = M ->
             ?assert(is_integer(maps:get(alive_nodes, R)), M),
@@ -2338,10 +2339,12 @@ disco_node_up_timestamp_is_remembered(Config) ->
 
 disco_logs_nodedown(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    ok = net_kernel:monitor_nodes(true),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
     rpc(Peer2, erlang, disconnect_node, [Node1]),
+    receive_message({nodedown, Node2}),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Peer2, Tab),
@@ -2354,10 +2357,13 @@ disco_logs_nodedown(Config) ->
     }),
     cets_discovery:add_table(Disco, Tab),
     ok = cets_discovery:wait_for_ready(Disco, 5000),
+    receive_message({nodeup, Node2}),
     rpc(Peer2, erlang, disconnect_node, [Node1]),
+    receive_message({nodedown, Node2}),
     receive
         {log, ?FUNCTION_NAME, #{
             level := warning,
+            meta := #{pid := Disco},
             msg := {report, #{what := nodedown, remote_node := Node2} = R}
         }} = M ->
             ?assert(is_integer(maps:get(alive_nodes, R)), M),
@@ -2417,6 +2423,7 @@ disco_logs_nodeup_after_downtime(Config) ->
     receive
         {log, ?FUNCTION_NAME, #{
             level := warning,
+            meta := #{pid := Disco},
             msg :=
                 {report,
                     #{
@@ -2459,6 +2466,7 @@ disco_logs_node_reconnects_after_downtime(Config) ->
     receive
         {log, ?FUNCTION_NAME, #{
             level := warning,
+            meta := #{pid := Disco},
             msg :=
                 {report, #{
                     what := node_reconnects,
@@ -2532,7 +2540,7 @@ disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
     %% Instead of restart the node, restart the process. It is enough to get
     %% a new start_time.
     rpc(Peer2, erlang, disconnect_node, [Node1]),
-    cets:stop(Disco2),
+    rpc(Peer2, cets, stop, [Disco2]),
     %% We actually would not detect the case of us just stopping the remote disco
     %% server. Because we use nodeup/nodedown to detect downs, not monitors.
     _RestartedDisco2 = start_disco(Node2, #{
@@ -2580,6 +2588,8 @@ start_local(Name) ->
     start_local(Name, #{}).
 
 start_local(Name, Opts) ->
+    catch cets:stop(Name),
+    wait_for_name_to_be_free(node(), Name),
     {ok, Pid} = cets:start(Name, Opts),
     schedule_cleanup(Pid),
     {ok, Pid}.
@@ -2595,14 +2605,28 @@ schedule_cleanup(Pid) ->
     end).
 
 start(Node, Tab) ->
+    catch rpc(Node, cets, stop, [Tab]),
+    wait_for_name_to_be_free(Node, Tab),
     {ok, Pid} = rpc(Node, cets, start, [Tab, #{}]),
     schedule_cleanup(Pid),
     {ok, Pid}.
 
 start_disco(Node, Opts) ->
+    case Opts of
+        #{name := Name} ->
+            catch rpc(Node, cets, stop, [Name]),
+            wait_for_name_to_be_free(Node, Name);
+        _ ->
+            ok
+    end,
     {ok, Pid} = rpc(Node, cets_discovery, start, [Opts]),
     schedule_cleanup(Pid),
     Pid.
+
+wait_for_name_to_be_free(Node, Name) ->
+    %% Wait for the old process to be killed by the cleaner in schedule_cleanup.
+    %% Cleaner is fast, but not instant.
+    cets_test_wait:wait_until(fun() -> rpc(Node, erlang, whereis, [Name]) end, undefined).
 
 insert(Node, Tab, Rec) ->
     rpc(Node, cets, insert, [Tab, Rec]).
