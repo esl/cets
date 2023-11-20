@@ -17,10 +17,8 @@ ping(Node) when is_atom(Node) ->
             case dist_util:split_node(Node) of
                 {node, Name, Host} ->
                     Epmd = net_kernel:epmd_module(),
-                    V4 = Epmd:address_please(Name, Host, inet),
-                    V6 = Epmd:address_please(Name, Host, inet6),
-                    case {V4, V6} of
-                        {{error, _}, {error, _}} ->
+                    case Epmd:address_please(Name, Host, net_family()) of
+                        {error, _} ->
                             pang;
                         _ ->
                             connect_ping(Node)
@@ -29,6 +27,22 @@ ping(Node) when is_atom(Node) ->
                     pang
             end
     end.
+
+%% The user should use proto_dist flag to enable inet6.
+-spec net_family() -> inet | inet6.
+net_family() ->
+    net_family(init:get_argument(proto_dist)).
+
+net_family({ok, [[ProtoDist]]}) ->
+    %% Check that the string contains "6". i.e. inet6, inet6_tls.
+    case lists:member($6, ProtoDist) of
+        true ->
+            inet6;
+        false ->
+            inet
+    end;
+net_family(_) ->
+    inet.
 
 connect_ping(Node) ->
     %% We could use net_adm:ping/1 but it does:
