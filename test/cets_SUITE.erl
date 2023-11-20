@@ -174,7 +174,8 @@ seq_cases() ->
         %% Cannot be run in parallel with other tests because checks all logging messages.
         logging_when_failing_join_with_disco,
         cets_ping_all_returns_when_ping_crashes,
-        join_interrupted_when_ping_crashes
+        join_interrupted_when_ping_crashes,
+        disco_logs_nodeup
     ].
 
 cets_seq_no_log_cases() ->
@@ -2226,6 +2227,33 @@ node_down_history_is_updated_when_netsplit_happens(Config) ->
     after
         reconnect_node(Node5, Peer5),
         cets:stop(Pid5)
+    end.
+
+disco_logs_nodeup(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := warning,
+            msg := {report, #{what := nodeup}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
     end.
 
 format_data_does_not_return_table_duplicates(Config) ->
