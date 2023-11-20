@@ -181,14 +181,16 @@ seq_cases() ->
         disco_logs_node_reconnects_after_downtime,
         disco_node_up_timestamp_is_remembered,
         disco_logs_nodedown_timestamp_is_remembered,
-        disco_nodeup_timestamp_is_updated_after_node_reconnects
+        disco_nodeup_timestamp_is_updated_after_node_reconnects,
+        disco_node_start_timestamp_is_updated_after_node_restarts
     ].
 
 cets_seq_no_log_cases() ->
     [
         join_interrupted_when_ping_crashes,
         node_down_history_is_updated_when_netsplit_happens,
-        disco_nodeup_timestamp_is_updated_after_node_reconnects
+        disco_nodeup_timestamp_is_updated_after_node_reconnects,
+        disco_node_start_timestamp_is_updated_after_node_restarts
     ].
 
 init_per_suite(Config) ->
@@ -2453,6 +2455,48 @@ disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
         fun() ->
             Info2 = cets_discovery:system_info(Disco),
             #{nodeup_timestamps := #{Node2 := NewTimestamp}} = Info2,
+            NewTimestamp =/= OldTimestamp
+        end,
+        true
+    ).
+
+disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% We have to start discovery server on both nodes for that feature to work
+    Disco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    %% Get an old nodeup timestamp
+    Info1 = cets_discovery:system_info(Disco),
+    #{node_start_timestamps := #{Node2 := OldTimestamp}} = Info1,
+    %% Instead of restart the node, restart the process. It is enough to get
+    %% a new start_time.
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    cets:stop(Disco2),
+    %% We actually would not detect the case of us just stopping the remote disco
+    %% server. Because we use nodeup/nodedown to detect downs, not monitors.
+    _RestartedDisco2 = start_disco(Node2, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_test_wait:wait_until(
+        fun() ->
+            Info2 = cets_discovery:system_info(Disco),
+            #{node_start_timestamps := #{Node2 := NewTimestamp}} = Info2,
             NewTimestamp =/= OldTimestamp
         end,
         true
