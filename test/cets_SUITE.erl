@@ -184,7 +184,9 @@ seq_cases() ->
 cets_seq_no_log_cases() ->
     [
         join_interrupted_when_ping_crashes,
-        node_down_history_is_updated_when_netsplit_happens
+        node_down_history_is_updated_when_netsplit_happens,
+        disco_logs_nodeup_no_log,
+        disco_logs_nodedown_no_log
     ].
 
 init_per_suite(Config) ->
@@ -2260,6 +2262,33 @@ disco_logs_nodeup(Config) ->
         ct:fail(timeout)
     end.
 
+%% disco_logs_nodeup, but logger is disabled (for code coverage)
+disco_logs_nodeup_no_log(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    %% Check that nodeup is remembered
+    cets_test_wait:wait_until(
+        fun() ->
+            #{nodeup_timestamps := Map} = cets_discovery:system_info(Disco),
+            maps:is_key(Node2, Map)
+        end,
+        true
+    ).
+
 disco_logs_nodedown(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Node1 = node(),
@@ -2290,6 +2319,34 @@ disco_logs_nodedown(Config) ->
     after 5000 ->
         ct:fail(timeout)
     end.
+
+disco_logs_nodedown_no_log(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Node1 = node(),
+    #{ct2 := Peer2} = proplists:get_value(peers, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Peer2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2]}, State}
+    end,
+    DiscoName = disco_name(Config),
+    Disco = start_disco(Node1, #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    rpc(Peer2, erlang, disconnect_node, [Node1]),
+    %% Check that nodedown is remembered
+    cets_test_wait:wait_until(
+        fun() ->
+            #{nodedown_timestamps := Map} = cets_discovery:system_info(Disco),
+            maps:is_key(Node2, Map)
+        end,
+        true
+    ).
 
 disco_logs_nodeup_after_downtime(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
