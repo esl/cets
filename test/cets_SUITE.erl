@@ -179,7 +179,8 @@ seq_cases() ->
 
 cets_seq_no_log_cases() ->
     [
-        join_interrupted_when_ping_crashes
+        join_interrupted_when_ping_crashes,
+        node_down_history_is_updated_when_netsplit_happens
     ].
 
 init_per_suite(Config) ->
@@ -2206,6 +2207,26 @@ join_interrupted_when_ping_crashes(Config) ->
     Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
     ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
     meck:unload().
+
+node_down_history_is_updated_when_netsplit_happens(Config) ->
+    %% node_down_history is available in cets:info/1 API.
+    %% It could be used for manual debugging in situations
+    %% we get netsplits or during rolling upgrades.
+    #{ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
+    block_node(Node5, Peer5),
+    try
+        F = fun() -> maps:get(node_down_history, cets:info(Pid1)) end,
+        cets_test_wait:wait_until(F, [Node5])
+    after
+        reconnect_node(Node5, Peer5),
+        cets:stop(Pid5)
+    end.
 
 format_data_does_not_return_table_duplicates(Config) ->
     Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
