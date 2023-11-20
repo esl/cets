@@ -150,7 +150,8 @@ cases() ->
         send_leader_op_throws_noproc,
         pinfo_returns_value,
         pinfo_returns_undefined,
-        format_data_does_not_return_table_duplicates
+        format_data_does_not_return_table_duplicates,
+        cets_ping_non_existing_node
     ].
 
 only_for_logger_cases() ->
@@ -2507,6 +2508,9 @@ disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
 format_data_does_not_return_table_duplicates(Config) ->
     Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
     ?assertMatch(#{remote_unknown_tables := [], remote_nodes_with_missing_tables := []}, Res).
+
+cets_ping_non_existing_node(_Config) ->
+    pang = cets_ping:ping('mongooseim@non_existing_host').
 
 %% Helper functions
 
