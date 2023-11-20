@@ -162,6 +162,8 @@ only_for_logger_cases() ->
         logs_are_printed_when_join_fails_because_servers_overlap,
         join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
+        stop_reason_is_not_logged_in_tracked,
+        other_reason_is_logged_in_tracked,
         nested_calls_errors_are_logged_once_with_tuple_reason,
         nested_calls_errors_are_logged_once_with_map_reason
     ].
@@ -1023,6 +1025,45 @@ atom_error_is_logged_in_tracked(_Config) ->
         }
     ] =
         receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+
+stop_reason_is_not_logged_in_tracked(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Me = self(),
+    LogRef = make_ref(),
+    F = fun() ->
+        Me ! ready,
+        timer:sleep(infinity)
+    end,
+    Pid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    receive_message(ready),
+    exit(Pid, stop),
+    wait_for_down(Pid),
+    [] = receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+
+%% Counter example for stop_reason_is_not_logged_in_tracked
+other_reason_is_logged_in_tracked(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    Me = self(),
+    LogRef = make_ref(),
+    F = fun() ->
+        Me ! ready,
+        timer:sleep(infinity)
+    end,
+    Pid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    receive_message(ready),
+    exit(Pid, bad_stuff_happened),
+    wait_for_down(Pid),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := task_failed,
+                    log_ref := LogRef,
+                    reason := bad_stuff_happened
+                }}
+        }
+    ] = receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 nested_calls_errors_are_logged_once_with_tuple_reason(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
