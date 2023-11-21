@@ -162,7 +162,7 @@ only_for_logger_cases() ->
         logs_are_printed_when_join_fails_because_servers_overlap,
         join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
-        stop_reason_is_not_logged_in_tracked,
+        shutdown_reason_is_not_logged_in_tracked,
         other_reason_is_logged_in_tracked,
         nested_calls_errors_are_logged_once_with_tuple_reason,
         nested_calls_errors_are_logged_once_with_map_reason
@@ -1026,7 +1026,7 @@ atom_error_is_logged_in_tracked(_Config) ->
     ] =
         receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
-stop_reason_is_not_logged_in_tracked(_Config) ->
+shutdown_reason_is_not_logged_in_tracked(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Me = self(),
     LogRef = make_ref(),
@@ -1036,11 +1036,11 @@ stop_reason_is_not_logged_in_tracked(_Config) ->
     end,
     Pid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
     receive_message(ready),
-    exit(Pid, stop),
+    exit(Pid, shutdown),
     wait_for_down(Pid),
     [] = receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
-%% Counter example for stop_reason_is_not_logged_in_tracked
+%% Counter example for shutdown_reason_is_not_logged_in_tracked
 other_reason_is_logged_in_tracked(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Me = self(),
