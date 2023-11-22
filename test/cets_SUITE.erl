@@ -152,7 +152,8 @@ cases() ->
         pinfo_returns_undefined,
         format_data_does_not_return_table_duplicates,
         cets_ping_non_existing_node,
-        cets_ping_net_family
+        cets_ping_net_family,
+        unexpected_nodedown_is_ignored_by_disco
     ].
 
 only_for_logger_cases() ->
@@ -2567,6 +2568,20 @@ cets_ping_net_family(_Config) ->
     inet = cets_ping:net_family({ok, [["inet"]]}),
     inet6 = cets_ping:net_family({ok, [["inet6"]]}),
     inet6 = cets_ping:net_family({ok, [["inet6_tls"]]}).
+
+unexpected_nodedown_is_ignored_by_disco(Config) ->
+    %% Theoretically, should not happen
+    %% Still, check that we do not crash in this case
+    DiscoName = disco_name(Config),
+    F = fun(State) -> {{ok, []}, State} end,
+    Disco = start_disco(node(), #{
+        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    #{start_time := StartTime} = cets_discovery:system_info(Disco),
+    Disco ! {nodedown, 'cets@badnode'},
+    %% Check that we are still running
+    #{start_time := StartTime} = cets_discovery:system_info(Disco),
+    ok.
 
 %% Helper functions
 
