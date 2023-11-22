@@ -187,7 +187,9 @@ seq_cases() ->
         disco_node_up_timestamp_is_remembered,
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
-        disco_node_start_timestamp_is_updated_after_node_restarts
+        disco_node_start_timestamp_is_updated_after_node_restarts,
+        ping_pairs_returns_pongs,
+        ping_pairs_returns_earlier
     ].
 
 cets_seq_no_log_cases() ->
@@ -2582,6 +2584,19 @@ unexpected_nodedown_is_ignored_by_disco(Config) ->
     %% Check that we are still running
     #{start_time := StartTime} = cets_discovery:system_info(Disco),
     ok.
+
+ping_pairs_returns_pongs(Config) ->
+    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
+    Me = node(),
+    [{Me, Node2, pong}, {Node2, Node3, pong}] =
+        cets_ping:ping_pairs([{Me, Node2}, {Node2, Node3}]).
+
+ping_pairs_returns_earlier(Config) ->
+    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
+    Me = node(),
+    Bad = 'badnode@localhost',
+    [{Me, Me, pong}, {Me, Node2, pong}, {Me, Bad, pang}, {Me, Node3, skipped}] =
+        cets_ping:ping_pairs([{Me, Me}, {Me, Node2}, {Me, Bad}, {Me, Node3}]).
 
 %% Helper functions
 
