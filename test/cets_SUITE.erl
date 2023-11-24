@@ -188,6 +188,7 @@ seq_cases() ->
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
+        disco_nodeup_triggers_check_and_get_nodes,
         ping_pairs_returns_pongs,
         ping_pairs_returns_earlier
     ].
@@ -2394,6 +2395,13 @@ disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
     simulate_disco_restart(Setup),
     wait_for_disco_timestamp_to_be_updated(Disco, node_start_timestamps, Node2, OldTimestamp).
 
+disco_nodeup_triggers_check_and_get_nodes(Config) ->
+    Setup = setup_two_nodes_and_discovery(Config, [wait, notify_get_nodes]),
+    #{disco := Disco, node2 := Node2} = Setup,
+    flush_message(get_nodes),
+    Disco ! {nodeup, Node2},
+    receive_message(get_nodes).
+
 format_data_does_not_return_table_duplicates(Config) ->
     Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
     ?assertMatch(#{remote_unknown_tables := [], remote_nodes_with_missing_tables := []}, Res).
@@ -2556,6 +2564,14 @@ receive_message_with_arg(Tag) ->
     after 5000 -> error({receive_message_with_arg_timeout, Tag})
     end.
 
+flush_message(M) ->
+    receive
+        M ->
+            flush_message(M)
+    after 0 ->
+        ok
+    end.
+
 make_name(Config) ->
     make_name(Config, 1).
 
@@ -2626,6 +2642,7 @@ setup_two_nodes_and_discovery(Config) ->
     setup_two_nodes_and_discovery(Config, []).
 
 setup_two_nodes_and_discovery(Config, Flags) ->
+    Me = self(),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
@@ -2634,6 +2651,12 @@ setup_two_nodes_and_discovery(Config, Flags) ->
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Peer2, Tab),
     F = fun(State) ->
+        case lists:member(notify_get_nodes, Flags) of
+            true ->
+                Me ! get_nodes;
+            false ->
+                ok
+        end,
         {{ok, [Node1, Node2]}, State}
     end,
     DiscoName = disco_name(Config),

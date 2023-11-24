@@ -230,6 +230,11 @@ handle_info(check, State) ->
 handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
+    %% nodeup triggers get_nodes call.
+    %% We are interested in up-to-date data
+    %% (in MongooseIM we want to know IPs of other nodes as soon as possible
+    %%  after some node connects to us)
+    self() ! check,
     State2 = handle_nodeup(Node, State),
     State3 = remove_node_from_unavailable_list(Node, State2),
     {noreply, try_joining(State3)};
