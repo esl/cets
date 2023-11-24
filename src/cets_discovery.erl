@@ -482,7 +482,6 @@ handle_system_info(State) ->
 handle_nodedown(Node, State) ->
     State2 = remember_nodedown_timestamp(Node, State),
     {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
-    %% Not inside of the macro to make code coverage happy
     ?LOG_WARNING(
         set_defined(connected_millisecond_duration, NodeUpTime, #{
             what => nodedown,
