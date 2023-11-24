@@ -40,12 +40,11 @@ net_family(_) ->
     inet.
 
 connect_ping(Node) ->
-    %% We could use net_adm:ping/1 but it does:
-    %% - disconnect node on pang - we don't want that
-    %%   (because it could disconnect already connected node because of race conditions)
-    %% - it calls net_kernel's gen_server of the remote server,
-    %%   but it could be busy doing something,
-    %%   which means slower response time.
+    %% We could use net_adm:ping/1 but it:
+    %% - disconnects node on pang - we don't want that
+    %%   (because it could disconnect an already connected node because of race conditions)
+    %% - calls net_kernel's gen_server of the remote server,
+    %%   but it could be busy doing something, which means slower response time.
     case net_kernel:connect_node(Node) of
         true ->
             pong;
@@ -69,7 +68,7 @@ ping_pairs_stop_on_pang([{Node1, Node2} | Pairs]) ->
         Other ->
             %% We do not need to ping the rest of nodes -
             %% one node returning pang is enough to cancel join.
-            %% We could exit earlier and safe some time
+            %% We could exit earlier and save some time
             %% (connect_node to the dead node could be time consuming)
             [{Node1, Node2, Other} | fail_pairs(Pairs, skipped)]
     end;
