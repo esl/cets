@@ -91,6 +91,9 @@ run_monitor(Info, Ref, Parent, Start) ->
 
 monitor_loop(Mon, Info, Parent, Start, Interval) ->
     receive
+        {'DOWN', _MonRef, process, _Pid, shutdown} ->
+            %% Special case, the long task is stopped using exit(Pid, shutdown)
+            ok;
         {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{
                 what => task_failed,

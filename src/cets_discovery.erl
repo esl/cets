@@ -90,8 +90,13 @@
     join_status := not_running | running,
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
-    pending_wait_for_ready := [gen_server:from()]
+    pending_wait_for_ready := [gen_server:from()],
+    nodeup_timestamps := #{node() => milliseconds()},
+    nodedown_timestamps := #{node() => milliseconds()},
+    node_start_timestamps := #{node() => milliseconds()},
+    start_time := milliseconds()
 }.
+-type milliseconds() :: integer().
 
 %% Backend could define its own options
 -type opts() :: #{name := atom(), _ := _}.
@@ -151,6 +156,7 @@ wait_for_ready(Server, Timeout) ->
 
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
+    StartTime = erlang:system_time(millisecond),
     %% Sends nodeup / nodedown
     ok = net_kernel:monitor_nodes(true),
     Mod = maps:get(backend_module, Opts, cets_discovery_file),
@@ -159,7 +165,7 @@ init(Opts) ->
     BackendState = Mod:init(Opts),
     %% Changes phase from initial to regular (affects the check interval)
     erlang:send_after(timer:minutes(5), self(), enter_regular_phase),
-    {ok, #{
+    State = #{
         phase => initial,
         results => [],
         nodes => [],
@@ -174,8 +180,16 @@ init(Opts) ->
         join_status => not_running,
         should_retry_join => false,
         timer_ref => undefined,
-        pending_wait_for_ready => []
-    }}.
+        pending_wait_for_ready => [],
+        nodeup_timestamps => #{},
+        node_start_timestamps => #{},
+        nodedown_timestamps => #{},
+        start_time => StartTime
+    },
+    %% Set initial timestamps because we would not receive nodeup events for
+    %% already connected nodes
+    State2 = lists:foldl(fun handle_nodeup/2, State, nodes()),
+    {ok, State2}.
 
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()} | {noreply, state()}.
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
@@ -216,12 +230,21 @@ handle_info(check, State) ->
 handle_info({handle_check_result, Result, BackendState}, State) ->
     {noreply, handle_get_nodes_result(Result, BackendState, State)};
 handle_info({nodeup, Node}, State) ->
-    State2 = remove_node_from_unavailable_list(Node, State),
-    {noreply, try_joining(State2)};
-handle_info({nodedown, _Node}, State) ->
+    %% nodeup triggers get_nodes call.
+    %% We are interested in up-to-date data
+    %% (in MongooseIM we want to know IPs of other nodes as soon as possible
+    %%  after some node connects to us)
+    self() ! check,
+    State2 = handle_nodeup(Node, State),
+    State3 = remove_node_from_unavailable_list(Node, State2),
+    {noreply, try_joining(State3)};
+handle_info({nodedown, Node}, State) ->
+    State2 = handle_nodedown(Node, State),
     %% Do another check to update unavailable_nodes list
     self() ! check,
-    {noreply, State};
+    {noreply, State2};
+handle_info({start_time, Node, StartTime}, State) ->
+    {noreply, handle_receive_start_time(Node, StartTime, State)};
 handle_info({joining_finished, Results}, State) ->
     {noreply, handle_joining_finished(Results, State)};
 handle_info({ping_result, Node, Result}, State) ->
@@ -315,7 +338,7 @@ ping_not_connected_nodes(Nodes) ->
     Self = self(),
     NotConNodes = Nodes -- [node() | nodes()],
     [
-        spawn(fun() -> Self ! {ping_result, Node, net_adm:ping(Node)} end)
+        spawn(fun() -> Self ! {ping_result, Node, cets_ping:ping(Node)} end)
      || Node <- lists:sort(NotConNodes)
     ],
     ok.
@@ -454,3 +477,102 @@ has_join_result_for(Node, Table, #{results := Results}) ->
 -spec handle_system_info(state()) -> system_info().
 handle_system_info(State) ->
     State#{verify_ready => verify_ready(State)}.
+
+-spec handle_nodedown(node(), state()) -> state().
+handle_nodedown(Node, State) ->
+    State2 = remember_nodedown_timestamp(Node, State),
+    {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
+    ?LOG_WARNING(
+        set_defined(connected_millisecond_duration, NodeUpTime, #{
+            what => nodedown,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+        })
+    ),
+    State3.
+
+-spec handle_nodeup(node(), state()) -> state().
+handle_nodeup(Node, State) ->
+    send_start_time_to(Node, State),
+    State2 = remember_nodeup_timestamp(Node, State),
+    NodeDownTime = get_downtime(Node, State2),
+    ?LOG_WARNING(
+        set_defined(downtime_millisecond_duration, NodeDownTime, #{
+            what => nodeup,
+            remote_node => Node,
+            alive_nodes => length(nodes()) + 1,
+            %% We report that time so we could work on minimizing that time.
+            %% It says how long it took to discover nodes after startup.
+            time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
+        })
+    ),
+    State2.
+
+-spec remember_nodeup_timestamp(node(), state()) -> state().
+remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
+    Time = erlang:system_time(millisecond),
+    Map2 = Map#{Node => Time},
+    State#{nodeup_timestamps := Map2}.
+
+-spec remember_nodedown_timestamp(node(), state()) -> state().
+remember_nodedown_timestamp(Node, State = #{nodedown_timestamps := Map}) ->
+    Time = erlang:system_time(millisecond),
+    Map2 = Map#{Node => Time},
+    State#{nodedown_timestamps := Map2}.
+
+-spec remove_nodeup_timestamp(node(), state()) -> {integer(), state()}.
+remove_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
+    StartTime = maps:get(Node, Map, undefined),
+    NodeUpTime = calculate_uptime(StartTime),
+    Map2 = maps:remove(Node, Map),
+    {NodeUpTime, State#{nodeup_timestamps := Map2}}.
+
+calculate_uptime(undefined) ->
+    undefined;
+calculate_uptime(StartTime) ->
+    time_since(StartTime).
+
+get_downtime(Node, #{nodedown_timestamps := Map}) ->
+    case maps:get(Node, Map, undefined) of
+        undefined ->
+            undefined;
+        WentDown ->
+            time_since(WentDown)
+    end.
+
+set_defined(_Key, undefined, Map) ->
+    Map;
+set_defined(Key, Value, Map) ->
+    Map#{Key => Value}.
+
+time_since_startup_in_milliseconds(#{start_time := StartTime}) ->
+    time_since(StartTime).
+
+time_since(StartTime) ->
+    erlang:system_time(millisecond) - StartTime.
+
+send_start_time_to(Node, #{start_time := StartTime}) ->
+    case erlang:process_info(self(), registered_name) of
+        {registered_name, Name} ->
+            erlang:send({Name, Node}, {start_time, node(), StartTime});
+        _ ->
+            ok
+    end.
+
+handle_receive_start_time(Node, StartTime, State = #{node_start_timestamps := Map}) ->
+    case maps:get(Node, Map, undefined) of
+        undefined ->
+            ok;
+        StartTime ->
+            ?LOG_WARNING(#{
+                what => node_reconnects,
+                remote_node => Node,
+                start_time => StartTime,
+                text => <<"Netsplit recovery. The remote node has been connected to us before.">>
+            });
+        _ ->
+            %% Restarted node reconnected, this is fine during the rolling updates
+            ok
+    end,
+    State#{node_start_timestamps := maps:put(Node, StartTime, Map)}.

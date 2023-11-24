@@ -84,10 +84,12 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
     Retries = 1,
+    %% global could abort the transaction when one of the nodes goes down.
+    %% It could usually abort it during startup or update.
     case global:trans(LockRequest, F, Nodes, Retries) of
         aborted ->
             checkpoint(before_retry, JoinOpts),
-            ?LOG_ERROR(Info#{what => join_retry, reason => lock_aborted}),
+            ?LOG_INFO(Info#{what => join_retry, reason => lock_aborted}),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
             Result
@@ -195,9 +197,9 @@ get_pids(Pid) ->
 check_pids(Info, LocPids, RemPids, JoinOpts) ->
     check_do_not_overlap(Info, LocPids, RemPids),
     checkpoint(before_check_fully_connected, JoinOpts),
+    check_could_reach_each_other(Info, LocPids, RemPids),
     check_fully_connected(Info, LocPids),
-    check_fully_connected(Info, RemPids),
-    check_could_reach_each_other(Info, LocPids, RemPids).
+    check_fully_connected(Info, RemPids).
 
 -spec check_could_reach_each_other(cets_long:log_info(), cets:servers(), cets:servers()) -> ok.
 check_could_reach_each_other(Info, LocPids, RemPids) ->
@@ -207,16 +209,7 @@ check_could_reach_each_other(Info, LocPids, RemPids) ->
         {min(LocNode, RemNode), max(LocNode, RemNode)}
      || LocNode <- LocNodes, RemNode <- RemNodes, LocNode =/= RemNode
     ]),
-    Results =
-        [
-            {Node1, Node2,
-                cets_long:run_tracked(
-                    #{task => ping_node, node1 => Node1, node2 => Node2}, fun() ->
-                        rpc:call(Node1, net_adm, ping, [Node2], 10000)
-                    end
-                )}
-         || {Node1, Node2} <- Pairs
-        ],
+    Results = cets_ping:ping_pairs(Pairs),
     NotConnected = [X || {_Node1, _Node2, Res} = X <- Results, Res =/= pong],
     case NotConnected of
         [] ->
