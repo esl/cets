@@ -2331,7 +2331,7 @@ disco_logs_nodeup(Config) ->
             meta := #{pid := Disco},
             msg := {report, #{what := nodeup, remote_node := Node2} = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M)
     after 5000 ->
         ct:fail(timeout)
@@ -2353,7 +2353,7 @@ disco_logs_nodedown(Config) ->
             meta := #{pid := Disco},
             msg := {report, #{what := nodedown, remote_node := Node2} = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M),
             ?assert(is_integer(maps:get(connected_millisecond_duration, R)), M)
     after 5000 ->
@@ -2384,7 +2384,7 @@ disco_logs_nodeup_after_downtime(Config) ->
                         downtime_millisecond_duration := Downtime
                     } = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(Downtime), M)
     after 5000 ->
         ct:fail(timeout)

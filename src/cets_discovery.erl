@@ -506,7 +506,7 @@ handle_nodedown(Node, State) ->
         set_defined(connected_millisecond_duration, NodeUpTime, #{
             what => nodedown,
             remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
+            connected_nodes => length(nodes()) + 1,
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
@@ -521,7 +521,7 @@ handle_nodeup(Node, State) ->
         set_defined(downtime_millisecond_duration, NodeDownTime, #{
             what => nodeup,
             remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
+            connected_nodes => length(nodes()) + 1,
             %% We report that time so we could work on minimizing that time.
             %% It says how long it took to discover nodes after startup.
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
