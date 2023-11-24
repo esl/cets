@@ -109,6 +109,8 @@ cases() ->
         status_remote_nodes_with_unknown_tables,
         status_remote_nodes_with_missing_nodes,
         status_conflict_nodes,
+        disco_wait_for_get_nodes_works,
+        disco_wait_for_get_nodes_blocks_and_returns,
         get_nodes_request,
         test_locally,
         handle_down_is_called,
@@ -1681,6 +1683,39 @@ status_conflict_nodes(Config) ->
     cets_test_wait:wait_until(
         fun() -> maps:get(conflict_tables, cets_status:status(DiscoName)) end, [Tab2]
     ).
+
+disco_wait_for_get_nodes_works(_Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    ok = cets_discovery:wait_for_get_nodes(Disco, 5000).
+
+disco_wait_for_get_nodes_blocks_and_returns(Config) ->
+    Tab = make_name(Config, 1),
+    {ok, _Pid} = start_local(Tab, #{}),
+    SignallingPid = spawn_link(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    F = fun(State) ->
+        wait_for_down(SignallingPid),
+        {{ok, []}, State}
+    end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    %% Enter into a blocking get_nodes function
+    Disco ! check,
+    %% Do it async, because it would block is
+    WaitPid = spawn_link(fun() -> ok = cets_discovery:wait_for_get_nodes(Disco, 5000) end),
+    Cond = fun() ->
+        length(maps:get(pending_wait_for_get_nodes, cets_discovery:system_info(Disco)))
+    end,
+    cets_test_wait:wait_until(Cond, 1),
+    %% Unblock get_nodes call
+    SignallingPid ! stop,
+    %% wait_for_get_nodes returns
+    wait_for_down(WaitPid),
+    ok.
 
 get_nodes_request(Config) ->
     #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(nodes, Config),

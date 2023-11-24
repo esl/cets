@@ -35,7 +35,8 @@
     get_tables/1,
     info/1,
     system_info/1,
-    wait_for_ready/2
+    wait_for_ready/2,
+    wait_for_get_nodes/2
 ]).
 -export([
     init/1,
@@ -55,6 +56,7 @@
     info/1,
     system_info/1,
     wait_for_ready/2,
+    wait_for_get_nodes/2,
     behaviour_info/1
 ]).
 
@@ -91,6 +93,7 @@
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
     pending_wait_for_ready := [gen_server:from()],
+    pending_wait_for_get_nodes := [gen_server:from()],
     nodeup_timestamps := #{node() => milliseconds()},
     nodedown_timestamps := #{node() => milliseconds()},
     node_start_timestamps := #{node() => milliseconds()},
@@ -146,12 +149,22 @@ info(Server) ->
 system_info(Server) ->
     gen_server:call(Server, system_info).
 
-%% This calls blocks until the initial discovery is done
-%% It also waits till the data is loaded from the remote nodes
+%% This calls blocks until the initial discovery is done.
+%% It also waits till the data is loaded from the remote nodes.
 -spec wait_for_ready(server(), timeout()) -> ok.
 wait_for_ready(Server, Timeout) ->
     F = fun() -> gen_server:call(Server, wait_for_ready, Timeout) end,
     Info = #{task => cets_wait_for_ready},
+    cets_long:run_tracked(Info, F).
+
+%% Waits for the currect get_nodes call to return.
+%% Just returns if there is no gen_nodes call running.
+%% It is different from wait_for_ready, because it does not wait for
+%% unavailable nodes to return pang.
+-spec wait_for_get_nodes(server(), timeout()) -> ok.
+wait_for_get_nodes(Server, Timeout) ->
+    F = fun() -> gen_server:call(Server, wait_for_get_nodes, Timeout) end,
+    Info = #{task => cets_wait_for_get_nodes},
     cets_long:run_tracked(Info, F).
 
 -spec init(term()) -> {ok, state()}.
@@ -181,6 +194,7 @@ init(Opts) ->
         should_retry_join => false,
         timer_ref => undefined,
         pending_wait_for_ready => [],
+        pending_wait_for_get_nodes => [],
         nodeup_timestamps => #{},
         node_start_timestamps => #{},
         nodedown_timestamps => #{},
@@ -198,6 +212,10 @@ handle_call(system_info, _From, State) ->
     {reply, handle_system_info(State), State};
 handle_call(wait_for_ready, From, State = #{pending_wait_for_ready := Pending}) ->
     {noreply, trigger_verify_ready(State#{pending_wait_for_ready := [From | Pending]})};
+handle_call(wait_for_get_nodes, _From, State = #{get_nodes_status := not_running}) ->
+    {reply, ok, State};
+handle_call(wait_for_get_nodes, From, State = #{pending_wait_for_get_nodes := Pending}) ->
+    {noreply, State#{pending_wait_for_get_nodes := [From | Pending]}};
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -279,10 +297,12 @@ handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
 
 -spec handle_get_nodes_result(Result, BackendState, State) -> State when
     Result :: get_nodes_result(), BackendState :: backend_state(), State :: state().
-handle_get_nodes_result(Result, BackendState, State) ->
+handle_get_nodes_result(Result, BackendState, State = #{pending_wait_for_get_nodes := Pending}) ->
+    [gen_server:reply(From, ok) || From <- Pending],
     State2 = State#{
         backend_state := BackendState,
         get_nodes_status := not_running,
+        pending_wait_for_get_nodes := [],
         last_get_nodes_result := Result
     },
     State3 = set_nodes(Result, State2),
