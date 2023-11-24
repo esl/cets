@@ -34,14 +34,8 @@ ping(Node) when is_atom(Node) ->
 net_family() ->
     net_family(init:get_argument(proto_dist)).
 
-net_family({ok, [[ProtoDist]]}) ->
-    %% Check that the string contains "6". i.e. inet6, inet6_tls.
-    case lists:member($6, ProtoDist) of
-        true ->
-            inet6;
-        false ->
-            inet
-    end;
+net_family({ok, [["inet6" ++ _]]}) ->
+    inet6;
 net_family(_) ->
     inet.
 
