@@ -109,6 +109,9 @@ cases() ->
         status_remote_nodes_with_unknown_tables,
         status_remote_nodes_with_missing_nodes,
         status_conflict_nodes,
+        disco_wait_for_get_nodes_works,
+        disco_wait_for_get_nodes_blocks_and_returns,
+        disco_wait_for_get_nodes_when_get_nodes_needs_to_be_retried,
         get_nodes_request,
         test_locally,
         handle_down_is_called,
@@ -1682,6 +1685,77 @@ status_conflict_nodes(Config) ->
         fun() -> maps:get(conflict_tables, cets_status:status(DiscoName)) end, [Tab2]
     ).
 
+disco_wait_for_get_nodes_works(_Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    ok = cets_discovery:wait_for_get_nodes(Disco, 5000).
+
+disco_wait_for_get_nodes_blocks_and_returns(Config) ->
+    Tab = make_name(Config, 1),
+    {ok, _Pid} = start_local(Tab, #{}),
+    SignallingPid = make_signalling_process(),
+    F = fun(State) ->
+        wait_for_down(SignallingPid),
+        {{ok, []}, State}
+    end,
+    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    cets_discovery:add_table(Disco, Tab),
+    %% Enter into a blocking get_nodes function
+    Disco ! check,
+    %% Do it async, because it would block is
+    WaitPid = spawn_link(fun() -> ok = cets_discovery:wait_for_get_nodes(Disco, 5000) end),
+    Cond = fun() ->
+        length(maps:get(pending_wait_for_get_nodes, cets_discovery:system_info(Disco)))
+    end,
+    cets_test_wait:wait_until(Cond, 1),
+    %% Unblock get_nodes call
+    SignallingPid ! stop,
+    %% wait_for_get_nodes returns
+    wait_for_down(WaitPid),
+    ok.
+
+%% Check that wait_for_get_nodes waits in case get_nodes should be retried
+disco_wait_for_get_nodes_when_get_nodes_needs_to_be_retried(Config) ->
+    Me = self(),
+    Tab = make_name(Config, 1),
+    {ok, _Pid} = start_local(Tab, #{}),
+    SignallingPid1 = make_signalling_process(),
+    SignallingPid2 = make_signalling_process(),
+    F = fun
+        (State = #{step := 1}) ->
+            wait_for_down(SignallingPid1),
+            {{ok, []}, State#{step => 2}};
+        (State = #{step := 2}) ->
+            Me ! entered_get_nodes2,
+            wait_for_down(SignallingPid2),
+            {{ok, []}, State#{step => 2}}
+    end,
+    {ok, Disco} = cets_discovery:start(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F, step => 1
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    %% Enter into a blocking get_nodes function
+    Disco ! check,
+    %% Do it async, because it would block is
+    WaitPid = spawn_link(fun() -> ok = cets_discovery:wait_for_get_nodes(Disco, 5000) end),
+    Cond = fun() ->
+        length(maps:get(pending_wait_for_get_nodes, cets_discovery:system_info(Disco)))
+    end,
+    cets_test_wait:wait_until(Cond, 1),
+    %% Set should_retry_get_nodes
+    Disco ! check,
+    %% Ensure check message is received
+    cets_discovery:system_info(Disco),
+    %% Unblock first get_nodes call
+    SignallingPid1 ! stop,
+    receive_message(entered_get_nodes2),
+    %% Still waiting for get_nodes being retried
+    true = erlang:is_process_alive(WaitPid),
+    %% It returns finally after second get_nodes call
+    SignallingPid2 ! stop,
+    wait_for_down(WaitPid),
+    ok.
+
 get_nodes_request(Config) ->
     #{ct2 := Node2, ct3 := Node3, ct4 := Node4} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
@@ -2296,7 +2370,7 @@ disco_logs_nodeup(Config) ->
             meta := #{pid := Disco},
             msg := {report, #{what := nodeup, remote_node := Node2} = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M)
     after 5000 ->
         ct:fail(timeout)
@@ -2318,7 +2392,7 @@ disco_logs_nodedown(Config) ->
             meta := #{pid := Disco},
             msg := {report, #{what := nodedown, remote_node := Node2} = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M),
             ?assert(is_integer(maps:get(connected_millisecond_duration, R)), M)
     after 5000 ->
@@ -2349,7 +2423,7 @@ disco_logs_nodeup_after_downtime(Config) ->
                         downtime_millisecond_duration := Downtime
                     } = R}
         }} = M ->
-            ?assert(is_integer(maps:get(alive_nodes, R)), M),
+            ?assert(is_integer(maps:get(connected_nodes, R)), M),
             ?assert(is_integer(Downtime), M)
     after 5000 ->
         ct:fail(timeout)
@@ -2847,3 +2921,10 @@ get_disco_timestamp(Disco, MapName, NodeKey) ->
     Info = cets_discovery:system_info(Disco),
     #{MapName := #{NodeKey := Timestamp}} = Info,
     Timestamp.
+
+make_signalling_process() ->
+    spawn_link(fun() ->
+        receive
+            stop -> ok
+        end
+    end).

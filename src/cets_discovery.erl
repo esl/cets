@@ -35,7 +35,8 @@
     get_tables/1,
     info/1,
     system_info/1,
-    wait_for_ready/2
+    wait_for_ready/2,
+    wait_for_get_nodes/2
 ]).
 -export([
     init/1,
@@ -55,6 +56,7 @@
     info/1,
     system_info/1,
     wait_for_ready/2,
+    wait_for_get_nodes/2,
     behaviour_info/1
 ]).
 
@@ -91,6 +93,7 @@
     should_retry_join := boolean(),
     timer_ref := reference() | undefined,
     pending_wait_for_ready := [gen_server:from()],
+    pending_wait_for_get_nodes := [gen_server:from()],
     nodeup_timestamps := #{node() => milliseconds()},
     nodedown_timestamps := #{node() => milliseconds()},
     node_start_timestamps := #{node() => milliseconds()},
@@ -146,12 +149,23 @@ info(Server) ->
 system_info(Server) ->
     gen_server:call(Server, system_info).
 
-%% This calls blocks until the initial discovery is done
-%% It also waits till the data is loaded from the remote nodes
+%% This calls blocks until the initial discovery is done.
+%% It also waits till the data is loaded from the remote nodes.
 -spec wait_for_ready(server(), timeout()) -> ok.
 wait_for_ready(Server, Timeout) ->
     F = fun() -> gen_server:call(Server, wait_for_ready, Timeout) end,
     Info = #{task => cets_wait_for_ready},
+    cets_long:run_tracked(Info, F).
+
+%% Waits for the current get_nodes call to return.
+%% Just returns if there is no gen_nodes call running.
+%% Waits for another get_nodes, if should_retry_get_nodes flag is set.
+%% It is different from wait_for_ready, because it does not wait for
+%% unavailable nodes to return pang.
+-spec wait_for_get_nodes(server(), timeout()) -> ok.
+wait_for_get_nodes(Server, Timeout) ->
+    F = fun() -> gen_server:call(Server, wait_for_get_nodes, Timeout) end,
+    Info = #{task => cets_wait_for_get_nodes},
     cets_long:run_tracked(Info, F).
 
 -spec init(term()) -> {ok, state()}.
@@ -181,6 +195,7 @@ init(Opts) ->
         should_retry_join => false,
         timer_ref => undefined,
         pending_wait_for_ready => [],
+        pending_wait_for_get_nodes => [],
         nodeup_timestamps => #{},
         node_start_timestamps => #{},
         nodedown_timestamps => #{},
@@ -198,6 +213,10 @@ handle_call(system_info, _From, State) ->
     {reply, handle_system_info(State), State};
 handle_call(wait_for_ready, From, State = #{pending_wait_for_ready := Pending}) ->
     {noreply, trigger_verify_ready(State#{pending_wait_for_ready := [From | Pending]})};
+handle_call(wait_for_get_nodes, _From, State = #{get_nodes_status := not_running}) ->
+    {reply, ok, State};
+handle_call(wait_for_get_nodes, From, State = #{pending_wait_for_get_nodes := Pending}) ->
+    {noreply, State#{pending_wait_for_get_nodes := [From | Pending]}};
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
@@ -280,13 +299,22 @@ handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
 -spec handle_get_nodes_result(Result, BackendState, State) -> State when
     Result :: get_nodes_result(), BackendState :: backend_state(), State :: state().
 handle_get_nodes_result(Result, BackendState, State) ->
-    State2 = State#{
+    State2 = maybe_reply_to_wait_for_get_nodes(State#{
         backend_state := BackendState,
         get_nodes_status := not_running,
         last_get_nodes_result := Result
-    },
+    }),
     State3 = set_nodes(Result, State2),
     schedule_check(trigger_verify_ready(State3)).
+
+-spec maybe_reply_to_wait_for_get_nodes(state()) -> state().
+maybe_reply_to_wait_for_get_nodes(
+    State = #{should_retry_get_nodes := false, pending_wait_for_get_nodes := Pending = [_ | _]}
+) ->
+    [gen_server:reply(From, ok) || From <- Pending],
+    State#{pending_wait_for_get_nodes := []};
+maybe_reply_to_wait_for_get_nodes(State) ->
+    State.
 
 -spec set_nodes({error, term()} | {ok, [node()]}, state()) -> state().
 set_nodes({error, _Reason}, State) ->
@@ -486,7 +514,7 @@ handle_nodedown(Node, State) ->
         set_defined(connected_millisecond_duration, NodeUpTime, #{
             what => nodedown,
             remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
+            connected_nodes => length(nodes()) + 1,
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
@@ -501,7 +529,7 @@ handle_nodeup(Node, State) ->
         set_defined(downtime_millisecond_duration, NodeDownTime, #{
             what => nodeup,
             remote_node => Node,
-            alive_nodes => length(nodes()) + 1,
+            connected_nodes => length(nodes()) + 1,
             %% We report that time so we could work on minimizing that time.
             %% It says how long it took to discover nodes after startup.
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
