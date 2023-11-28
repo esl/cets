@@ -281,9 +281,6 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 -spec handle_check(state()) -> state().
-handle_check(State = #{tables := []}) ->
-    %% No tables to track, skip
-    State;
 handle_check(State = #{get_nodes_status := running}) ->
     State#{should_retry_get_nodes := true};
 handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
