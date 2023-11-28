@@ -157,8 +157,9 @@ wait_for_ready(Server, Timeout) ->
     Info = #{task => cets_wait_for_ready},
     cets_long:run_tracked(Info, F).
 
-%% Waits for the currect get_nodes call to return.
+%% Waits for the current get_nodes call to return.
 %% Just returns if there is no gen_nodes call running.
+%% Waits for another get_nodes, if should_retry_get_nodes flag is set.
 %% It is different from wait_for_ready, because it does not wait for
 %% unavailable nodes to return pang.
 -spec wait_for_get_nodes(server(), timeout()) -> ok.
@@ -297,16 +298,23 @@ handle_check(State = #{backend_module := Mod, backend_state := BackendState}) ->
 
 -spec handle_get_nodes_result(Result, BackendState, State) -> State when
     Result :: get_nodes_result(), BackendState :: backend_state(), State :: state().
-handle_get_nodes_result(Result, BackendState, State = #{pending_wait_for_get_nodes := Pending}) ->
-    [gen_server:reply(From, ok) || From <- Pending],
-    State2 = State#{
+handle_get_nodes_result(Result, BackendState, State) ->
+    State2 = maybe_reply_to_wait_for_get_nodes(State#{
         backend_state := BackendState,
         get_nodes_status := not_running,
-        pending_wait_for_get_nodes := [],
         last_get_nodes_result := Result
-    },
+    }),
     State3 = set_nodes(Result, State2),
     schedule_check(trigger_verify_ready(State3)).
+
+-spec maybe_reply_to_wait_for_get_nodes(state()) -> state().
+maybe_reply_to_wait_for_get_nodes(
+    State = #{should_retry_get_nodes := false, pending_wait_for_get_nodes := Pending = [_ | _]}
+) ->
+    [gen_server:reply(From, ok) || From <- Pending],
+    State#{pending_wait_for_get_nodes := []};
+maybe_reply_to_wait_for_get_nodes(State) ->
+    State.
 
 -spec set_nodes({error, term()} | {ok, [node()]}, state()) -> state().
 set_nodes({error, _Reason}, State) ->
