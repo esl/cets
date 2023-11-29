@@ -25,19 +25,13 @@ ping(Node) when is_atom(Node) ->
 %% It is important to check this on all nodes before actually connecting
 %% to avoid getting kicked by overlapped nodes protection in the global module.
 -spec can_preconnect_from_all_nodes(node()) -> boolean().
-can_preconnect_from_all_nodes(PingNode) ->
-    pre_connect_list([node() | nodes()], PingNode).
-
-pre_connect_list([Node | Nodes], PingNode) ->
-    case rpc:call(Node, ?MODULE, pre_connect, [PingNode]) of
-        pang ->
-            false;
-        _ ->
-            %% We skip node in case it does not have CETS nodules
-            pre_connect_list(Nodes, PingNode)
-    end;
-pre_connect_list([], _PingNode) ->
-    true.
+can_preconnect_from_all_nodes(Node) ->
+    Nodes = [node() | nodes()],
+    %% pre_connect is safe to run in parallel
+    %% (it does not actually create a distributed connection)
+    Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], infinity),
+    %% We skip nodes which do not have cets_ping module
+    not lists:member({ok, pang}, Results).
 
 -spec pre_connect(node()) -> pong | pang.
 pre_connect(Node) when is_atom(Node) ->
