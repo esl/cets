@@ -24,14 +24,34 @@ ping(Node) when is_atom(Node) ->
 %% Preconnect checks if the remote node could be connected.
 %% It is important to check this on all nodes before actually connecting
 %% to avoid getting kicked by overlapped nodes protection in the global module.
+%% There are two major scenarios for this function:
+%% - Node is down and would return pang on all nodes.
+%% - Node is up and would return pong on all nodes.
+%% These two scenarios should happen during the normal operation,
+%% so code is optimized for them.
+%% For first scenario we want to check the local node first and do not do RPCs
+%% if possible.
+%% For second scenario we want to do the check in parallel on all nodes.
+%%
+%% This function avoids a corner case when node returns pang on some of the nodes
+%% (third scenario).
+%% This could be because:
+%% - netsplit
+%% - node is not resolvable on some of the nodes yet
 -spec can_preconnect_from_all_nodes(node()) -> boolean().
 can_preconnect_from_all_nodes(Node) ->
-    Nodes = [node() | nodes()],
+    Nodes = nodes(),
     %% pre_connect is safe to run in parallel
     %% (it does not actually create a distributed connection)
-    Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], infinity),
-    %% We skip nodes which do not have cets_ping module
-    not lists:member({ok, pang}, Results).
+    case pre_connect(Node) of
+        pang ->
+            %% Node is probably down, skip multicall
+            false;
+        pong ->
+            Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], infinity),
+            %% We skip nodes which do not have cets_ping module and return an error
+            not lists:member({ok, pang}, Results)
+    end.
 
 -spec pre_connect(node()) -> pong | pang.
 pre_connect(Node) when is_atom(Node) ->
