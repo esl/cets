@@ -134,8 +134,7 @@ fail_pairs(Pairs, Reason) ->
 
 -spec can_connect(inet:ip_address()) -> boolean().
 can_connect(IP) ->
-    Timeout = 1000,
-    case try_open(IP, Timeout) of
+    case gen_tcp:connect(IP, get_epmd_port(), [], 5000) of
         {ok, Socket} ->
             gen_tcp:close(Socket),
             true;
@@ -151,9 +150,3 @@ get_epmd_port() ->
         error ->
             4369
     end.
-
-try_open({_, _, _, _} = IP, Timeout) ->
-    %% That would block
-    gen_tcp:connect(IP, get_epmd_port(), [inet], Timeout);
-try_open({_, _, _, _, _, _, _, _} = IP, Timeout) ->
-    gen_tcp:connect(IP, get_epmd_port(), [inet6], Timeout).

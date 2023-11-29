@@ -2639,6 +2639,8 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
             Other
     end.
 
+%% Set epmd_port for better coverage
+extra_args(ct2) -> ["-epmd_port", "4369"];
 extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
 extra_args(_) -> "".
 
