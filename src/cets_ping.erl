@@ -30,10 +30,11 @@ can_preconnect_from_all_nodes(PingNode) ->
 
 pre_connect_list([Node | Nodes], PingNode) ->
     case rpc:call(Node, ?MODULE, pre_connect, [PingNode]) of
-        pong ->
-            pre_connect_list(Nodes, PingNode);
+        pang ->
+            false;
         _ ->
-            false
+            %% We skip node in case it does not have CETS nodules
+            pre_connect_list(Nodes, PingNode)
     end;
 pre_connect_list([], _PingNode) ->
     true.
