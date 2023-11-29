@@ -24,8 +24,13 @@ ping(Node) when is_atom(Node) ->
             case Epmd:address_please(Name, Host, net_family()) of
                 {error, _} ->
                     pang;
-                _ ->
-                    connect_ping(Node)
+                {ok, IP} ->
+                    case can_connect(IP) of
+                        true ->
+                            connect_ping(Node);
+                        false ->
+                            pang
+                    end
             end
     end.
 
@@ -77,3 +82,29 @@ ping_pairs_stop_on_pang([]) ->
 
 fail_pairs(Pairs, Reason) ->
     [{Node1, Node2, Reason} || {Node1, Node2} <- Pairs].
+
+-spec can_connect(inet:ip_address()) -> boolean().
+can_connect(IP) ->
+    Timeout = 1000,
+    case try_open(IP, Timeout) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        _ ->
+            false
+    end.
+
+-spec get_epmd_port() -> inet:port_number().
+get_epmd_port() ->
+    case init:get_argument(epmd_port) of
+        {ok, [[PortStr | _] | _]} when is_list(PortStr) ->
+            list_to_integer(PortStr);
+        error ->
+            4369
+    end.
+
+try_open({_, _, _, _} = IP, Timeout) ->
+    %% That would block
+    gen_tcp:connect(IP, get_epmd_port(), [inet], Timeout);
+try_open({_, _, _, _, _, _, _, _} = IP, Timeout) ->
+    gen_tcp:connect(IP, get_epmd_port(), [inet6], Timeout).
