@@ -1,11 +1,45 @@
 -module(cets_ping).
--export([ping/1, ping_pairs/1]).
+-export([ping/1, ping_pairs/1, pre_connect/1]).
 
 -ifdef(TEST).
 -export([net_family/1]).
 -endif.
 
+-ignore_xref([pre_connect/1]).
+
+-spec ping(node()) -> pong | pang.
 ping(Node) when is_atom(Node) ->
+    case lists:member(Node, nodes()) of
+        true ->
+            pong;
+        false ->
+            case can_preconnect_from_all_nodes(Node) of
+                true ->
+                    connect_ping(Node);
+                false ->
+                    pang
+            end
+    end.
+
+%% Preconnect checks if the remote node could be connected.
+%% It is important to check this on all nodes before actually connecting
+%% to avoid getting kicked by overlapped nodes protection in the global module.
+-spec can_preconnect_from_all_nodes(node()) -> boolean().
+can_preconnect_from_all_nodes(PingNode) ->
+    pre_connect_list([node() | nodes()], PingNode).
+
+pre_connect_list([Node | Nodes], PingNode) ->
+    case rpc:call(Node, ?MODULE, pre_connect, [PingNode]) of
+        pong ->
+            pre_connect_list(Nodes, PingNode);
+        _ ->
+            false
+    end;
+pre_connect_list([], _PingNode) ->
+    true.
+
+-spec pre_connect(node()) -> pong | pang.
+pre_connect(Node) when is_atom(Node) ->
     %% It is important to understand, that initial setup for dist connections
     %% is done by the single net_kernel process.
     %% It calls net_kernel:setup, which calls inet_tcp_dist, which calls
@@ -27,7 +61,7 @@ ping(Node) when is_atom(Node) ->
                 {ok, IP} ->
                     case can_connect(IP) of
                         true ->
-                            connect_ping(Node);
+                            pong;
                         false ->
                             pang
                     end
