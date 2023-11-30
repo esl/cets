@@ -193,7 +193,9 @@ seq_cases() ->
         disco_node_start_timestamp_is_updated_after_node_restarts,
         disco_nodeup_triggers_check_and_get_nodes,
         ping_pairs_returns_pongs,
-        ping_pairs_returns_earlier
+        ping_pairs_returns_earlier,
+        pre_connect_fails_on_our_node,
+        pre_connect_fails_on_one_of_the_nodes
     ].
 
 cets_seq_no_log_cases() ->
@@ -2483,6 +2485,30 @@ format_data_does_not_return_table_duplicates(Config) ->
 cets_ping_non_existing_node(_Config) ->
     pang = cets_ping:ping('mongooseim@non_existing_host').
 
+pre_connect_fails_on_our_node(_Config) ->
+    mock_epmd(),
+    %% We would fail to connect to the remote EPMD but we would get an IP
+    pang = cets_ping:ping('mongooseim@resolvabletobadip'),
+    meck:unload().
+
+pre_connect_fails_on_one_of_the_nodes(Config) ->
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    mock_epmd(),
+    %% We would get pong on Node2, but would fail an RPC to our hode
+    pang = rpc(Node2, cets_ping, ping, ['cetsnode1@localhost']),
+    History = meck:history(erl_epmd),
+    %% Check that Node2 called us
+    ?assertMatch(
+        [_],
+        [
+            X
+         || {_, {erl_epmd, address_please, ["cetsnode1", "localhost", inet]},
+                {ok, {192, 168, 100, 134}}} = X <- History
+        ],
+        History
+    ),
+    meck:unload().
+
 cets_ping_net_family(_Config) ->
     inet = cets_ping:net_family(error),
     inet = cets_ping:net_family({ok, [["inet"]]}),
@@ -2613,6 +2639,8 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
             Other
     end.
 
+%% Set epmd_port for better coverage
+extra_args(ct2) -> ["-epmd_port", "4369"];
 extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
 extra_args(_) -> "".
 
@@ -2927,4 +2955,11 @@ make_signalling_process() ->
         receive
             stop -> ok
         end
+    end).
+
+mock_epmd() ->
+    meck:new(erl_epmd, [passthrough, unstick]),
+    meck:expect(erl_epmd, address_please, fun
+        ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
+        (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
     end).

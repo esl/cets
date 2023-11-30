@@ -1,11 +1,60 @@
 -module(cets_ping).
--export([ping/1, ping_pairs/1]).
+-export([ping/1, ping_pairs/1, pre_connect/1]).
 
 -ifdef(TEST).
 -export([net_family/1]).
 -endif.
 
+-ignore_xref([pre_connect/1]).
+
+-spec ping(node()) -> pong | pang.
 ping(Node) when is_atom(Node) ->
+    case lists:member(Node, nodes()) of
+        true ->
+            pong;
+        false ->
+            case can_preconnect_from_all_nodes(Node) of
+                true ->
+                    connect_ping(Node);
+                false ->
+                    pang
+            end
+    end.
+
+%% Preconnect checks if the remote node could be connected.
+%% It is important to check this on all nodes before actually connecting
+%% to avoid getting kicked by overlapped nodes protection in the global module.
+%% There are two major scenarios for this function:
+%% - Node is down and would return pang on all nodes.
+%% - Node is up and would return pong on all nodes.
+%% These two scenarios should happen during the normal operation,
+%% so code is optimized for them.
+%% For first scenario we want to check the local node first and do not do RPCs
+%% if possible.
+%% For second scenario we want to do the check in parallel on all nodes.
+%%
+%% This function avoids a corner case when node returns pang on some of the nodes
+%% (third scenario).
+%% This could be because:
+%% - netsplit
+%% - node is not resolvable on some of the nodes yet
+-spec can_preconnect_from_all_nodes(node()) -> boolean().
+can_preconnect_from_all_nodes(Node) ->
+    Nodes = nodes(),
+    %% pre_connect is safe to run in parallel
+    %% (it does not actually create a distributed connection)
+    case pre_connect(Node) of
+        pang ->
+            %% Node is probably down, skip multicall
+            false;
+        pong ->
+            Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], 5000),
+            %% We skip nodes which do not have cets_ping module and return an error
+            not lists:member({ok, pang}, Results)
+    end.
+
+-spec pre_connect(node()) -> pong | pang.
+pre_connect(Node) when is_atom(Node) ->
     %% It is important to understand, that initial setup for dist connections
     %% is done by the single net_kernel process.
     %% It calls net_kernel:setup, which calls inet_tcp_dist, which calls
@@ -24,8 +73,13 @@ ping(Node) when is_atom(Node) ->
             case Epmd:address_please(Name, Host, net_family()) of
                 {error, _} ->
                     pang;
-                _ ->
-                    connect_ping(Node)
+                {ok, IP} ->
+                    case can_connect(IP) of
+                        true ->
+                            pong;
+                        false ->
+                            pang
+                    end
             end
     end.
 
@@ -77,3 +131,22 @@ ping_pairs_stop_on_pang([]) ->
 
 fail_pairs(Pairs, Reason) ->
     [{Node1, Node2, Reason} || {Node1, Node2} <- Pairs].
+
+-spec can_connect(inet:ip_address()) -> boolean().
+can_connect(IP) ->
+    case gen_tcp:connect(IP, get_epmd_port(), [], 5000) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        _ ->
+            false
+    end.
+
+-spec get_epmd_port() -> inet:port_number().
+get_epmd_port() ->
+    case init:get_argument(epmd_port) of
+        {ok, [[PortStr | _] | _]} when is_list(PortStr) ->
+            list_to_integer(PortStr);
+        error ->
+            4369
+    end.
