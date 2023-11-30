@@ -48,7 +48,7 @@ can_preconnect_from_all_nodes(Node) ->
             %% Node is probably down, skip multicall
             false;
         pong ->
-            Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], infinity),
+            Results = erpc:multicall(Nodes, ?MODULE, pre_connect, [Node], 5000),
             %% We skip nodes which do not have cets_ping module and return an error
             not lists:member({ok, pang}, Results)
     end.
