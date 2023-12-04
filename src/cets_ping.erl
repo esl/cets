@@ -1,5 +1,5 @@
 -module(cets_ping).
--export([ping/1, ping_pairs/1, pre_connect/1]).
+-export([ping/1, ping_pairs/1, pre_connect/1, send_ping_result/3]).
 
 -ifdef(TEST).
 -export([net_family/1]).
@@ -150,3 +150,9 @@ get_epmd_port() ->
         error ->
             4369
     end.
+
+%% Send ping result back to cets_discovery
+-spec send_ping_result(pid(), node(), pong | pang) -> ok.
+send_ping_result(SendTo, Node, PingResult) ->
+    SendTo ! {ping_result, Node, PingResult},
+    ok.

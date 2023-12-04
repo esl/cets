@@ -363,14 +363,22 @@ ping_not_connected_nodes(Nodes) ->
     Self = self(),
     NotConNodes = Nodes -- [node() | nodes()],
     [
-        spawn(fun() -> Self ! {ping_result, Node, cets_ping:ping(Node)} end)
+        spawn_link(fun() -> cets_ping:send_ping_result(Self, Node, cets_ping:ping(Node)) end)
      || Node <- lists:sort(NotConNodes)
     ],
     ok.
 
 -spec handle_ping_result(node(), pong | pang, state()) -> state().
 handle_ping_result(Node, pang, State = #{unavailable_nodes := UnNodes}) ->
-    trigger_verify_ready(State#{unavailable_nodes := ordsets:add_element(Node, UnNodes)});
+    State2 =
+        case lists:member(Node, nodes()) of
+            true ->
+                %% Race condition between nodeup and ping results
+                State;
+            false ->
+                State#{unavailable_nodes := ordsets:add_element(Node, UnNodes)}
+        end,
+    trigger_verify_ready(State2);
 handle_ping_result(_Node, pong, State) ->
     State.
 
