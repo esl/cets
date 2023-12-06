@@ -191,7 +191,7 @@ seq_cases() ->
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_pang_result_arrives_after_nodeup,
+        disco_late_pang_result_arrives_after_node_went_up,
         disco_nodeup_triggers_check_and_get_nodes,
         ping_pairs_returns_pongs,
         ping_pairs_returns_earlier,
@@ -207,7 +207,7 @@ cets_seq_no_log_cases() ->
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_pang_result_arrives_after_nodeup
+        disco_late_pang_result_arrives_after_node_went_up
     ].
 
 init_per_suite(Config) ->
@@ -2473,15 +2473,34 @@ disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
     simulate_disco_restart(Setup),
     wait_for_disco_timestamp_to_be_updated(Disco, node_start_timestamps, Node2, OldTimestamp).
 
-disco_pang_result_arrives_after_nodeup(Config) ->
+disco_late_pang_result_arrives_after_node_went_up(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    %% unavailable_nodes list contains nodes which have not responded to pings.
+    %% Ping is async though.
+    %% So, there could be the situation when the result of ping would be processed
+    %% after the node actually got connected.
     meck:new(cets_ping, [passthrough]),
+    Me = self(),
     meck:expect(cets_ping, send_ping_result, fun(Pid, Node, _PingResult) ->
+        %% Wait until Node is up
+        Cond = fun() -> lists:member(Node, nodes()) end,
+        cets_test_wait:wait_until(Cond, true),
+        Me ! send_ping_result_called,
+        %% Return pang to cets_discovery.
+        %% cets_join does not use send_ping_result function
+        %% and would receive pong and join correctly.
         meck:passthrough([Pid, Node, pang])
     end),
     try
-        Setup = setup_two_nodes_and_discovery(Config, [wait]),
+        %% setup_two_nodes_and_discovery would call disconnect_node/2 function
+        Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
+        receive_message(send_ping_result_called),
         #{disco_name := DiscoName} = Setup,
-        ?assertMatch([], maps:get(unavailable_nodes, cets_status:status(DiscoName)))
+        Status = cets_status:status(DiscoName),
+        %% Check that pang is ignored and unavailable_nodes list is empty.
+        ?assertMatch([], maps:get(unavailable_nodes, Status)),
+        ?assertMatch([Node1, Node2], maps:get(joined_nodes, Status))
     after
         meck:unload()
     end.
@@ -2791,6 +2810,7 @@ setup_two_nodes_and_discovery(Config, Flags) ->
         case lists:member(disco2, Flags) of
             true ->
                 Disco2 = start_disco(Node2, DiscoOpts),
+                cets_discovery:add_table(Disco2, Tab),
                 #{disco2 => Disco2};
             false ->
                 #{}
