@@ -82,6 +82,7 @@ cases() ->
         remote_ops_are_ignored_if_join_ref_does_not_match,
         join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
+        servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -1138,6 +1139,20 @@ send_dump_contains_already_added_servers(Config) ->
     cets:send_dump(Pid1, [Pid2], make_ref(), [{1}]),
     cets:unpause(Pid1, PauseRef),
     {ok, [{1}]} = cets:remote_dump(Pid1).
+
+servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause(Config) ->
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
+    %% cets:send_check_servers function is only called after all pauses are unpaused
+    PauseRef1 = cets:pause(Pid1),
+    PauseRef2 = cets:pause(Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    %% send_check_servers is not called yet, because we are still pausing.
+    %% Mess with join_ref in the state.
+    set_join_ref(Pid1, make_ref()),
+    cets:unpause(Pid1, PauseRef1),
+    cets:unpause(Pid2, PauseRef2),
+    cets_test_wait:wait_until(fun() -> maps:get(other_servers, cets:info(Pid1)) end, []).
 
 test_multinode(Config) ->
     Node1 = node(),

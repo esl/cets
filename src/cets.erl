@@ -151,6 +151,7 @@
 -type info() :: #{
     table := table_name(),
     nodes := [node()],
+    other_servers := [pid()],
     size := non_neg_integer(),
     memory := non_neg_integer(),
     ack_pid := ack_pid(),
@@ -483,8 +484,8 @@ handle_cast(Msg, State) ->
 handle_info({remote_op, Op, From, AckPid, JoinRef}, State) ->
     handle_remote_op(Op, From, AckPid, JoinRef, State),
     {noreply, State};
-handle_info({'DOWN', Mon, process, Pid, _Reason}, State) ->
-    {noreply, handle_down(Mon, Pid, State)};
+handle_info({'DOWN', Mon, process, Pid, Reason}, State) ->
+    {noreply, handle_down(Mon, Pid, Reason, State)};
 handle_info({check_server, FromPid, JoinRef}, State) ->
     handle_check_server(FromPid, JoinRef, State),
     {noreply, State};
@@ -506,14 +507,15 @@ handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := 
     Servers2 = add_servers(NewPids, Servers),
     {reply, ok, set_other_servers(Servers2, State#{join_ref := JoinRef})}.
 
--spec handle_down(reference(), pid(), state()) -> state().
-handle_down(Mon, Pid, State = #{pause_monitors := Mons}) ->
+-spec handle_down(reference(), pid(), term(), state()) -> state().
+handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
             ?LOG_ERROR(#{
                 what => pause_owner_crashed,
                 state => State,
-                paused_by_pid => Pid
+                paused_by_pid => Pid,
+                reason => Reason
             }),
             handle_unpause2(Mon, Mons, State);
         false ->
@@ -726,6 +728,7 @@ send_check_server(Pid, JoinRef) ->
     Pid ! {check_server, self(), JoinRef},
     ok.
 
+%% That could actually arrive before we get unpaused
 handle_check_server(_FromPid, JoinRef, #{join_ref := JoinRef}) ->
     ok;
 handle_check_server(FromPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
@@ -755,6 +758,7 @@ handle_get_info(
     #{
         table => Tab,
         nodes => lists:usort(pids_to_nodes([self() | Servers])),
+        other_servers => Servers,
         size => ets:info(Tab, size),
         memory => ets:info(Tab, memory),
         ack_pid => AckPid,
