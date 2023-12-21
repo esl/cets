@@ -20,10 +20,11 @@
     | before_get_pids
     | before_check_fully_connected
     | before_unpause
-    | {before_send_dump, server_pid()}.
+    | {before_send_dump, server_pid()}
+    | {after_send_dump, server_pid(), Result :: term()}.
 
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
--type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
+-type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
 
 -export_type([join_ref/0]).
 
@@ -100,7 +101,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
 -spec join2(cets_long:log_info(), server_pid(), server_pid(), join_opts()) -> ok.
 join2(Info, LocalPid, RemotePid, JoinOpts) ->
     checkpoint(join_start, JoinOpts),
-    JoinRef = make_ref(),
+    JoinRef = maps:get(join_ref, JoinOpts, make_ref()),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
@@ -138,7 +139,9 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
 send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
     checkpoint({before_send_dump, Pid}, JoinOpts),
     %% Error reporting would be done by cets_long:call_tracked
-    catch cets:send_dump(Pid, Pids, JoinRef, Dump).
+    Result = catch cets:send_dump(Pid, Pids, JoinRef, Dump),
+    checkpoint({after_send_dump, Pid, Result}, JoinOpts),
+    ok.
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),

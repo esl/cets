@@ -119,6 +119,8 @@
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type servers() :: ordsets:ordset(server_pid()).
+-type delayed_check_server() :: {FromPid :: pid(), JoinRef :: join_ref()}.
+-type node_down_history() :: #{node => node(), pid => pid(), reason => term()}.
 -type state() :: #{
     tab := table_name(),
     keypos := pos_integer(),
@@ -131,7 +133,8 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    node_down_history := [node()]
+    delayed_check_server := [delayed_check_server()],
+    node_down_history := [node_down_history()]
 }.
 
 -type long_msg() ::
@@ -157,7 +160,8 @@
     ack_pid := ack_pid(),
     join_ref := join_ref(),
     opts := start_opts(),
-    node_down_history := [node()]
+    node_down_history := [node_down_history()],
+    paused := boolean()
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
@@ -231,7 +235,7 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), servers(), join_ref(), [tuple()]) -> ok.
+-spec send_dump(server_ref(), servers(), join_ref(), [tuple()]) -> ok | {error, ignored}.
 send_dump(Server, NewPids, JoinRef, OurDump) ->
     Info = #{msg => send_dump, join_ref => JoinRef, count => length(OurDump)},
     cets_call:long_call(Server, {send_dump, NewPids, JoinRef, OurDump}, Info).
@@ -421,6 +425,7 @@ init({Tab, Opts}) ->
         opts => Opts,
         backlog => [],
         pause_monitors => [],
+        delayed_check_server => [],
         node_down_history => []
     }}.
 
@@ -487,8 +492,7 @@ handle_info({remote_op, Op, From, AckPid, JoinRef}, State) ->
 handle_info({'DOWN', Mon, process, Pid, Reason}, State) ->
     {noreply, handle_down(Mon, Pid, Reason, State)};
 handle_info({check_server, FromPid, JoinRef}, State) ->
-    handle_check_server(FromPid, JoinRef, State),
-    {noreply, State};
+    {noreply, handle_check_server(FromPid, JoinRef, State)};
 handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
@@ -502,6 +506,14 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal logic
 
 -spec handle_send_dump(servers(), join_ref(), [tuple()], state()) -> {reply, ok, state()}.
+handle_send_dump(_NewPids, JoinRef, _Dump, State = #{pause_monitors := []}) ->
+    ?LOG_ERROR(#{
+        what => send_dump_received_when_unpaused,
+        text => <<"Received send_dump message while in the unpaused state. Ignore it">>,
+        join_ref => JoinRef,
+        state => State
+    }),
+    {reply, {error, ignored}, State};
 handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := Servers}) ->
     ets:insert(Tab, Dump),
     Servers2 = add_servers(NewPids, Servers),
@@ -519,17 +531,17 @@ handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
             }),
             handle_unpause2(Mon, Mons, State);
         false ->
-            handle_down2(Pid, State)
+            handle_down2(Pid, Reason, State)
     end.
 
--spec handle_down2(pid(), state()) -> state().
-handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) ->
+-spec handle_down2(pid(), term(), state()) -> state().
+handle_down2(RemotePid, Reason, State = #{other_servers := Servers, ack_pid := AckPid}) ->
     case lists:member(RemotePid, Servers) of
         true ->
             cets_ack:send_remote_down(AckPid, RemotePid),
             call_user_handle_down(RemotePid, State),
             Servers2 = lists:delete(RemotePid, Servers),
-            update_node_down_history(RemotePid, set_other_servers(Servers2, State));
+            update_node_down_history(RemotePid, Reason, set_other_servers(Servers2, State));
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -540,8 +552,12 @@ handle_down2(RemotePid, State = #{other_servers := Servers, ack_pid := AckPid}) 
             State
     end.
 
-update_node_down_history(RemotePid, State = #{node_down_history := History}) ->
-    State#{node_down_history := [node(RemotePid) | History]}.
+update_node_down_history(RemotePid, Reason, State = #{node_down_history := History}) ->
+    State#{
+        node_down_history := [
+            #{node => node(RemotePid), pid => RemotePid, reason => Reason} | History
+        ]
+    }.
 
 %% Merge two lists of pids, create the missing monitors.
 -spec add_servers(Servers, Servers) -> Servers when Servers :: servers().
@@ -709,8 +725,9 @@ handle_unpause2(Mon, Mons, State) ->
     State2 = State#{pause_monitors := Mons2},
     case Mons2 of
         [] ->
-            send_check_servers(State2),
-            apply_backlog(State2);
+            State3 = send_delayed_check_server_replies(State2),
+            send_check_servers(State3),
+            apply_backlog(State3);
         _ ->
             State2
     end.
@@ -729,9 +746,14 @@ send_check_server(Pid, JoinRef) ->
     ok.
 
 %% That could actually arrive before we get unpaused
-handle_check_server(_FromPid, JoinRef, #{join_ref := JoinRef}) ->
-    ok;
-handle_check_server(FromPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
+handle_check_server(
+    FromPid, JoinRef, State = #{pause_monitors := [_ | _], delayed_check_server := Delayed}
+) ->
+    %% Delay reply until this server is unpaused.
+    State#{delayed_check_server := [{FromPid, JoinRef} | Delayed]};
+handle_check_server(_FromPid, JoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
+    State;
+handle_check_server(FromPid, RemoteJoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
     ?LOG_WARNING(#{
         what => cets_check_server_failed,
         text => <<"Disconnect the remote server">>,
@@ -742,7 +764,15 @@ handle_check_server(FromPid, RemoteJoinRef, #{join_ref := JoinRef}) ->
     %% Ask the remote server to disconnect from us
     Reason = {check_server_failed, {RemoteJoinRef, JoinRef}},
     FromPid ! {'DOWN', make_ref(), process, self(), Reason},
-    ok.
+    State.
+
+-spec send_delayed_check_server_replies(state()) -> state().
+send_delayed_check_server_replies(State = #{delayed_check_server := Delayed}) ->
+    State2 = State#{delayed_check_server := []},
+    F = fun({FromPid, JoinRef}, State3) ->
+        handle_check_server(FromPid, JoinRef, State3)
+    end,
+    lists:foldl(F, State2, Delayed).
 
 -spec handle_get_info(state()) -> info().
 handle_get_info(
@@ -752,6 +782,7 @@ handle_get_info(
         ack_pid := AckPid,
         join_ref := JoinRef,
         node_down_history := DownHistory,
+        pause_monitors := PauseMons,
         opts := Opts
     }
 ) ->
@@ -764,6 +795,7 @@ handle_get_info(
         ack_pid => AckPid,
         join_ref => JoinRef,
         node_down_history => DownHistory,
+        paused => PauseMons =/= [],
         opts => Opts
     }.
 

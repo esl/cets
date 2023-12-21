@@ -197,7 +197,8 @@ seq_cases() ->
         ping_pairs_returns_pongs,
         ping_pairs_returns_earlier,
         pre_connect_fails_on_our_node,
-        pre_connect_fails_on_one_of_the_nodes
+        pre_connect_fails_on_one_of_the_nodes,
+        send_check_servers_is_called_before_last_server_got_dump
     ].
 
 cets_seq_no_log_cases() ->
@@ -208,11 +209,12 @@ cets_seq_no_log_cases() ->
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_late_pang_result_arrives_after_node_went_up
+        disco_late_pang_result_arrives_after_node_went_up,
+        send_check_servers_is_called_before_last_server_got_dump
     ].
 
 init_per_suite(Config) ->
-    Names = [ct2, ct3, ct4, ct5],
+    Names = [ct2, ct3, ct4, ct5, ct6, ct7],
     {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
@@ -1153,6 +1155,54 @@ servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause(Con
     cets:unpause(Pid1, PauseRef1),
     cets:unpause(Pid2, PauseRef2),
     cets_test_wait:wait_until(fun() -> maps:get(other_servers, cets:info(Pid1)) end, []).
+
+send_dump_received_when_unpaused(Config) ->
+    ok.
+
+%% Happens when one node receives send_dump and looses connection with the node
+%% that runs cets_join logic.
+send_check_servers_is_called_before_last_server_got_dump(Config) ->
+    Self = self(),
+    %% For this test we need nodes with prevent_overlapping_partitions=false
+    %% Otherwise disconnect_node would kick both CETS nodes
+    #{ct6 := Peer6, ct7 := Peer7, ct5 := Peer5} = proplists:get_value(peers, Config),
+    Tab = make_name(Config),
+    Lock = lock_name(Config),
+    {ok, Pid6} = start(Peer6, Tab),
+    {ok, Pid7} = start(Peer7, Tab),
+    CheakPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid7 ->
+            %% Node6 already got its dump
+            disconnect_node(Peer6, node()),
+            wait_for_unpaused(Peer6, Pid6),
+            %% Wait for check_server to be send from Pid6 to Pid7
+            rpc(Peer6, cets, ping_all, [Pid6]),
+            Self ! before_send_dump7,
+            ok;
+        ({after_send_dump, Pid, Result}) when Pid == Pid7 ->
+            Self ! {after_send_dump7, Result},
+            ok;
+        (_) ->
+            ok
+    end,
+    JoinRef = make_ref(),
+    spawn_link(fun() ->
+        ok = rpc(Peer5, cets_join, join, [
+            Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheakPointF}
+        ])
+    end),
+    wait_for_unpaused(Peer6, Pid6),
+    receive_message(before_send_dump7),
+    ?assertEqual(ok, receive_message_with_arg(after_send_dump7)),
+    wait_for_join_ref_to_match(Pid6, JoinRef),
+    wait_for_join_ref_to_match(Pid7, JoinRef),
+    cets:ping_all(Pid6),
+    cets:ping_all(Pid7),
+    #{other_servers := OtherServers6} = Info6 = cets:info(Pid6),
+    #{other_servers := OtherServers7} = Info7 = cets:info(Pid7),
+    ?assertEqual([Pid7], OtherServers6, Info6),
+    ?assertEqual([Pid6], OtherServers7, Info7),
+    ok.
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -2371,7 +2421,10 @@ node_down_history_is_updated_when_netsplit_happens(Config) ->
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
     block_node(Node5, Peer5),
     try
-        F = fun() -> maps:get(node_down_history, cets:info(Pid1)) end,
+        F = fun() ->
+            History = maps:get(node_down_history, cets:info(Pid1)),
+            lists:map(fun(#{node := Node}) -> Node end, History)
+        end,
         cets_test_wait:wait_until(F, [Node5])
     after
         reconnect_node(Node5, Peer5),
@@ -2689,9 +2742,12 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
     end.
 
 %% Set epmd_port for better coverage
-extra_args(ct2) -> ["-epmd_port", "4369"];
-extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
-extra_args(_) -> "".
+extra_args(ct2) ->
+    ["-epmd_port", "4369"];
+extra_args(X) when X == ct5; X == ct6; X == ct7 ->
+    ["-kernel", "prevent_overlapping_partitions", "false"];
+extra_args(_) ->
+    "".
 
 start_node(Sname) ->
     {ok, Peer, Node} = ?CT_PEER(#{
@@ -3012,6 +3068,18 @@ wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
         NewTimestamp =/= OldTimestamp
     end,
     cets_test_wait:wait_until(Cond, true).
+
+wait_for_unpaused(Peer, Pid) ->
+    Cond = fun() ->
+        maps:get(paused, rpc(Peer, cets, info, [Pid]))
+    end,
+    cets_test_wait:wait_until(Cond, false).
+
+wait_for_join_ref_to_match(Pid, JoinRef) ->
+    Cond = fun() ->
+        maps:get(join_ref, cets:info(Pid))
+    end,
+    cets_test_wait:wait_until(Cond, JoinRef).
 
 get_disco_timestamp(Disco, MapName, NodeKey) ->
     Info = cets_discovery:system_info(Disco),
