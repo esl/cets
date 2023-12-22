@@ -125,8 +125,8 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         check_fully_connected(Info, LocPids),
         check_fully_connected(Info, RemPids),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, ServerOpts),
-        RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
-        LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
+        RemF = fun(Pid) -> send_dump(Pid, Paused, LocPids, JoinRef, LocalDump2, JoinOpts) end,
+        LocF = fun(Pid) -> send_dump(Pid, Paused, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
         lists:foreach(LocF, LocPids),
         lists:foreach(RemF, RemPids),
         ok
@@ -136,10 +136,11 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
     end.
 
-send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
+send_dump(Pid, Paused, Pids, JoinRef, Dump, JoinOpts) ->
+    PauseRef = proplists:get_value(Pid, Paused),
     checkpoint({before_send_dump, Pid}, JoinOpts),
     %% Error reporting would be done by cets_long:call_tracked
-    Result = catch cets:send_dump(Pid, Pids, JoinRef, Dump),
+    Result = catch cets:send_dump(Pid, Pids, JoinRef, PauseRef, Dump),
     checkpoint({after_send_dump, Pid, Result}, JoinOpts),
     ok.
 

@@ -31,7 +31,7 @@
     delete_objects/2,
     dump/1,
     remote_dump/1,
-    send_dump/4,
+    send_dump/5,
     table_name/1,
     other_nodes/1,
     get_nodes_request/1,
@@ -149,7 +149,7 @@
     | {unpause, reference()}
     | get_leader
     | {set_leader, boolean()}
-    | {send_dump, servers(), join_ref(), [tuple()]}.
+    | {send_dump, servers(), join_ref(), pause_monitor(), [tuple()]}.
 
 -type info() :: #{
     table := table_name(),
@@ -161,6 +161,7 @@
     join_ref := join_ref(),
     opts := start_opts(),
     node_down_history := [node_down_history()],
+    pause_monitors := [pause_monitor()],
     paused := boolean()
 }.
 
@@ -235,10 +236,11 @@ table_name(Tab) when is_atom(Tab) ->
 table_name(Server) ->
     cets_call:long_call(Server, table_name).
 
--spec send_dump(server_ref(), servers(), join_ref(), [tuple()]) -> ok | {error, ignored}.
-send_dump(Server, NewPids, JoinRef, OurDump) ->
+-spec send_dump(server_ref(), servers(), join_ref(), pause_monitor(), [tuple()]) ->
+    ok | {error, ignored}.
+send_dump(Server, NewPids, JoinRef, PauseRef, OurDump) ->
     Info = #{msg => send_dump, join_ref => JoinRef, count => length(OurDump)},
-    cets_call:long_call(Server, {send_dump, NewPids, JoinRef, OurDump}, Info).
+    cets_call:long_call(Server, {send_dump, NewPids, JoinRef, PauseRef, OurDump}, Info).
 
 %% Only the node that owns the data could update/remove the data.
 %% Ideally, Key should contain inserter node info so cleaning and merging is simplified.
@@ -467,8 +469,8 @@ handle_call(remote_dump, From, State = #{tab := Tab}) ->
     %% Do not block the main process (also reduces GC of the main process)
     proc_lib:spawn_link(fun() -> gen_server:reply(From, {ok, dump(Tab)}) end),
     {noreply, State};
-handle_call({send_dump, NewPids, JoinRef, Dump}, _From, State) ->
-    handle_send_dump(NewPids, JoinRef, Dump, State);
+handle_call({send_dump, NewPids, JoinRef, PauseRef, Dump}, _From, State) ->
+    handle_send_dump(NewPids, JoinRef, PauseRef, Dump, State);
 handle_call(pause, _From = {FromPid, _}, State = #{pause_monitors := Mons}) ->
     %% We monitor who pauses our server
     Mon = erlang:monitor(process, FromPid),
@@ -505,19 +507,30 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal logic
 
--spec handle_send_dump(servers(), join_ref(), [tuple()], state()) -> {reply, ok, state()}.
-handle_send_dump(_NewPids, JoinRef, _Dump, State = #{pause_monitors := []}) ->
-    ?LOG_ERROR(#{
-        what => send_dump_received_when_unpaused,
-        text => <<"Received send_dump message while in the unpaused state. Ignore it">>,
-        join_ref => JoinRef,
-        state => State
-    }),
-    {reply, {error, ignored}, State};
-handle_send_dump(NewPids, JoinRef, Dump, State = #{tab := Tab, other_servers := Servers}) ->
-    ets:insert(Tab, Dump),
-    Servers2 = add_servers(NewPids, Servers),
-    {reply, ok, set_other_servers(Servers2, State#{join_ref := JoinRef})}.
+-spec handle_send_dump(servers(), join_ref(), pause_monitor(), [tuple()], state()) ->
+    {reply, ok, state()}.
+handle_send_dump(
+    NewPids,
+    JoinRef,
+    PauseRef,
+    Dump,
+    State = #{tab := Tab, other_servers := Servers, pause_monitors := PauseMons}
+) ->
+    case lists:member(PauseRef, PauseMons) of
+        true ->
+            ets:insert(Tab, Dump),
+            Servers2 = add_servers(NewPids, Servers),
+            {reply, ok, set_other_servers(Servers2, State#{join_ref := JoinRef})};
+        false ->
+            ?LOG_ERROR(#{
+                what => send_dump_received_when_unpaused,
+                text => <<"Received send_dump message while in the unpaused state. Ignore it">>,
+                join_ref => JoinRef,
+                pause_ref => PauseRef,
+                state => State
+            }),
+            {reply, {error, ignored}, State}
+    end.
 
 -spec handle_down(reference(), pid(), term(), state()) -> state().
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
@@ -796,6 +809,7 @@ handle_get_info(
         join_ref => JoinRef,
         node_down_history => DownHistory,
         paused => PauseMons =/= [],
+        pause_monitors => PauseMons,
         opts => Opts
     }.
 

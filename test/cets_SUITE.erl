@@ -23,15 +23,18 @@ all() ->
     ].
 
 groups() ->
+    %% Cases should have unique names, because we name CETS servers based on case names
     [
-        {cets, [parallel, {repeat_until_any_fail, 3}], cases() ++ only_for_logger_cases()},
-        {cets_no_log, [parallel], cases()},
+        {cets, [parallel, {repeat_until_any_fail, 3}],
+            assert_unique(cases() ++ only_for_logger_cases())},
+        {cets_no_log, [parallel], assert_unique(cases())},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()},
-        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}], cets_seq_no_log_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], assert_unique(seq_cases())},
+        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}],
+            assert_unique(cets_seq_no_log_cases())}
     ].
 
 cases() ->
@@ -170,7 +173,9 @@ only_for_logger_cases() ->
         shutdown_reason_is_not_logged_in_tracked,
         other_reason_is_logged_in_tracked,
         nested_calls_errors_are_logged_once_with_tuple_reason,
-        nested_calls_errors_are_logged_once_with_map_reason
+        nested_calls_errors_are_logged_once_with_map_reason,
+        ignore_send_dump_received_when_unpaused,
+        ignore_send_dump_received_when_paused_with_another_pause_ref
     ].
 
 seq_cases() ->
@@ -1138,7 +1143,7 @@ send_dump_contains_already_added_servers(Config) ->
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
     PauseRef = cets:pause(Pid1),
     %% That should be called by cets_join module
-    cets:send_dump(Pid1, [Pid2], make_ref(), [{1}]),
+    cets:send_dump(Pid1, [Pid2], make_ref(), PauseRef, [{1}]),
     cets:unpause(Pid1, PauseRef),
     {ok, [{1}]} = cets:remote_dump(Pid1).
 
@@ -1156,7 +1161,34 @@ servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause(Con
     cets:unpause(Pid2, PauseRef2),
     cets_test_wait:wait_until(fun() -> maps:get(other_servers, cets:info(Pid1)) end, []).
 
-send_dump_received_when_unpaused(Config) ->
+ignore_send_dump_received_when_paused_with_another_pause_ref(Config) ->
+    ignore_send_dump_received_when_unpaused([{extra_pause, true} | Config]).
+
+ignore_send_dump_received_when_unpaused(Config) ->
+    Self = self(),
+    %% Check that even if we have already added server in send_dump, nothing crashes
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
+    CheakPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid1 ->
+            #{pause_monitors := [PauseRef]} = cets:info(Pid1),
+            cets:unpause(Pid1, PauseRef),
+            case proplists:get_value(extra_pause, Config, false) of
+                true ->
+                    cets:pause(Pid1);
+                false ->
+                    ok
+            end,
+            ok;
+        ({after_send_dump, Pid, Result}) when Pid == Pid1 ->
+            Self ! {after_send_dump, Result},
+            ok;
+        (_) ->
+            ok
+    end,
+    Lock = lock_name(Config),
+    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => CheakPointF}),
+    ?assertEqual({error, ignored}, receive_message_with_arg(after_send_dump)),
     ok.
 
 %% Happens when one node receives send_dump and looses connection with the node
@@ -2779,6 +2811,14 @@ flush_message(M) ->
         ok
     end.
 
+flush_messages() ->
+    receive
+        M ->
+            [M | flush_messages()]
+    after 0 ->
+        []
+    end.
+
 make_name(Config) ->
     make_name(Config, 1).
 
@@ -3099,3 +3139,8 @@ mock_epmd() ->
         ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
         (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
     end).
+
+%% Fails if List has duplicates
+assert_unique(List) ->
+    ?assertEqual([], List -- lists:usort(List)),
+    List.
