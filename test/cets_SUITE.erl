@@ -141,6 +141,8 @@ cases() ->
         insert_into_keypos_table,
         table_name_works,
         info_contains_opts,
+        info_contains_pause_monitors,
+        info_contains_other_servers,
         check_could_reach_each_other_fails,
         unknown_down_message_is_ignored,
         unknown_message_is_ignored,
@@ -2102,6 +2104,16 @@ info_contains_opts(Config) ->
     T = make_name(Config),
     {ok, Pid} = start_local(T, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
+
+info_contains_pause_monitors(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T, #{}),
+    PauseMon = cets:pause(Pid),
+    #{pause_monitors := [PauseMon]} = cets:info(Pid).
+
+info_contains_other_servers(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    #{other_servers := [Pid2]} = cets:info(Pid1).
 
 check_could_reach_each_other_fails(_Config) ->
     ?assertException(
