@@ -506,13 +506,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec handle_send_dump(servers(), join_ref(), pause_monitor(), [tuple()], state()) ->
     {reply, ok, state()}.
-handle_send_dump(
-    NewPids,
-    JoinRef,
-    PauseRef,
-    Dump,
-    State = #{tab := Tab, other_servers := Servers, pause_monitors := PauseMons}
-) ->
+handle_send_dump(NewPids, JoinRef, PauseRef, Dump, State) ->
+    #{tab := Tab, other_servers := Servers, pause_monitors := PauseMons} = State,
     case lists:member(PauseRef, PauseMons) of
         true ->
             ets:insert(Tab, Dump),
@@ -563,11 +558,8 @@ handle_down2(RemotePid, Reason, State = #{other_servers := Servers, ack_pid := A
     end.
 
 update_node_down_history(RemotePid, Reason, State = #{node_down_history := History}) ->
-    State#{
-        node_down_history := [
-            #{node => node(RemotePid), pid => RemotePid, reason => Reason} | History
-        ]
-    }.
+    Item = #{node => node(RemotePid), pid => RemotePid, reason => Reason},
+    State#{node_down_history := [Item | History]}.
 
 %% Merge two lists of pids, create the missing monitors.
 -spec add_servers(Servers, Servers) -> Servers when Servers :: servers().
