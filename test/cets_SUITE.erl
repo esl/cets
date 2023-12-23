@@ -1173,7 +1173,7 @@ ignore_send_dump_received_when_unpaused(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
     {ok, Pid1} = start_local(make_name(Config, 1)),
     {ok, Pid2} = start_local(make_name(Config, 2)),
-    CheakPointF = fun
+    CheckPointF = fun
         ({before_send_dump, Pid}) when Pid == Pid1 ->
             #{pause_monitors := [PauseRef]} = cets:info(Pid1),
             cets:unpause(Pid1, PauseRef),
@@ -1191,7 +1191,7 @@ ignore_send_dump_received_when_unpaused(Config) ->
             ok
     end,
     Lock = lock_name(Config),
-    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => CheakPointF}),
+    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => CheckPointF}),
     ?assertEqual({error, ignored}, receive_message_with_arg(after_send_dump)),
     ok.
 
@@ -1206,7 +1206,7 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
     Lock = lock_name(Config),
     {ok, Pid6} = start(Peer6, Tab),
     {ok, Pid7} = start(Peer7, Tab),
-    CheakPointF = fun
+    CheckPointF = fun
         ({before_send_dump, Pid}) when Pid == Pid7 ->
             %% Node6 already got its dump
             disconnect_node(Peer6, node()),
@@ -1223,11 +1223,9 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
             ok
     end,
     JoinRef = make_ref(),
-    spawn_link(fun() ->
-        ok = rpc(Peer5, cets_join, join, [
-            Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheakPointF}
-        ])
-    end),
+    ok = rpc(Peer5, cets_join, join, [
+        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheckPointF}
+    ]),
     receive_message(before_send_dump7),
     ?assertEqual(ok, receive_message_with_arg(after_send_dump7)),
     wait_for_join_ref_to_match(Pid6, JoinRef),
@@ -1249,7 +1247,7 @@ remote_ops_are_not_sent_before_last_server_got_dump(Config) ->
     {ok, Pid6} = start(Peer6, Tab),
     {ok, Pid7} = start(Peer7, Tab),
     insert(Peer6, Tab, {a, 1}),
-    CheakPointF = fun
+    CheckPointF = fun
         ({before_send_dump, Pid}) when Pid == Pid7 ->
             %% Node6 already got its dump.
             %% Use disconnect_node to loose connection between the coordinator and Pid6.
@@ -1266,7 +1264,7 @@ remote_ops_are_not_sent_before_last_server_got_dump(Config) ->
     end,
     JoinRef = make_ref(),
     ok = rpc(Peer5, cets_join, join, [
-        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheakPointF}
+        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheckPointF}
     ]),
     cets:ping_all(Pid6),
     cets:ping_all(Pid7),

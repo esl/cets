@@ -159,8 +159,7 @@
     join_ref := join_ref(),
     opts := start_opts(),
     node_down_history := [node_down_history()],
-    pause_monitors := [pause_monitor()],
-    paused := boolean()
+    pause_monitors := [pause_monitor()]
 }.
 
 -type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
@@ -787,7 +786,6 @@ handle_get_info(
         ack_pid => AckPid,
         join_ref => JoinRef,
         node_down_history => DownHistory,
-        paused => PauseMons =/= [],
         pause_monitors => PauseMons,
         opts => Opts
     }.
