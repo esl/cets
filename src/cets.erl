@@ -119,7 +119,6 @@
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type servers() :: ordsets:ordset(server_pid()).
--type delayed_check_server() :: {FromPid :: pid(), JoinRef :: join_ref()}.
 -type node_down_history() :: #{node => node(), pid => pid(), reason => term()}.
 -type state() :: #{
     tab := table_name(),
@@ -133,7 +132,6 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    delayed_check_server := [delayed_check_server()],
     node_down_history := [node_down_history()]
 }.
 
@@ -427,7 +425,6 @@ init({Tab, Opts}) ->
         opts => Opts,
         backlog => [],
         pause_monitors => [],
-        delayed_check_server => [],
         node_down_history => []
     }}.
 
@@ -738,9 +735,8 @@ handle_unpause2(Mon, Mons, State) ->
     State2 = State#{pause_monitors := Mons2},
     case Mons2 of
         [] ->
-            State3 = send_delayed_check_server_replies(State2),
-            send_check_servers(State3),
-            apply_backlog(State3);
+            send_check_servers(State2),
+            apply_backlog(State2);
         _ ->
             State2
     end.
@@ -758,16 +754,14 @@ send_check_server(Pid, JoinRef) ->
     Pid ! {check_server, self(), JoinRef},
     ok.
 
-%% That could actually arrive before we get unpaused
-handle_check_server(
-    FromPid, JoinRef, State = #{pause_monitors := [_ | _], delayed_check_server := Delayed}
-) ->
-    %% Delay reply until this server is unpaused.
-    State#{delayed_check_server := [{FromPid, JoinRef} | Delayed]};
-handle_check_server(_FromPid, JoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
+%% That could actually arrive before we get fully unpaused
+%% (though cets_join:pause_on_remote_node/2 would ensure that CETS server
+%%  would send check_server only after cets_join is down
+%%  and does not send new send_dump messages)
+handle_check_server(_FromPid, JoinRef, State = #{join_ref := JoinRef}) ->
     %% check_server passed - do nothing
     State;
-handle_check_server(FromPid, RemoteJoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
+handle_check_server(FromPid, RemoteJoinRef, State = #{join_ref := JoinRef}) ->
     ?LOG_WARNING(#{
         what => cets_check_server_failed,
         text => <<"Disconnect the remote server">>,
@@ -779,14 +773,6 @@ handle_check_server(FromPid, RemoteJoinRef, State = #{pause_monitors := [], join
     Reason = {check_server_failed, {RemoteJoinRef, JoinRef}},
     FromPid ! {'DOWN', make_ref(), process, self(), Reason},
     State.
-
--spec send_delayed_check_server_replies(state()) -> state().
-send_delayed_check_server_replies(State = #{delayed_check_server := Delayed}) ->
-    State2 = State#{delayed_check_server := []},
-    F = fun({FromPid, JoinRef}, State3) ->
-        handle_check_server(FromPid, JoinRef, State3)
-    end,
-    lists:foldl(F, State2, Delayed).
 
 -spec handle_get_info(state()) -> info().
 handle_get_info(
