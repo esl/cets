@@ -162,7 +162,9 @@ cases() ->
         format_data_does_not_return_table_duplicates,
         cets_ping_non_existing_node,
         cets_ping_net_family,
-        unexpected_nodedown_is_ignored_by_disco
+        unexpected_nodedown_is_ignored_by_disco,
+        ignore_send_dump_received_when_unpaused,
+        ignore_send_dump_received_when_paused_with_another_pause_ref
     ].
 
 only_for_logger_cases() ->
@@ -176,8 +178,7 @@ only_for_logger_cases() ->
         other_reason_is_logged_in_tracked,
         nested_calls_errors_are_logged_once_with_tuple_reason,
         nested_calls_errors_are_logged_once_with_map_reason,
-        ignore_send_dump_received_when_unpaused,
-        ignore_send_dump_received_when_paused_with_another_pause_ref
+        send_dump_received_when_unpaused_is_logged
     ].
 
 seq_cases() ->
@@ -1167,6 +1168,19 @@ servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause(Con
 
 ignore_send_dump_received_when_paused_with_another_pause_ref(Config) ->
     ignore_send_dump_received_when_unpaused([{extra_pause, true} | Config]).
+
+send_dump_received_when_unpaused_is_logged(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    ignore_send_dump_received_when_unpaused(Config),
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := error,
+            msg := {report, #{what := send_dump_received_when_unpaused}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
 
 ignore_send_dump_received_when_unpaused(Config) ->
     Self = self(),
