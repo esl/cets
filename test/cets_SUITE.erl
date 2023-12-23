@@ -2862,14 +2862,6 @@ flush_message(M) ->
         ok
     end.
 
-flush_messages() ->
-    receive
-        M ->
-            [M | flush_messages()]
-    after 0 ->
-        []
-    end.
-
 make_name(Config) ->
     make_name(Config, 1).
 
