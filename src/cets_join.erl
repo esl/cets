@@ -5,6 +5,9 @@
 -export([join/5]).
 -include_lib("kernel/include/logger.hrl").
 
+%% Export for RPC
+-export([pause_on_remote_node/2]).
+
 -ifdef(TEST).
 -export([check_could_reach_each_other/3]).
 -endif.
@@ -28,7 +31,7 @@
 
 -export_type([join_ref/0]).
 
--ignore_xref([join/5]).
+-ignore_xref([join/5, pause_on_remote_node/2]).
 
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
@@ -111,7 +114,13 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     RemPids = get_pids(RemotePid),
     check_pids(Info, LocPids, RemPids, JoinOpts),
     AllPids = LocPids ++ RemPids,
+    %% We should create a pause helper process on each node in the cluster.
+    %% It is to ensure that node that loosing a connection with cets_join coordinator
+    %% would not unpause one of the processes too soon
+    %% (because it could start sending remote ops to nodes which are still in the current joining procedure).
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    OtherNodes = lists:delete(node(), lists:usort([node(Pid) || Pid <- AllPids])),
+    _ = erpc:multicall(OtherNodes, ?MODULE, pause_on_remote_node, [self(), AllPids], infinity),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
@@ -134,6 +143,30 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         checkpoint(before_unpause, JoinOpts),
         %% If unpause fails, there would be log messages
         lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
+    end.
+
+-spec pause_on_remote_node(pid(), [pid()]) -> ok.
+pause_on_remote_node(JoinerPid, AllPids) ->
+    Self = self(),
+    {Pid, Mon} = spawn_monitor(fun() ->
+        JoinerMon = erlang:monitor(process, JoinerPid),
+        MyNode = node(),
+        %% Ignore pids on the current nodes
+        %% (because we only interested in internode connections here).
+        %% Catching because we can ignore loosing some connections here.
+        _Pauses = [catch cets:pause(Pid) || Pid <- AllPids, node(Pid) =/= MyNode],
+        Self ! {ready, self()},
+        receive
+            {'DOWN', JoinerMon, process, JoinerPid, _Reason} ->
+                %% Exit and release pauses
+                ok
+        end
+    end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} ->
+            ok;
+        {ready, Pid} ->
+            ok
     end.
 
 send_dump(Pid, Paused, Pids, JoinRef, Dump, JoinOpts) ->

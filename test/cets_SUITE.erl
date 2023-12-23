@@ -205,7 +205,8 @@ seq_cases() ->
         ping_pairs_returns_earlier,
         pre_connect_fails_on_our_node,
         pre_connect_fails_on_one_of_the_nodes,
-        send_check_servers_is_called_before_last_server_got_dump
+        send_check_servers_is_called_before_last_server_got_dump,
+        remote_ops_are_sent_before_last_server_got_dump
     ].
 
 cets_seq_no_log_cases() ->
@@ -217,7 +218,8 @@ cets_seq_no_log_cases() ->
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
         disco_late_pang_result_arrives_after_node_went_up,
-        send_check_servers_is_called_before_last_server_got_dump
+        send_check_servers_is_called_before_last_server_got_dump,
+        remote_ops_are_sent_before_last_server_got_dump
     ].
 
 init_per_suite(Config) ->
@@ -1208,7 +1210,8 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
         ({before_send_dump, Pid}) when Pid == Pid7 ->
             %% Node6 already got its dump
             disconnect_node(Peer6, node()),
-            wait_for_unpaused(Peer6, Pid6),
+            %% Wait for Pid6 to loose pause monitor from the join process
+            wait_for_unpaused(Peer6, Pid6, self()),
             %% Wait for check_server to be send from Pid6 to Pid7
             rpc(Peer6, cets, ping_all, [Pid6]),
             Self ! before_send_dump7,
@@ -1225,7 +1228,6 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
             Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheakPointF}
         ])
     end),
-    wait_for_unpaused(Peer6, Pid6),
     receive_message(before_send_dump7),
     ?assertEqual(ok, receive_message_with_arg(after_send_dump7)),
     wait_for_join_ref_to_match(Pid6, JoinRef),
@@ -1236,6 +1238,37 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
     #{other_servers := OtherServers7} = Info7 = cets:info(Pid7),
     ?assertEqual([Pid7], OtherServers6, Info6),
     ?assertEqual([Pid6], OtherServers7, Info7),
+    ok.
+
+remote_ops_are_sent_before_last_server_got_dump(Config) ->
+    %% For this test we need nodes with prevent_overlapping_partitions=false
+    %% Otherwise disconnect_node would kick both CETS nodes
+    #{ct6 := Peer6, ct7 := Peer7, ct5 := Peer5} = proplists:get_value(peers, Config),
+    Tab = make_name(Config),
+    Lock = lock_name(Config),
+    {ok, Pid6} = start(Peer6, Tab),
+    {ok, Pid7} = start(Peer7, Tab),
+    insert(Peer6, Tab, {a, 1}),
+    CheakPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid7 ->
+            %% Node6 already got its dump
+            disconnect_node(Peer6, node()),
+            %% We cannot use blocking cets:delete/2 here because we would deadlock
+            %% Use delete_request/2 instead and wait till at least the local node precessed the operation
+            delete_request(Peer6, Tab, a),
+            rpc(Peer6, cets, ping, [Tab]),
+            ok;
+        (_) ->
+            ok
+    end,
+    JoinRef = make_ref(),
+    ok = rpc(Peer5, cets_join, join, [
+        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheakPointF}
+    ]),
+    cets:ping_all(Pid6),
+    cets:ping_all(Pid7),
+    {ok, []} = cets:remote_dump(Pid6),
+    {ok, []} = cets:remote_dump(Pid7),
     ok.
 
 test_multinode(Config) ->
@@ -2757,6 +2790,9 @@ insert_many(Node, Tab, Records) ->
 delete(Node, Tab, Key) ->
     rpc(Node, cets, delete, [Tab, Key]).
 
+delete_request(Node, Tab, Key) ->
+    rpc(Node, cets, delete_request, [Tab, Key]).
+
 delete_many(Node, Tab, Keys) ->
     rpc(Node, cets, delete_many, [Tab, Keys]).
 
@@ -3121,9 +3157,10 @@ wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
     end,
     cets_test_wait:wait_until(Cond, true).
 
-wait_for_unpaused(Peer, Pid) ->
+wait_for_unpaused(Peer, Pid, PausedByPid) ->
     Cond = fun() ->
-        maps:get(paused, rpc(Peer, cets, info, [Pid]))
+        {monitors, Info} = rpc(Peer, erlang, process_info, [Pid, monitors]),
+        lists:member({process, PausedByPid}, Info)
     end,
     cets_test_wait:wait_until(Cond, false).
 

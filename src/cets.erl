@@ -765,6 +765,7 @@ handle_check_server(
     %% Delay reply until this server is unpaused.
     State#{delayed_check_server := [{FromPid, JoinRef} | Delayed]};
 handle_check_server(_FromPid, JoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
+    %% check_server passed - do nothing
     State;
 handle_check_server(FromPid, RemoteJoinRef, State = #{pause_monitors := [], join_ref := JoinRef}) ->
     ?LOG_WARNING(#{
