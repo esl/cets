@@ -206,7 +206,7 @@ seq_cases() ->
         pre_connect_fails_on_our_node,
         pre_connect_fails_on_one_of_the_nodes,
         send_check_servers_is_called_before_last_server_got_dump,
-        remote_ops_are_sent_before_last_server_got_dump
+        remote_ops_are_not_sent_before_last_server_got_dump
     ].
 
 cets_seq_no_log_cases() ->
@@ -219,7 +219,7 @@ cets_seq_no_log_cases() ->
         disco_node_start_timestamp_is_updated_after_node_restarts,
         disco_late_pang_result_arrives_after_node_went_up,
         send_check_servers_is_called_before_last_server_got_dump,
-        remote_ops_are_sent_before_last_server_got_dump
+        remote_ops_are_not_sent_before_last_server_got_dump
     ].
 
 init_per_suite(Config) ->
@@ -1240,7 +1240,7 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
     ?assertEqual([Pid6], OtherServers7, Info7),
     ok.
 
-remote_ops_are_sent_before_last_server_got_dump(Config) ->
+remote_ops_are_not_sent_before_last_server_got_dump(Config) ->
     %% For this test we need nodes with prevent_overlapping_partitions=false
     %% Otherwise disconnect_node would kick both CETS nodes
     #{ct6 := Peer6, ct7 := Peer7, ct5 := Peer5} = proplists:get_value(peers, Config),
@@ -1251,10 +1251,13 @@ remote_ops_are_sent_before_last_server_got_dump(Config) ->
     insert(Peer6, Tab, {a, 1}),
     CheakPointF = fun
         ({before_send_dump, Pid}) when Pid == Pid7 ->
-            %% Node6 already got its dump
+            %% Node6 already got its dump.
+            %% Use disconnect_node to loose connection between the coordinator and Pid6.
+            %% But Pid6 would still be paused by cets_join:pause_on_remote_node/2 from Node7.
             disconnect_node(Peer6, node()),
-            %% We cannot use blocking cets:delete/2 here because we would deadlock
-            %% Use delete_request/2 instead and wait till at least the local node precessed the operation
+            %% We cannot use blocking cets:delete/2 here because we would deadlock.
+            %% Use delete_request/2 instead and wait till
+            %% at least the local node precessed the operation.
             delete_request(Peer6, Tab, a),
             rpc(Peer6, cets, ping, [Tab]),
             ok;
