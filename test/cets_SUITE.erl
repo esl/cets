@@ -164,7 +164,8 @@ cases() ->
         cets_ping_net_family,
         unexpected_nodedown_is_ignored_by_disco,
         ignore_send_dump_received_when_unpaused,
-        ignore_send_dump_received_when_paused_with_another_pause_ref
+        ignore_send_dump_received_when_paused_with_another_pause_ref,
+        pause_on_remote_node_returns_if_monitor_process_dies
     ].
 
 only_for_logger_cases() ->
@@ -1208,6 +1209,27 @@ ignore_send_dump_received_when_unpaused(Config) ->
     ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => CheckPointF}),
     ?assertEqual({error, ignored}, receive_message_with_arg(after_send_dump)),
     ok.
+
+pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
+    JoinPid = make_process(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    AllPids = [rpc(Node2, ?MODULE, make_process, [])],
+    TestPid = spawn(fun() ->
+        %% Would block
+        cets_join:pause_on_remote_node(JoinPid, AllPids)
+    end),
+    cets_test_wait:wait_until(
+        fun() ->
+            case erlang:process_info(TestPid, monitors) of
+                {monitors, [{process, MonitorProcess}]} -> is_pid(MonitorProcess);
+                _ -> false
+            end
+        end,
+        true
+    ),
+    {monitors, [{process, MonitorProcess}]} = erlang:process_info(TestPid, monitors),
+    exit(MonitorProcess, killed),
+    wait_for_down(TestPid).
 
 %% Happens when one node receives send_dump and looses connection with the node
 %% that runs cets_join logic.
@@ -3200,3 +3222,10 @@ mock_epmd() ->
 assert_unique(List) ->
     ?assertEqual([], List -- lists:usort(List)),
     List.
+
+make_process() ->
+    spawn(fun() ->
+        receive
+            stop -> stop
+        end
+    end).
