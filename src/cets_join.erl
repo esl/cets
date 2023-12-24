@@ -15,6 +15,7 @@
 -type lock_key() :: term().
 -type join_ref() :: reference().
 -type server_pid() :: cets:server_pid().
+-type rpc_result() :: {Class :: throw | exit | error, Reason :: term()} | {ok, ok}.
 
 %% Critical events during the joining procedure
 -type checkpoint() ::
@@ -114,13 +115,7 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     RemPids = get_pids(RemotePid),
     check_pids(Info, LocPids, RemPids, JoinOpts),
     AllPids = LocPids ++ RemPids,
-    %% We should create a pause helper process on each node in the cluster.
-    %% It is to ensure that node that loosing a connection with cets_join coordinator
-    %% would not unpause one of the processes too soon
-    %% (because it could start sending remote ops to nodes which are still in the current joining procedure).
-    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
-    OtherNodes = lists:delete(node(), lists:usort([node(Pid) || Pid <- AllPids])),
-    _ = erpc:multicall(OtherNodes, ?MODULE, pause_on_remote_node, [self(), AllPids], infinity),
+    Paused = pause_servers(AllPids),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
@@ -144,6 +139,20 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         %% If unpause fails, there would be log messages
         lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
     end.
+
+-spec pause_servers(AllPids :: [pid(), ...]) -> Paused :: [{pid(), cets:pause_monitor()}].
+pause_servers(AllPids) ->
+    %% We should create a pause helper process on each node in the cluster.
+    %% It is to ensure that node that loosing a connection with cets_join coordinator
+    %% would not unpause one of the processes too soon
+    %% (because it could start sending remote ops to nodes which are still in the current joining procedure).
+    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    OtherNodes = lists:delete(node(), lists:usort([node(Pid) || Pid <- AllPids])),
+    Results = erpc:multicall(
+        OtherNodes, ?MODULE, pause_on_remote_node, [self(), AllPids], timer:seconds(30)
+    ),
+    assert_all_ok(OtherNodes, Results),
+    Paused.
 
 -spec pause_on_remote_node(pid(), [pid()]) -> ok.
 pause_on_remote_node(JoinerPid, AllPids) ->
@@ -341,6 +350,16 @@ check_same_join_ref(Info, Pids) ->
 pid_to_join_ref(Pid) ->
     #{join_ref := JoinRef} = cets:info(Pid),
     JoinRef.
+
+-spec assert_all_ok(Nodes :: [node()], Results :: [rpc_result()]) -> ok.
+assert_all_ok(Nodes, Results) ->
+    Zip = lists:zip(Nodes, Results),
+    case lists:filter(fun({_Node, Res}) -> Res =/= {ok, ok} end, Zip) of
+        [] ->
+            ok;
+        BadZip ->
+            error({assert_all_ok, BadZip})
+    end.
 
 %% Checkpoints are used for testing
 %% Checkpoints do nothing in production

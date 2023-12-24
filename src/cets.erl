@@ -184,6 +184,7 @@
     long_msg/0,
     info/0,
     table_name/0,
+    pause_monitor/0,
     servers/0,
     response_return/0,
     response_timeout/0
