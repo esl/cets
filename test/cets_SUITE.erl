@@ -208,7 +208,8 @@ seq_cases() ->
         pre_connect_fails_on_our_node,
         pre_connect_fails_on_one_of_the_nodes,
         send_check_servers_is_called_before_last_server_got_dump,
-        remote_ops_are_not_sent_before_last_server_got_dump
+        remote_ops_are_not_sent_before_last_server_got_dump,
+        pause_on_remote_crashes
     ].
 
 cets_seq_no_log_cases() ->
@@ -1230,6 +1231,25 @@ pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
     {monitors, [{process, MonitorProcess}]} = erlang:process_info(TestPid, monitors),
     exit(MonitorProcess, killed),
     wait_for_down(TestPid).
+
+pause_on_remote_crashes(Config) ->
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    ok = rpc(Node2, ?MODULE, mock_pause_on_remote_node_failing, []),
+    try
+        {error,
+            {task_failed,
+                {assert_all_ok, [
+                    {Node2, {error, {exception, mock_pause_on_remote_node_failing, _}}}
+                ]},
+                #{}}} =
+            cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
+    after
+        [cets_join] = rpc(Node2, meck, unload, [])
+    end.
 
 %% Happens when one node receives send_dump and looses connection with the node
 %% that runs cets_join logic.
@@ -3217,6 +3237,13 @@ mock_epmd() ->
         ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
         (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
     end).
+
+mock_pause_on_remote_node_failing() ->
+    meck:new(cets_join, [passthrough, no_link]),
+    meck:expect(cets_join, pause_on_remote_node, fun(_JoinerPid, _AllPids) ->
+        error(mock_pause_on_remote_node_failing)
+    end),
+    ok.
 
 %% Fails if List has duplicates
 assert_unique(List) ->
