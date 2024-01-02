@@ -1,9 +1,12 @@
-%% @doc CETS API module
+%% @doc Main CETS module.
 %%
-%% CETS replicates an ETS table across the cluster. This module contains functions
-%% to write data. To read data, use an `ets' module from the Erlang/OTP.
+%% CETS stores data in-memory. Writes are replicated on all nodes across the cluster.
+%% Reads are done locally.
 %%
-%% Preferred key format is a node specific key (i.e. a key should contain the inserter
+%% This module contains functions to write data. To read data, use an `ets' module
+%% from the Erlang/OTP.
+%%
+%% The preferred key format is a node specific key (i.e. a key should contain the inserter
 %% node name or a pid). This should simplify the cleaning logic. This also avoids the key conflicts
 %% during the cluster join.
 %%
@@ -12,7 +15,7 @@
 %% a `handle_conflict' function on startup (because two segments in the cluster could
 %% contain a new and an old version of the record, so the records would be overwritten incorrectly).
 %%
-%% Be careful, the CETS does not protect you from records being overwritten.
+%% Be careful, CETS does not protect you from records being overwritten.
 %% It is a good option to provide `handle_conflict' function as a start argument, so you could
 %% choose, which version of the record to keep, if there are two versions present in the different
 %% cluster segments.
@@ -99,18 +102,29 @@
 
 -include_lib("kernel/include/logger.hrl").
 
-%% CETS pid
 -type server_pid() :: pid().
+%% CETS pid.
+
 -type server_ref() ::
     server_pid()
     | atom()
     | {local, atom()}
     | {global, term()}
     | {via, module(), term()}.
+%% CETS Process Reference.
+
 -type request_id() :: gen_server:request_id().
+%% Request Reference.
+
 -type from() :: gen_server:from().
+%% gen_server's caller.
+
 -type join_ref() :: cets_join:join_ref().
+%% An unique ID assigned during the table join attempt.
+
 -type ack_pid() :: cets_ack:ack_pid().
+%% Pid of the helper process that tracks unacked writes.
+
 -type op() ::
     {insert, tuple()}
     | {delete, term()}
@@ -121,13 +135,26 @@
     | {insert_new, tuple()}
     | {insert_new_or_lookup, tuple()}
     | {leader_op, op()}.
+%% Write operation type.
+
 -type remote_op() ::
     {remote_op, Op :: op(), From :: from(), AckPid :: ack_pid(), JoinRef :: join_ref()}.
+%% Message broadcasted to other nodes.
+
 -type backlog_entry() :: {op(), from()}.
+%% Delayed operation.
+
 -type table_name() :: atom().
+%% ETS table name (and the process server name).
+
 -type pause_monitor() :: reference().
+%% Reference returned from `pause/1'.
+
 -type servers() :: ordsets:ordset(server_pid()).
+%% Ordered list of server pids.
+
 -type node_down_event() :: #{node => node(), pid => pid(), reason => term()}.
+
 -type state() :: #{
     tab := table_name(),
     keypos := pos_integer(),
@@ -142,6 +169,7 @@
     pause_monitors := [pause_monitor()],
     node_down_history := [node_down_event()]
 }.
+%% gen_server's state.
 
 -type long_msg() ::
     pause
@@ -156,6 +184,7 @@
     | get_leader
     | {set_leader, boolean()}
     | {send_dump, servers(), join_ref(), pause_monitor(), [tuple()]}.
+%% Types of gen_server calls.
 
 -type info() :: #{
     table := table_name(),
@@ -169,10 +198,17 @@
     node_down_history := [node_down_event()],
     pause_monitors := [pause_monitor()]
 }.
+%% Status information returned `info/1'.
 
 -type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
+%% Handler function which is called when the remote node goes down.
+
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
+%% Handler function which is called when we need to choose which record to keep during joining.
+
 -type handle_wrong_leader() :: fun((#{from := from(), op := op(), server := server_pid()}) -> ok).
+%% Handler function which is called when a leader operation is received by a non-leader (for debugging).
+
 -type start_opts() :: #{
     type => ordered_set | bag,
     keypos => non_neg_integer(),
@@ -180,11 +216,13 @@
     handle_conflict => handle_conflict_fun(),
     handle_wrong_leader => handle_wrong_leader()
 }.
-%% Response return from `gen_server''s API
-%%
-%% Reply is usually ok
+%% Options for `start/2' function.
+
 -type response_return() :: {reply, Reply :: term()} | {error, {_, _}} | timeout.
+%% Response return from `gen_server''s API. `Reply' is usually ok.
+
 -type response_timeout() :: timeout() | {abs, integer()}.
+%% Timeout to wait for response.
 
 -export_type([
     request_id/0,
@@ -212,7 +250,7 @@
 %%
 %%   Called when a remote node goes down. This function is called on all nodes
 %%   in the remaining partition, so you should call the remote nodes
-%%   from this function. Otherwise a circular locking could happen. 
+%%   from this function. Otherwise a circular locking could happen.
 %%   i.e. any functions that replicate changes are not allowed (i.e. `cets:insert/2',
 %%   `cets:remove/2' and so on).
 %%   Use `ets' module to handle the cleaning (i.e. `ets:match_delete/2').
@@ -293,7 +331,7 @@ insert_new(Server, Rec) when is_tuple(Rec) ->
 handle_insert_new_result(ok) -> true;
 handle_insert_new_result({error, rejected}) -> false.
 
-%% @doc Insert a new tuple or return an existing one.
+%% @doc Inserts a new tuple or returns an existing one.
 -spec insert_new_or_lookup(server_ref(), tuple()) -> {WasInserted, ReadRecords} when
     WasInserted :: boolean(),
     ReadRecords :: [tuple()].
@@ -318,17 +356,20 @@ insert_serial(Server, Rec) when is_tuple(Rec) ->
 
 %% @doc Removes an object with the key from all nodes in the cluster.
 %%
-%% Ideally, nodes should only remove data that they've inserted, not data from other node.
+%% Ideally, nodes should only remove data that they've inserted, not data from another node.
+%% @see delete_many/2
+%% @see delete_request/2
 -spec delete(server_ref(), term()) -> ok.
 delete(Server, Key) ->
     cets_call:sync_operation(Server, {delete, Key}).
 
-%% @doc Removes a specific object. Useful to remove data from ETS tables of type bags.
+%% @doc Removes a specific object. Useful to remove data from ETS tables of type `bag'.
 -spec delete_object(server_ref(), tuple()) -> ok.
 delete_object(Server, Object) ->
     cets_call:sync_operation(Server, {delete_object, Object}).
 
-%% @doc A separate function for multidelete (because key COULD be a list, so no confusion)
+%% @doc Removes multiple objects using a list of keys.
+%% @see delete/2
 -spec delete_many(server_ref(), [term()]) -> ok.
 delete_many(Server, Keys) ->
     cets_call:sync_operation(Server, {delete_many, Keys}).
@@ -373,10 +414,10 @@ delete_objects_request(Server, Objects) ->
 wait_response(ReqId, Timeout) ->
     gen_server:wait_response(ReqId, Timeout).
 
-%% @doc Waits for multiple responses
+%% @doc Waits for multiple responses.
 %%
-%% Returns results in the same order as ReqIds
-%% Blocks for maximum Timeout milliseconds
+%% Returns results in the same order as `ReqIds'.
+%% Blocks for maximum `Timeout' milliseconds.
 -spec wait_responses([request_id()], response_timeout()) ->
     [response_return()].
 wait_responses(ReqIds, Timeout) ->
@@ -409,7 +450,7 @@ other_nodes(Server) ->
 get_nodes_request(Server) ->
     gen_server:send_request(Server, get_nodes).
 
-%% @doc Get a list of other CETS processes that are handling this table.
+%% @doc Gets a list of other CETS processes that are handling this table.
 -spec other_pids(server_ref()) -> servers().
 other_pids(Server) ->
     cets_call:long_call(Server, other_servers).
@@ -421,14 +462,14 @@ other_pids(Server) ->
 pause(Server) ->
     cets_call:long_call(Server, pause).
 
-%% @doc Unpauses update operations
+%% @doc Unpauses update operations.
 %%
 %% Provide reference, returned from `cets:pause/1' as an argument.
 -spec unpause(server_ref(), pause_monitor()) -> ok | {error, unknown_pause_monitor}.
 unpause(Server, PauseRef) ->
     cets_call:long_call(Server, {unpause, PauseRef}).
 
-%% @doc Set is_leader field in the state.
+%% @doc Sets `is_leader' field in the state.
 %%
 %% For debugging only.
 %% Setting in in the real life would break leader election logic.

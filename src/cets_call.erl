@@ -1,7 +1,4 @@
-%% @doc Module for extending gen_server calls.
-%% Also, it contains code for sync and async multinode operations.
-%% Operations are messages which could be buffered when a server is paused.
-%% Operations are also broadcasted to the whole cluster.
+%% @doc Helper module for extended gen_server API.
 -module(cets_call).
 
 -export([long_call/2, long_call/3]).
@@ -13,12 +10,16 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type request_id() :: cets:request_id().
+
 -type op() :: cets:op().
+%% Operations are messages which could be buffered when a server is paused.
+%% Operations are also broadcasted to the whole cluster.
+
 -type server_ref() :: cets:server_ref().
 -type long_msg() :: cets:long_msg().
 -type ok_or_error() :: ok | {error, Reason :: term()}.
 
-%% Does gen_server:call with better error reporting.
+%% @doc Makes gen_server:call with better error reporting.
 %% It would log a warning if the call takes too long.
 -spec long_call(server_ref(), long_msg()) -> term().
 long_call(Server, Msg) ->
@@ -93,7 +94,7 @@ send_leader_op(Server, Op, Backoff) ->
             Res
     end.
 
-%% Waits for multiple responces at once
+%% @doc Waits for multiple responses at once
 -spec wait_responses([gen_server:request_id()], cets:response_timeout()) ->
     [cets:response_return()].
 wait_responses([ReqId], Timeout) ->
