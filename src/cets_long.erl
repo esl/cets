@@ -1,4 +1,4 @@
-%% Helper to log long running operations.
+%% @doc Helper to log long running operations.
 -module(cets_long).
 -export([run_spawn/2, run_tracked/2]).
 
@@ -6,19 +6,25 @@
 -export([pinfo/2]).
 -endif.
 
--include_lib("kernel/include/logger.hrl").
-
-%% Extra logging information
--type log_info() :: map().
--type task_result() :: term().
--type task_fun() :: fun(() -> task_result()).
 -export_type([log_info/0]).
 
-%% Spawn a new process to do some memory-intensive task
-%% This allows to reduce GC on the parent process
-%% Wait for function to finish
-%% Handles errors
-%% Returns result from the function or crashes (i.e. forwards the error)
+-include_lib("kernel/include/logger.hrl").
+
+-type log_info() :: map().
+%% Extra logging information.
+
+-type task_result() :: term().
+%% The generic result of execution.
+
+-type task_fun() :: fun(() -> task_result()).
+%% User provided function to executre.
+
+%% @doc Spawns a new process to do some memory-intensive task.
+%%
+%% This allows to reduce GC on the parent process.
+%% Waits for function to finish.
+%% Handles errors.
+%% Returns result from the function or crashes (i.e. forwards an error).
 -spec run_spawn(log_info(), task_fun()) -> task_result().
 run_spawn(Info, F) ->
     Pid = self(),
@@ -39,7 +45,8 @@ run_spawn(Info, F) ->
             erlang:raise(Class, Reason, Stacktrace)
     end.
 
-%% Run function Fun.
+%% @doc Runs function `Fun'.
+%%
 %% Logs errors.
 %% Logs if function execution takes too long.
 %% Does not catches the errors - the caller would have to catch

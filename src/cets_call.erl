@@ -10,21 +10,29 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type request_id() :: cets:request_id().
+%% Asynchronous request reference.
 
 -type op() :: cets:op().
 %% Operations are messages which could be buffered when a server is paused.
 %% Operations are also broadcasted to the whole cluster.
 
 -type server_ref() :: cets:server_ref().
+%% Server name or pid.
+
 -type long_msg() :: cets:long_msg().
+%% Message type.
+
 -type ok_or_error() :: ok | {error, Reason :: term()}.
+%% Return result.
 
 %% @doc Makes gen_server:call with better error reporting.
+%%
 %% It would log a warning if the call takes too long.
 -spec long_call(server_ref(), long_msg()) -> term().
 long_call(Server, Msg) ->
     long_call(Server, Msg, #{msg => Msg}).
 
+%% @doc Makes gen_server:call with better error reporting.
 -spec long_call(server_ref(), long_msg(), map()) -> term().
 long_call(Server, Msg, Info) ->
     case where(Server) of
@@ -36,13 +44,17 @@ long_call(Server, Msg, Info) ->
             error({pid_not_found, Server})
     end.
 
-%% Contacts the local server to broadcast multinode operation.
+%% @doc Contacts the local server to broadcast multinode operation.
+%%
 %% Returns immediately.
-%% You can wait for response from all nodes by calling wait_response/2.
+%% You can wait for response from all nodes by calling `wait_response/2'.
 -spec async_operation(server_ref(), op()) -> request_id().
 async_operation(Server, Op) ->
     gen_server:send_request(Server, {op, Op}).
 
+%% @doc Contacts the local server to broadcast multinode operation.
+%%
+%% Blocks until the operation is applied on all nodes.
 -spec sync_operation(server_ref(), op()) -> ok.
 sync_operation(Server, Op) ->
     ok = gen_server:call(Server, {op, Op}, infinity).
@@ -64,7 +76,7 @@ where({via, Module, Name}) -> Module:whereis_name(Name).
 backoff_intervals() ->
     [10, 50, 100, 500, 1000, 5000, 5000].
 
-%% Sends all requests to a single node in the cluster
+%% @doc Sends all requests to a single node in the cluster.
 -spec send_leader_op(server_ref(), op()) -> ok_or_error().
 send_leader_op(Server, Op) ->
     send_leader_op(Server, Op, backoff_intervals()).
@@ -94,7 +106,7 @@ send_leader_op(Server, Op, Backoff) ->
             Res
     end.
 
-%% @doc Waits for multiple responses at once
+%% @doc Waits for multiple responses at once.
 -spec wait_responses([gen_server:request_id()], cets:response_timeout()) ->
     [cets:response_return()].
 wait_responses([ReqId], Timeout) ->

@@ -1,4 +1,7 @@
 %% @doc Cluster join logic.
+%%
+%% Join is called for each table by the discovery process.
+%%
 %% Checkpoints are used for testing and do not affect the joining logic.
 -module(cets_join).
 -export([join/4]).
@@ -13,11 +16,15 @@
 -endif.
 
 -type lock_key() :: term().
+%% Key for `global:trans/4'.
+
 -type join_ref() :: reference().
+%% An unique ID assigned during the table join attempt.
+
 -type server_pid() :: cets:server_pid().
 -type rpc_result() :: {Class :: throw | exit | error, Reason :: term()} | {ok, ok}.
+%% Pid of CETS gen_server.
 
-%% Critical events during the joining procedure
 -type checkpoint() ::
     join_start
     | before_retry
@@ -29,19 +36,27 @@
 
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
 -type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
+%% Critical events during the joining procedure.
+
+-type checkpoint_handler() :: fun((checkpoint()) -> ok).
+%% Checkpoint function for debugging.
+
+-type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
+%% Joining options.
 
 -export_type([join_ref/0]).
 
 -ignore_xref([join/5, pause_on_remote_node/2]).
 
-%% Adds a node to a cluster.
-%% Writes from other nodes would wait for join completion.
-%% LockKey should be the same on all nodes.
+%% @doc Join two clusters with default options.
 -spec join(lock_key(), cets_long:log_info(), server_pid(), server_pid()) ->
     ok | {error, term()}.
 join(LockKey, Info, LocalPid, RemotePid) ->
     join(LockKey, Info, LocalPid, RemotePid, #{}).
 
+%% @doc Join two clusters.
+%%
+%% Writes would wait for join completion.
 -spec join(lock_key(), cets_long:log_info(), pid(), pid(), join_opts()) -> ok | {error, term()}.
 join(_LockKey, _Info, Pid, Pid, _JoinOpts) when is_pid(Pid) ->
     {error, join_with_the_same_pid};

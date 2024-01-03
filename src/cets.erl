@@ -240,7 +240,7 @@
 
 %% API functions
 
-%% @doc Start a process serving an ETS table.
+%% @doc Starts a process serving an ETS table.
 %%
 %% The process would be registered under `table_name()' name.
 %%
