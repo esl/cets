@@ -119,7 +119,7 @@
 -type table_name() :: atom().
 -type pause_monitor() :: reference().
 -type servers() :: ordsets:ordset(server_pid()).
--type node_down_history() :: #{node => node(), pid => pid(), reason => term()}.
+-type node_down_event() :: #{node => node(), pid => pid(), reason => term()}.
 -type state() :: #{
     tab := table_name(),
     keypos := pos_integer(),
@@ -132,7 +132,7 @@
     opts := start_opts(),
     backlog := [backlog_entry()],
     pause_monitors := [pause_monitor()],
-    node_down_history := [node_down_history()]
+    node_down_history := [node_down_event()]
 }.
 
 -type long_msg() ::
@@ -158,7 +158,7 @@
     ack_pid := ack_pid(),
     join_ref := join_ref(),
     opts := start_opts(),
-    node_down_history := [node_down_history()],
+    node_down_history := [node_down_event()],
     pause_monitors := [pause_monitor()]
 }.
 

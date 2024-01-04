@@ -85,7 +85,7 @@ cases() ->
         remote_ops_are_ignored_if_join_ref_does_not_match,
         join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
-        servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause,
+        servers_remove_each_other_if_join_refs_do_not_match_after_unpause,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -209,7 +209,7 @@ seq_cases() ->
         pre_connect_fails_on_one_of_the_nodes,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump,
-        pause_on_remote_crashes
+        pause_on_remote_node_crashes
     ].
 
 cets_seq_no_log_cases() ->
@@ -1154,7 +1154,7 @@ send_dump_contains_already_added_servers(Config) ->
     cets:unpause(Pid1, PauseRef),
     {ok, [{1}]} = cets:remote_dump(Pid1).
 
-servers_remove_each_other_each_other_if_join_refs_do_not_match_after_unpause(Config) ->
+servers_remove_each_other_if_join_refs_do_not_match_after_unpause(Config) ->
     {ok, Pid1} = start_local(make_name(Config, 1)),
     {ok, Pid2} = start_local(make_name(Config, 2)),
     %% cets:send_check_servers function is only called after all pauses are unpaused
@@ -1232,7 +1232,7 @@ pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
     exit(MonitorProcess, killed),
     wait_for_down(TestPid).
 
-pause_on_remote_crashes(Config) ->
+pause_on_remote_node_crashes(Config) ->
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Node1 = node(),
     Tab = make_name(Config),
@@ -1251,7 +1251,7 @@ pause_on_remote_crashes(Config) ->
         [cets_join] = rpc(Node2, meck, unload, [])
     end.
 
-%% Happens when one node receives send_dump and looses connection with the node
+%% Happens when one node receives send_dump and loses connection with the node
 %% that runs cets_join logic.
 send_check_servers_is_called_before_last_server_got_dump(Config) ->
     Self = self(),
@@ -1266,7 +1266,7 @@ send_check_servers_is_called_before_last_server_got_dump(Config) ->
         ({before_send_dump, Pid}) when Pid == Pid7 ->
             %% Node6 already got its dump
             disconnect_node(Peer6, node()),
-            %% Wait for Pid6 to loose pause monitor from the join process
+            %% Wait for Pid6 to lose pause monitor from the join process
             wait_for_unpaused(Peer6, Pid6, self()),
             %% Wait for check_server to be send from Pid6 to Pid7
             rpc(Peer6, cets, ping_all, [Pid6]),
@@ -1306,7 +1306,7 @@ remote_ops_are_not_sent_before_last_server_got_dump(Config) ->
     CheckPointF = fun
         ({before_send_dump, Pid}) when Pid == Pid7 ->
             %% Node6 already got its dump.
-            %% Use disconnect_node to loose connection between the coordinator and Pid6.
+            %% Use disconnect_node to lose connection between the coordinator and Pid6.
             %% But Pid6 would still be paused by cets_join:pause_on_remote_node/2 from Node7.
             disconnect_node(Peer6, node()),
             %% We cannot use blocking cets:delete/2 here because we would deadlock.

@@ -143,7 +143,7 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
 -spec pause_servers(AllPids :: [pid(), ...]) -> Paused :: [{pid(), cets:pause_monitor()}].
 pause_servers(AllPids) ->
     %% We should create a pause helper process on each node in the cluster.
-    %% It is to ensure that node that loosing a connection with cets_join coordinator
+    %% It is to ensure that node that losing a connection with cets_join coordinator
     %% would not unpause one of the processes too soon
     %% (because it could start sending remote ops to nodes which are still in the current joining procedure).
     Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
@@ -160,9 +160,9 @@ pause_on_remote_node(JoinerPid, AllPids) ->
     {Pid, Mon} = spawn_monitor(fun() ->
         JoinerMon = erlang:monitor(process, JoinerPid),
         MyNode = node(),
-        %% Ignore pids on the current nodes
+        %% Ignore pids on the current node
         %% (because we only interested in internode connections here).
-        %% Catching because we can ignore loosing some connections here.
+        %% Catching because we can ignore losing some connections here.
         _Pauses = [catch cets:pause(Pid) || Pid <- AllPids, node(Pid) =/= MyNode],
         Self ! {ready, self()},
         receive
