@@ -23,15 +23,18 @@ all() ->
     ].
 
 groups() ->
+    %% Cases should have unique names, because we name CETS servers based on case names
     [
-        {cets, [parallel, {repeat_until_any_fail, 3}], cases() ++ only_for_logger_cases()},
-        {cets_no_log, [parallel], cases()},
+        {cets, [parallel, {repeat_until_any_fail, 3}],
+            assert_unique(cases() ++ only_for_logger_cases())},
+        {cets_no_log, [parallel], assert_unique(cases())},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
         %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], seq_cases()},
-        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}], cets_seq_no_log_cases()}
+        {cets_seq, [sequence, {repeat_until_any_fail, 2}], assert_unique(seq_cases())},
+        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}],
+            assert_unique(cets_seq_no_log_cases())}
     ].
 
 cases() ->
@@ -82,6 +85,7 @@ cases() ->
         remote_ops_are_ignored_if_join_ref_does_not_match,
         join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
+        servers_remove_each_other_if_join_refs_do_not_match_after_unpause,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
@@ -137,6 +141,8 @@ cases() ->
         insert_into_keypos_table,
         table_name_works,
         info_contains_opts,
+        info_contains_pause_monitors,
+        info_contains_other_servers,
         check_could_reach_each_other_fails,
         unknown_down_message_is_ignored,
         unknown_message_is_ignored,
@@ -156,7 +162,10 @@ cases() ->
         format_data_does_not_return_table_duplicates,
         cets_ping_non_existing_node,
         cets_ping_net_family,
-        unexpected_nodedown_is_ignored_by_disco
+        unexpected_nodedown_is_ignored_by_disco,
+        ignore_send_dump_received_when_unpaused,
+        ignore_send_dump_received_when_paused_with_another_pause_ref,
+        pause_on_remote_node_returns_if_monitor_process_dies
     ].
 
 only_for_logger_cases() ->
@@ -169,7 +178,8 @@ only_for_logger_cases() ->
         shutdown_reason_is_not_logged_in_tracked,
         other_reason_is_logged_in_tracked,
         nested_calls_errors_are_logged_once_with_tuple_reason,
-        nested_calls_errors_are_logged_once_with_map_reason
+        nested_calls_errors_are_logged_once_with_map_reason,
+        send_dump_received_when_unpaused_is_logged
     ].
 
 seq_cases() ->
@@ -196,7 +206,10 @@ seq_cases() ->
         ping_pairs_returns_pongs,
         ping_pairs_returns_earlier,
         pre_connect_fails_on_our_node,
-        pre_connect_fails_on_one_of_the_nodes
+        pre_connect_fails_on_one_of_the_nodes,
+        send_check_servers_is_called_before_last_server_got_dump,
+        remote_ops_are_not_sent_before_last_server_got_dump,
+        pause_on_remote_node_crashes
     ].
 
 cets_seq_no_log_cases() ->
@@ -207,11 +220,13 @@ cets_seq_no_log_cases() ->
         disco_node_down_timestamp_is_remembered,
         disco_nodeup_timestamp_is_updated_after_node_reconnects,
         disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_late_pang_result_arrives_after_node_went_up
+        disco_late_pang_result_arrives_after_node_went_up,
+        send_check_servers_is_called_before_last_server_got_dump,
+        remote_ops_are_not_sent_before_last_server_got_dump
     ].
 
 init_per_suite(Config) ->
-    Names = [ct2, ct3, ct4, ct5],
+    Names = [ct2, ct3, ct4, ct5, ct6, ct7],
     {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
@@ -1135,9 +1150,183 @@ send_dump_contains_already_added_servers(Config) ->
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
     PauseRef = cets:pause(Pid1),
     %% That should be called by cets_join module
-    cets:send_dump(Pid1, [Pid2], make_ref(), [{1}]),
+    cets:send_dump(Pid1, [Pid2], make_ref(), PauseRef, [{1}]),
     cets:unpause(Pid1, PauseRef),
     {ok, [{1}]} = cets:remote_dump(Pid1).
+
+servers_remove_each_other_if_join_refs_do_not_match_after_unpause(Config) ->
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
+    %% cets:send_check_servers function is only called after all pauses are unpaused
+    PauseRef1 = cets:pause(Pid1),
+    PauseRef2 = cets:pause(Pid2),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
+    %% send_check_servers is not called yet, because we are still pausing.
+    %% Mess with join_ref in the state.
+    set_join_ref(Pid1, make_ref()),
+    cets:unpause(Pid1, PauseRef1),
+    cets:unpause(Pid2, PauseRef2),
+    cets_test_wait:wait_until(fun() -> maps:get(other_servers, cets:info(Pid1)) end, []).
+
+ignore_send_dump_received_when_paused_with_another_pause_ref(Config) ->
+    ignore_send_dump_received_when_unpaused([{extra_pause, true} | Config]).
+
+send_dump_received_when_unpaused_is_logged(Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    ignore_send_dump_received_when_unpaused(Config),
+    receive
+        {log, ?FUNCTION_NAME, #{
+            level := error,
+            msg := {report, #{what := send_dump_received_when_unpaused}}
+        }} ->
+            ok
+    after 5000 ->
+        ct:fail(timeout)
+    end.
+
+ignore_send_dump_received_when_unpaused(Config) ->
+    Self = self(),
+    %% Check that even if we have already added server in send_dump, nothing crashes
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    {ok, Pid2} = start_local(make_name(Config, 2)),
+    CheckPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid1 ->
+            #{pause_monitors := [PauseRef]} = cets:info(Pid1),
+            cets:unpause(Pid1, PauseRef),
+            case proplists:get_value(extra_pause, Config, false) of
+                true ->
+                    cets:pause(Pid1);
+                false ->
+                    ok
+            end,
+            ok;
+        ({after_send_dump, Pid, Result}) when Pid == Pid1 ->
+            Self ! {after_send_dump, Result},
+            ok;
+        (_) ->
+            ok
+    end,
+    Lock = lock_name(Config),
+    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => CheckPointF}),
+    ?assertEqual({error, ignored}, receive_message_with_arg(after_send_dump)),
+    ok.
+
+pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
+    JoinPid = make_process(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    AllPids = [rpc(Node2, ?MODULE, make_process, [])],
+    TestPid = spawn(fun() ->
+        %% Would block
+        cets_join:pause_on_remote_node(JoinPid, AllPids)
+    end),
+    cets_test_wait:wait_until(
+        fun() ->
+            case erlang:process_info(TestPid, monitors) of
+                {monitors, [{process, MonitorProcess}]} -> is_pid(MonitorProcess);
+                _ -> false
+            end
+        end,
+        true
+    ),
+    {monitors, [{process, MonitorProcess}]} = erlang:process_info(TestPid, monitors),
+    exit(MonitorProcess, killed),
+    wait_for_down(TestPid).
+
+pause_on_remote_node_crashes(Config) ->
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid2} = start(Node2, Tab),
+    ok = rpc(Node2, ?MODULE, mock_pause_on_remote_node_failing, []),
+    try
+        {error,
+            {task_failed,
+                {assert_all_ok, [
+                    {Node2, {error, {exception, mock_pause_on_remote_node_failing, _}}}
+                ]},
+                #{}}} =
+            cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
+    after
+        [cets_join] = rpc(Node2, meck, unload, [])
+    end.
+
+%% Happens when one node receives send_dump and loses connection with the node
+%% that runs cets_join logic.
+send_check_servers_is_called_before_last_server_got_dump(Config) ->
+    Self = self(),
+    %% For this test we need nodes with prevent_overlapping_partitions=false
+    %% Otherwise disconnect_node would kick both CETS nodes
+    #{ct6 := Peer6, ct7 := Peer7, ct5 := Peer5} = proplists:get_value(peers, Config),
+    Tab = make_name(Config),
+    Lock = lock_name(Config),
+    {ok, Pid6} = start(Peer6, Tab),
+    {ok, Pid7} = start(Peer7, Tab),
+    CheckPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid7 ->
+            %% Node6 already got its dump
+            disconnect_node(Peer6, node()),
+            %% Wait for Pid6 to lose pause monitor from the join process
+            wait_for_unpaused(Peer6, Pid6, self()),
+            %% Wait for check_server to be send from Pid6 to Pid7
+            rpc(Peer6, cets, ping_all, [Pid6]),
+            Self ! before_send_dump7,
+            ok;
+        ({after_send_dump, Pid, Result}) when Pid == Pid7 ->
+            Self ! {after_send_dump7, Result},
+            ok;
+        (_) ->
+            ok
+    end,
+    JoinRef = make_ref(),
+    ok = rpc(Peer5, cets_join, join, [
+        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheckPointF}
+    ]),
+    receive_message(before_send_dump7),
+    ?assertEqual(ok, receive_message_with_arg(after_send_dump7)),
+    wait_for_join_ref_to_match(Pid6, JoinRef),
+    wait_for_join_ref_to_match(Pid7, JoinRef),
+    cets:ping_all(Pid6),
+    cets:ping_all(Pid7),
+    #{other_servers := OtherServers6} = Info6 = cets:info(Pid6),
+    #{other_servers := OtherServers7} = Info7 = cets:info(Pid7),
+    ?assertEqual([Pid7], OtherServers6, Info6),
+    ?assertEqual([Pid6], OtherServers7, Info7),
+    ok.
+
+remote_ops_are_not_sent_before_last_server_got_dump(Config) ->
+    %% For this test we need nodes with prevent_overlapping_partitions=false
+    %% Otherwise disconnect_node would kick both CETS nodes
+    #{ct6 := Peer6, ct7 := Peer7, ct5 := Peer5} = proplists:get_value(peers, Config),
+    Tab = make_name(Config),
+    Lock = lock_name(Config),
+    {ok, Pid6} = start(Peer6, Tab),
+    {ok, Pid7} = start(Peer7, Tab),
+    insert(Peer6, Tab, {a, 1}),
+    CheckPointF = fun
+        ({before_send_dump, Pid}) when Pid == Pid7 ->
+            %% Node6 already got its dump.
+            %% Use disconnect_node to lose connection between the coordinator and Pid6.
+            %% But Pid6 would still be paused by cets_join:pause_on_remote_node/2 from Node7.
+            disconnect_node(Peer6, node()),
+            %% We cannot use blocking cets:delete/2 here because we would deadlock.
+            %% Use delete_request/2 instead and wait till
+            %% at least the local node precessed the operation.
+            delete_request(Peer6, Tab, a),
+            rpc(Peer6, cets, ping, [Tab]),
+            ok;
+        (_) ->
+            ok
+    end,
+    JoinRef = make_ref(),
+    ok = rpc(Peer5, cets_join, join, [
+        Lock, #{}, Pid6, Pid7, #{join_ref => JoinRef, checkpoint_handler => CheckPointF}
+    ]),
+    cets:ping_all(Pid6),
+    cets:ping_all(Pid7),
+    {ok, []} = cets:remote_dump(Pid6),
+    {ok, []} = cets:remote_dump(Pid7),
+    ok.
 
 test_multinode(Config) ->
     Node1 = node(),
@@ -2006,6 +2195,16 @@ info_contains_opts(Config) ->
     {ok, Pid} = start_local(T, #{type => bag}),
     #{opts := #{type := bag}} = cets:info(Pid).
 
+info_contains_pause_monitors(Config) ->
+    T = make_name(Config),
+    {ok, Pid} = start_local(T, #{}),
+    PauseMon = cets:pause(Pid),
+    #{pause_monitors := [PauseMon]} = cets:info(Pid).
+
+info_contains_other_servers(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    #{other_servers := [Pid2]} = cets:info(Pid1).
+
 check_could_reach_each_other_fails(_Config) ->
     ?assertException(
         error,
@@ -2356,7 +2555,10 @@ node_down_history_is_updated_when_netsplit_happens(Config) ->
     ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
     block_node(Node5, Peer5),
     try
-        F = fun() -> maps:get(node_down_history, cets:info(Pid1)) end,
+        F = fun() ->
+            History = maps:get(node_down_history, cets:info(Pid1)),
+            lists:map(fun(#{node := Node}) -> Node end, History)
+        end,
         cets_test_wait:wait_until(F, [Node5])
     after
         reconnect_node(Node5, Peer5),
@@ -2645,6 +2847,9 @@ insert_many(Node, Tab, Records) ->
 delete(Node, Tab, Key) ->
     rpc(Node, cets, delete, [Tab, Key]).
 
+delete_request(Node, Tab, Key) ->
+    rpc(Node, cets, delete_request, [Tab, Key]).
+
 delete_many(Node, Tab, Keys) ->
     rpc(Node, cets, delete_many, [Tab, Keys]).
 
@@ -2674,9 +2879,12 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
     end.
 
 %% Set epmd_port for better coverage
-extra_args(ct2) -> ["-epmd_port", "4369"];
-extra_args(ct5) -> ["-kernel", "prevent_overlapping_partitions", "false"];
-extra_args(_) -> "".
+extra_args(ct2) ->
+    ["-epmd_port", "4369"];
+extra_args(X) when X == ct5; X == ct6; X == ct7 ->
+    ["-kernel", "prevent_overlapping_partitions", "false"];
+extra_args(_) ->
+    "".
 
 start_node(Sname) ->
     {ok, Peer, Node} = ?CT_PEER(#{
@@ -2998,6 +3206,19 @@ wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
     end,
     cets_test_wait:wait_until(Cond, true).
 
+wait_for_unpaused(Peer, Pid, PausedByPid) ->
+    Cond = fun() ->
+        {monitors, Info} = rpc(Peer, erlang, process_info, [Pid, monitors]),
+        lists:member({process, PausedByPid}, Info)
+    end,
+    cets_test_wait:wait_until(Cond, false).
+
+wait_for_join_ref_to_match(Pid, JoinRef) ->
+    Cond = fun() ->
+        maps:get(join_ref, cets:info(Pid))
+    end,
+    cets_test_wait:wait_until(Cond, JoinRef).
+
 get_disco_timestamp(Disco, MapName, NodeKey) ->
     Info = cets_discovery:system_info(Disco),
     #{MapName := #{NodeKey := Timestamp}} = Info,
@@ -3015,4 +3236,23 @@ mock_epmd() ->
     meck:expect(erl_epmd, address_please, fun
         ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
         (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
+    end).
+
+mock_pause_on_remote_node_failing() ->
+    meck:new(cets_join, [passthrough, no_link]),
+    meck:expect(cets_join, pause_on_remote_node, fun(_JoinerPid, _AllPids) ->
+        error(mock_pause_on_remote_node_failing)
+    end),
+    ok.
+
+%% Fails if List has duplicates
+assert_unique(List) ->
+    ?assertEqual([], List -- lists:usort(List)),
+    List.
+
+make_process() ->
+    spawn(fun() ->
+        receive
+            stop -> stop
+        end
     end).

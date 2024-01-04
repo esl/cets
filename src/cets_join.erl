@@ -5,6 +5,9 @@
 -export([join/5]).
 -include_lib("kernel/include/logger.hrl").
 
+%% Export for RPC
+-export([pause_on_remote_node/2]).
+
 -ifdef(TEST).
 -export([check_could_reach_each_other/3]).
 -endif.
@@ -12,6 +15,7 @@
 -type lock_key() :: term().
 -type join_ref() :: reference().
 -type server_pid() :: cets:server_pid().
+-type rpc_result() :: {Class :: throw | exit | error, Reason :: term()} | {ok, ok}.
 
 %% Critical events during the joining procedure
 -type checkpoint() ::
@@ -20,14 +24,15 @@
     | before_get_pids
     | before_check_fully_connected
     | before_unpause
-    | {before_send_dump, server_pid()}.
+    | {before_send_dump, server_pid()}
+    | {after_send_dump, server_pid(), Result :: term()}.
 
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
--type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
+-type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
 
 -export_type([join_ref/0]).
 
--ignore_xref([join/5]).
+-ignore_xref([join/5, pause_on_remote_node/2]).
 
 %% Adds a node to a cluster.
 %% Writes from other nodes would wait for join completion.
@@ -100,7 +105,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
 -spec join2(cets_long:log_info(), server_pid(), server_pid(), join_opts()) -> ok.
 join2(Info, LocalPid, RemotePid, JoinOpts) ->
     checkpoint(join_start, JoinOpts),
-    JoinRef = make_ref(),
+    JoinRef = maps:get(join_ref, JoinOpts, make_ref()),
     %% Joining is a symmetrical operation here - both servers exchange information between each other.
     %% We still use LocalPid/RemotePid in names
     %% (they are local and remote pids as passed from the cets_join and from the cets_discovery).
@@ -110,7 +115,7 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     RemPids = get_pids(RemotePid),
     check_pids(Info, LocPids, RemPids, JoinOpts),
     AllPids = LocPids ++ RemPids,
-    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    Paused = pause_servers(AllPids),
     %% Merges data from two partitions together.
     %% Each entry in the table is allowed to be updated by the node that owns
     %% the key only, so merging is easy.
@@ -124,8 +129,8 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         check_fully_connected(Info, LocPids),
         check_fully_connected(Info, RemPids),
         {LocalDump2, RemoteDump2} = maybe_apply_resolver(LocalDump, RemoteDump, ServerOpts),
-        RemF = fun(Pid) -> send_dump(Pid, LocPids, JoinRef, LocalDump2, JoinOpts) end,
-        LocF = fun(Pid) -> send_dump(Pid, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
+        RemF = fun(Pid) -> send_dump(Pid, Paused, LocPids, JoinRef, LocalDump2, JoinOpts) end,
+        LocF = fun(Pid) -> send_dump(Pid, Paused, RemPids, JoinRef, RemoteDump2, JoinOpts) end,
         lists:foreach(LocF, LocPids),
         lists:foreach(RemF, RemPids),
         ok
@@ -135,10 +140,51 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
         lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
     end.
 
-send_dump(Pid, Pids, JoinRef, Dump, JoinOpts) ->
+-spec pause_servers(AllPids :: [pid(), ...]) -> Paused :: [{pid(), cets:pause_monitor()}].
+pause_servers(AllPids) ->
+    %% We should create a pause helper process on each node in the cluster.
+    %% It is to ensure that node that losing a connection with cets_join coordinator
+    %% would not unpause one of the processes too soon
+    %% (because it could start sending remote ops to nodes which are still in the current joining procedure).
+    Paused = [{Pid, cets:pause(Pid)} || Pid <- AllPids],
+    OtherNodes = lists:delete(node(), lists:usort([node(Pid) || Pid <- AllPids])),
+    Results = erpc:multicall(
+        OtherNodes, ?MODULE, pause_on_remote_node, [self(), AllPids], timer:seconds(30)
+    ),
+    assert_all_ok(OtherNodes, Results),
+    Paused.
+
+-spec pause_on_remote_node(pid(), [pid()]) -> ok.
+pause_on_remote_node(JoinerPid, AllPids) ->
+    Self = self(),
+    {Pid, Mon} = spawn_monitor(fun() ->
+        JoinerMon = erlang:monitor(process, JoinerPid),
+        MyNode = node(),
+        %% Ignore pids on the current node
+        %% (because we only interested in internode connections here).
+        %% Catching because we can ignore losing some connections here.
+        _Pauses = [catch cets:pause(Pid) || Pid <- AllPids, node(Pid) =/= MyNode],
+        Self ! {ready, self()},
+        receive
+            {'DOWN', JoinerMon, process, JoinerPid, _Reason} ->
+                %% Exit and release pauses
+                ok
+        end
+    end),
+    receive
+        {'DOWN', Mon, process, Pid, _Reason} ->
+            ok;
+        {ready, Pid} ->
+            ok
+    end.
+
+send_dump(Pid, Paused, Pids, JoinRef, Dump, JoinOpts) ->
+    PauseRef = proplists:get_value(Pid, Paused),
     checkpoint({before_send_dump, Pid}, JoinOpts),
     %% Error reporting would be done by cets_long:call_tracked
-    catch cets:send_dump(Pid, Pids, JoinRef, Dump).
+    Result = catch cets:send_dump(Pid, Pids, JoinRef, PauseRef, Dump),
+    checkpoint({after_send_dump, Pid, Result}, JoinOpts),
+    ok.
 
 remote_or_local_dump(Pid) when node(Pid) =:= node() ->
     {ok, Tab} = cets:table_name(Pid),
@@ -304,6 +350,16 @@ check_same_join_ref(Info, Pids) ->
 pid_to_join_ref(Pid) ->
     #{join_ref := JoinRef} = cets:info(Pid),
     JoinRef.
+
+-spec assert_all_ok(Nodes :: [node()], Results :: [rpc_result()]) -> ok.
+assert_all_ok(Nodes, Results) ->
+    Zip = lists:zip(Nodes, Results),
+    case lists:filter(fun({_Node, Res}) -> Res =/= {ok, ok} end, Zip) of
+        [] ->
+            ok;
+        BadZip ->
+            error({assert_all_ok, BadZip})
+    end.
 
 %% Checkpoints are used for testing
 %% Checkpoints do nothing in production
