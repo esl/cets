@@ -173,6 +173,8 @@ only_for_logger_cases() ->
         run_tracked_logged_check_logger,
         long_call_fails_because_linked_process_dies,
         logs_are_printed_when_join_fails_because_servers_overlap,
+        pause_owner_crashed_is_logged,
+        pause_owner_crashed_is_not_logged_if_reason_is_normal,
         join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
         shutdown_reason_is_not_logged_in_tracked,
@@ -1030,6 +1032,45 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
     assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
 
+pause_owner_crashed_is_logged(Config) ->
+    ct:timetrap({seconds, 6}),
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    Me = self(),
+    PausedByPid = spawn(fun() ->
+        cets:pause(Pid1),
+        Me ! paused,
+        error(oops)
+    end),
+    %% Wait for unpausing before checking logs
+    receive_message(paused),
+    wait_for_unpaused(node(), Pid1, PausedByPid),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := pause_owner_crashed,
+                    reason := {oops, _}
+                }}
+        }
+    ] =
+        cets_test_log:receive_all_logs_from_pid(?FUNCTION_NAME, Pid1).
+
+pause_owner_crashed_is_not_logged_if_reason_is_normal(Config) ->
+    ct:timetrap({seconds, 6}),
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    Me = self(),
+    PausedByPid = spawn(fun() ->
+        cets:pause(Pid1),
+        Me ! paused
+    end),
+    %% Wait for unpausing before checking logs
+    receive_message(paused),
+    wait_for_unpaused(node(), Pid1, PausedByPid),
+    [] = cets_test_log:receive_all_logs_from_pid(?FUNCTION_NAME, Pid1).
+
 atom_error_is_logged_in_tracked(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     LogRef = make_ref(),
@@ -1050,7 +1091,7 @@ atom_error_is_logged_in_tracked(_Config) ->
                 }}
         }
     ] =
-        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+        cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 shutdown_reason_is_not_logged_in_tracked(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
@@ -1064,7 +1105,7 @@ shutdown_reason_is_not_logged_in_tracked(_Config) ->
     receive_message(ready),
     exit(Pid, shutdown),
     wait_for_down(Pid),
-    [] = receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+    [] = cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 %% Complementary to shutdown_reason_is_not_logged_in_tracked
 other_reason_is_logged_in_tracked(_Config) ->
@@ -1089,7 +1130,7 @@ other_reason_is_logged_in_tracked(_Config) ->
                     reason := bad_stuff_happened
                 }}
         }
-    ] = receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+    ] = cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 nested_calls_errors_are_logged_once_with_tuple_reason(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
@@ -1113,7 +1154,7 @@ nested_calls_errors_are_logged_once_with_tuple_reason(_Config) ->
                 }}
         }
     ] =
-        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+        cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 nested_calls_errors_are_logged_once_with_map_reason(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
@@ -1141,7 +1182,7 @@ nested_calls_errors_are_logged_once_with_map_reason(_Config) ->
                 }}
         }
     ] =
-        receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+        cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
 
 send_dump_contains_already_added_servers(Config) ->
     %% Check that even if we have already added server in send_dump, nothing crashes
@@ -3148,32 +3189,6 @@ send_join_start_back_and_wait_for_continue_joining() ->
             end;
         (_) ->
             ok
-    end.
-
-receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
-    ?LOG_ERROR(#{what => ensure_nothing_logged_before, log_ref => LogRef}),
-    receive
-        {log, LogHandlerId, #{
-            msg := {report, #{log_ref := LogRef, what := ensure_nothing_logged_before}}
-        }} ->
-            ok
-    after 5000 ->
-        ct:fail({timeout, logger_is_broken})
-    end,
-    %% Do a new logging call to check that it is the only log message
-    ?LOG_ERROR(#{what => ensure_nothing_logged_after, log_ref => LogRef}),
-    %% We only match messages with the matching log_ref here
-    %% to ignore messages from the other parallel tests
-    receive
-        {log, LogHandlerId, Log = #{msg := {report, Report = #{log_ref := LogRef}}}} ->
-            case Report of
-                #{what := ensure_nothing_logged_after} ->
-                    [];
-                _ ->
-                    [Log | receive_all_logs_with_log_ref(LogHandlerId, LogRef)]
-            end
-    after 5000 ->
-        ct:fail({timeout, receive_all_logs_with_log_ref})
     end.
 
 %% Gathered after Helm update
