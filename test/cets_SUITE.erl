@@ -173,6 +173,8 @@ only_for_logger_cases() ->
         run_tracked_logged_check_logger,
         long_call_fails_because_linked_process_dies,
         logs_are_printed_when_join_fails_because_servers_overlap,
+        pause_owner_crashed_is_logged,
+        pause_owner_crashed_is_not_logged_if_reason_is_normal,
         join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
         shutdown_reason_is_not_logged_in_tracked,
@@ -1029,6 +1031,45 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     %% The counter example for no logging is
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
     assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
+
+pause_owner_crashed_is_logged(Config) ->
+    ct:timetrap({seconds, 6}),
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    Me = self(),
+    PausedByPid = spawn(fun() ->
+        cets:pause(Pid1),
+        Me ! paused,
+        error(oops)
+    end),
+    %% Wait for unpausing before checking logs
+    receive_message(paused),
+    wait_for_unpaused(node(), Pid1, PausedByPid),
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := pause_owner_crashed,
+                    reason := {oops, _}
+                }}
+        }
+    ] =
+        receive_all_logs_from_pid(?FUNCTION_NAME, Pid1).
+
+pause_owner_crashed_is_not_logged_if_reason_is_normal(Config) ->
+    ct:timetrap({seconds, 6}),
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    {ok, Pid1} = start_local(make_name(Config, 1)),
+    Me = self(),
+    PausedByPid = spawn(fun() ->
+        cets:pause(Pid1),
+        Me ! paused
+    end),
+    %% Wait for unpausing before checking logs
+    receive_message(paused),
+    wait_for_unpaused(node(), Pid1, PausedByPid),
+    [] = receive_all_logs_from_pid(?FUNCTION_NAME, Pid1).
 
 atom_error_is_logged_in_tracked(_Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
@@ -3150,7 +3191,7 @@ send_join_start_back_and_wait_for_continue_joining() ->
             ok
     end.
 
-receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
+ensure_logger_is_working(LogHandlerId, LogRef) ->
     ?LOG_ERROR(#{what => ensure_nothing_logged_before, log_ref => LogRef}),
     receive
         {log, LogHandlerId, #{
@@ -3159,9 +3200,15 @@ receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
             ok
     after 5000 ->
         ct:fail({timeout, logger_is_broken})
-    end,
+    end.
+
+receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
+    ensure_logger_is_working(LogHandlerId, LogRef),
     %% Do a new logging call to check that it is the only log message
     ?LOG_ERROR(#{what => ensure_nothing_logged_after, log_ref => LogRef}),
+    receive_all_logs_with_log_ref_loop(LogHandlerId, LogRef).
+
+receive_all_logs_with_log_ref_loop(LogHandlerId, LogRef) ->
     %% We only match messages with the matching log_ref here
     %% to ignore messages from the other parallel tests
     receive
@@ -3170,10 +3217,33 @@ receive_all_logs_with_log_ref(LogHandlerId, LogRef) ->
                 #{what := ensure_nothing_logged_after} ->
                     [];
                 _ ->
-                    [Log | receive_all_logs_with_log_ref(LogHandlerId, LogRef)]
+                    [Log | receive_all_logs_with_log_ref_loop(LogHandlerId, LogRef)]
             end
     after 5000 ->
         ct:fail({timeout, receive_all_logs_with_log_ref})
+    end.
+
+%% Return logged messages so far. Filters by pid.
+receive_all_logs_from_pid(LogHandlerId, Pid) ->
+    LogRef = make_ref(),
+    ensure_logger_is_working(LogHandlerId, LogRef),
+    %% Do a new logging call to check that it is the only log message
+    ?LOG_ERROR(#{what => ensure_nothing_logged_after, log_ref => LogRef}),
+    receive_all_logs_from_pid_loop(LogHandlerId, Pid, LogRef).
+
+receive_all_logs_from_pid_loop(LogHandlerId, Pid, LogRef) ->
+    %% We only match messages with the matching log_ref here
+    %% to ignore messages from the other parallel tests
+    receive
+        {log, LogHandlerId, #{msg := {report, #{log_ref := LogRef}}}} ->
+            %% Finish waiting
+            [];
+        {log, LogHandlerId, Log = #{meta := #{pid := Pid}}} ->
+            [Log | receive_all_logs_from_pid_loop(LogHandlerId, Pid, LogRef)];
+        {log, LogHandlerId, _Log} ->
+            receive_all_logs_from_pid_loop(LogHandlerId, Pid, LogRef)
+    after 5000 ->
+        ct:fail({timeout, receive_all_logs_from_pid})
     end.
 
 %% Gathered after Helm update

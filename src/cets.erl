@@ -528,12 +528,18 @@ handle_send_dump(NewPids, JoinRef, PauseRef, Dump, State) ->
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->
     case lists:member(Mon, Mons) of
         true ->
-            ?LOG_ERROR(#{
-                what => pause_owner_crashed,
-                state => State,
-                paused_by_pid => Pid,
-                reason => Reason
-            }),
+            %% Ignore logging if the process exited normally
+            case Reason of
+                normal ->
+                    ok;
+                _ ->
+                    ?LOG_ERROR(#{
+                        what => pause_owner_crashed,
+                        state => State,
+                        paused_by_pid => Pid,
+                        reason => Reason
+                    })
+            end,
             handle_unpause2(Mon, Mons, State);
         false ->
             handle_down2(Pid, Reason, State)
