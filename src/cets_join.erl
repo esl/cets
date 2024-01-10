@@ -33,15 +33,12 @@
     | before_unpause
     | {before_send_dump, server_pid()}
     | {after_send_dump, server_pid(), Result :: term()}.
-
--type checkpoint_handler() :: fun((checkpoint()) -> ok).
--type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
 %% Critical events during the joining procedure.
 
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
 %% Checkpoint function for debugging.
 
--type join_opts() :: #{checkpoint_handler => checkpoint_handler()}.
+-type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
 %% Joining options.
 
 -export_type([join_ref/0]).
