@@ -1,9 +1,12 @@
 {application, cets, [
     {description, "Clustered Erlang Term Storage"},
-    {vsn, "0.1"},
+    {vsn, git},
     {modules, []},
     {registered, []},
     {applications, [kernel, stdlib]},
-    {env, []}
-    % {mod, {cets_app, []}
+    {env, []},
+    {maintainers, ["ESL"]},
+    {pkg_name, "cets"},
+    {licenses, ["Apache License 2.0"]},
+    {links, [{"GitHub", "https://github.com/esl/cets/"}]}
 ]}.

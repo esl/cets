@@ -17,7 +17,7 @@
 %% The generic result of execution.
 
 -type task_fun() :: fun(() -> task_result()).
-%% User provided function to executre.
+%% User provided function to execute.
 
 %% @doc Spawns a new process to do some memory-intensive task.
 %%
