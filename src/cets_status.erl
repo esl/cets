@@ -1,3 +1,4 @@
+%% @doc Status of all tables.
 -module(cets_status).
 -export([status/1]).
 
@@ -13,9 +14,16 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type tab_nodes_map() :: #{Table :: atom() => Nodes :: ordsets:ordset(node())}.
+%% Mapping from a table name to a node list.
+
 -type node_to_tab_nodes_map() :: #{node() => tab_nodes_map()}.
+%% Mapping from a node name to `tab_nodes_map'.
+
 -type table_name() :: cets:table_name().
+%% Table name (atom).
+
 -type disco_name() :: atom().
+%% Discovery process name (atom).
 
 -type info() :: #{
     %% Nodes that are connected to us and have the CETS disco process started.
@@ -43,6 +51,7 @@
     conflict_nodes := [node()],
     conflict_tables := [table_name()]
 }.
+%% Status information.
 
 -type status_data() :: #{
     this_node := node(),
@@ -52,13 +61,16 @@
     local_table_to_other_nodes_map := tab_nodes_map(),
     node_to_tab_nodes_map := node_to_tab_nodes_map()
 }.
+%% Intermediate status information.
 
+%% @doc Collects and analyses status information.
 -spec status(disco_name()) -> info().
 status(Disco) when is_atom(Disco) ->
     %% Gathering and formatting data is separated to simplify testing/debugging
     Data = gather_data(Disco),
     format_data(Data).
 
+%% @doc Collects status information.
 -spec gather_data(disco_name()) -> status_data().
 gather_data(Disco) ->
     ThisNode = node(),
@@ -77,7 +89,8 @@ gather_data(Disco) ->
         node_to_tab_nodes_map => OtherTabNodes
     }.
 
-%% Formats gathered data.
+%% @doc Formats gathered data.
+%%
 %% Contains pure functions logic.
 -spec format_data(status_data()) -> info().
 format_data(#{

@@ -1,28 +1,46 @@
-%% @doc Node discovery logic
-%% Joins table together when a new node appears
+%% @doc Node discovery logic.
+%%
+%% Joins table together when a new node appears.
 %%
 %% Things that make discovery logic harder:
-%% - A table list is dynamic (but eventually we add all the tables into it)
-%% - Creating Erlang distribution connection is async, but it net_kernel:ping/1 is blocking
-%% - net_kernel:ping/1 could block for unknown number of seconds
-%%   (but net_kernel default timeout is 7 seconds)
+%%
+%% - A table list is dynamic (but eventually we add all the tables into it).
+%%
+%% - Creating Erlang distribution connection is async, but it `net_kernel:ping/1' is blocking.
+%%
+%% - `net_kernel:ping/1' could block for unknown number of seconds
+%%   (but `net_kernel' default timeout is 7 seconds).
+%%
 %% - Resolving nodename could take a lot of time (5 seconds in tests).
 %%   It is unpredictable blocking.
+%%
 %% - join tables should be one by one to avoid OOM.
-%% - Backend:get_nodes/1 could take a long time.
-%% - cets_discovery:get_tables/1, cets_discovery:add_table/2 should be fast.
+%%
+%% - `Backend:get_nodes/1' could take a long time.
+%%
+%% - `cets_discovery:get_tables/1', `cets_discovery:add_table/2' should be fast.
+%%
 %% - The most important net_kernel flags for us to consider are:
-%%   - dist_auto_connect=never
-%%   - connect_all
-%%   - prevent_overlapping_partitions
+%%
+%%   * `dist_auto_connect=never'
+%%
+%%   * `connect_all'
+%%
+%%   * `prevent_overlapping_partitions'
+%%
 %% These flags change the way the discovery logic behaves.
 %% Also the module would not try to connect to the hidden nodes.
 %%
 %% Retry logic considerations:
+%%
 %% - Backend:get_nodes/1 could return an error during startup, so we have to retry fast.
+%%
 %% - There are two periods of operation for this module:
-%%   - startup phase, usually first 5 minutes.
-%%   - regular operation phase, after the startup phase.
+%%
+%%   * startup phase, usually first 5 minutes.
+%%
+%%   * regular operation phase, after the startup phase.
+%%
 %% - We don't need to check for the updated get_nodes too often in the regular operation phase.
 -module(cets_discovery).
 -behaviour(gen_server).
@@ -60,15 +78,22 @@
     behaviour_info/1
 ]).
 
+-export_type([get_nodes_result/0, system_info/0]).
+
 -include_lib("kernel/include/logger.hrl").
 
 -type backend_state() :: term().
--type get_nodes_result() :: {ok, [node()]} | {error, term()}.
--type retry_type() :: initial | after_error | regular.
+%% Backend state.
 
--export_type([get_nodes_result/0, system_info/0]).
+-type get_nodes_result() :: {ok, [node()]} | {error, term()}.
+%% Result of `get_nodes/2' call.
+
+-type retry_type() :: initial | after_error | regular.
+%% Retry logic type.
 
 -type from() :: {pid(), reference()}.
+%% gen_server's caller.
+
 -type join_result() :: #{
     node := node(),
     table := atom(),
@@ -76,6 +101,8 @@
     result => ok | {error, _},
     reason => term()
 }.
+%% Join result information.
+
 -type state() :: #{
     phase := initial | regular,
     results := [join_result()],
@@ -99,21 +126,32 @@
     node_start_timestamps := #{node() => milliseconds()},
     start_time := milliseconds()
 }.
--type milliseconds() :: integer().
+%% The discovery process state data.
 
-%% Backend could define its own options
+-type milliseconds() :: integer().
+%% Number of milliseconds.
+
 -type opts() :: #{name := atom(), _ := _}.
+%% Backend could define its own options.
+
 -type start_result() :: {ok, pid()} | {error, term()}.
+%% Result of `start_link/1'.
+
 -type server() :: pid() | atom().
+%% Discovery server process.
+
 -type system_info() :: map().
+%% Discovery status.
 
 -callback init(map()) -> backend_state().
 -callback get_nodes(backend_state()) -> {get_nodes_result(), backend_state()}.
 
+%% @doc Starts a discovery process.
 -spec start(opts()) -> start_result().
 start(Opts) ->
     start_common(start, Opts).
 
+%% @doc Starts a discovery process with a link.
 -spec start_link(opts()) -> start_result().
 start_link(Opts) ->
     start_common(start_link, Opts).
@@ -128,36 +166,43 @@ start_common(F, Opts) ->
         end,
     apply(gen_server, F, Args).
 
+%% @doc Adds a table to be tracked and joined.
 -spec add_table(server(), cets:table_name()) -> ok.
 add_table(Server, Table) ->
     gen_server:cast(Server, {add_table, Table}).
 
+%% @doc Deletes a table from being tracked or joined.
 -spec delete_table(server(), cets:table_name()) -> ok.
 delete_table(Server, Table) ->
     gen_server:cast(Server, {delete_table, Table}).
 
+%% @doc Gets a list of the tracked tables.
 -spec get_tables(server()) -> {ok, [cets:table_name()]}.
 get_tables(Server) ->
     gen_server:call(Server, get_tables).
 
+%% @doc Gets information for each tracked table.
 -spec info(server()) -> [cets:info()].
 info(Server) ->
     {ok, Tables} = get_tables(Server),
     [cets:info(Tab) || Tab <- Tables].
 
+%% @doc Gets discovery process status.
 -spec system_info(server()) -> system_info().
 system_info(Server) ->
     gen_server:call(Server, system_info).
 
-%% This calls blocks until the initial discovery is done.
-%% It also waits till the data is loaded from the remote nodes.
+%% @doc Blocks until the initial discovery is done.
+%%
+%% This call would also wait till the data is loaded from the remote nodes.
 -spec wait_for_ready(server(), timeout()) -> ok.
 wait_for_ready(Server, Timeout) ->
     F = fun() -> gen_server:call(Server, wait_for_ready, Timeout) end,
     Info = #{task => cets_wait_for_ready},
     cets_long:run_tracked(Info, F).
 
-%% Waits for the current get_nodes call to return.
+%% @doc Waits for the current get_nodes call to return.
+%%
 %% Just returns if there is no gen_nodes call running.
 %% Waits for another get_nodes, if should_retry_get_nodes flag is set.
 %% It is different from wait_for_ready, because it does not wait for
@@ -168,6 +213,7 @@ wait_for_get_nodes(Server, Timeout) ->
     Info = #{task => cets_wait_for_get_nodes},
     cets_long:run_tracked(Info, F).
 
+%% @private
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
     StartTime = erlang:system_time(millisecond),
@@ -206,6 +252,7 @@ init(Opts) ->
     State2 = lists:foldl(fun handle_nodeup/2, State, nodes()),
     {ok, State2}.
 
+%% @private
 -spec handle_call(term(), from(), state()) -> {reply, term(), state()} | {noreply, state()}.
 handle_call(get_tables, _From, State = #{tables := Tables}) ->
     {reply, {ok, Tables}, State};
@@ -221,6 +268,7 @@ handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
 
+%% @private
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast({add_table, Table}, State = #{tables := Tables}) ->
     case lists:member(Table, Tables) of
@@ -243,6 +291,7 @@ handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
+%% @private
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info(check, State) ->
     {noreply, handle_check(State)};
@@ -274,9 +323,11 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
+%% @private
 terminate(_Reason, _State) ->
     ok.
 
+%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

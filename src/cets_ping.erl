@@ -1,3 +1,4 @@
+%% @doc Helper module for pinging remote nodes.
 -module(cets_ping).
 -export([ping/1, ping_pairs/1, pre_connect/1, send_ping_result/3]).
 
@@ -7,6 +8,7 @@
 
 -ignore_xref([pre_connect/1]).
 
+%% @doc Pings a remote node.
 -spec ping(node()) -> pong | pang.
 ping(Node) when is_atom(Node) ->
     case lists:member(Node, nodes()) of
@@ -53,6 +55,7 @@ can_preconnect_from_all_nodes(Node) ->
             not lists:member({ok, pang}, Results)
     end.
 
+%% @private
 -spec pre_connect(node()) -> pong | pang.
 pre_connect(Node) when is_atom(Node) ->
     %% It is important to understand, that initial setup for dist connections
@@ -106,6 +109,7 @@ connect_ping(Node) ->
             pang
     end.
 
+%% @doc Run multiple ping requests from many nodes.
 -spec ping_pairs([{node(), node()}]) -> [{node(), node(), pong | Reason :: term()}].
 ping_pairs(Pairs) ->
     %% We could use rpc:multicall(Nodes, cets_ping, ping, Args).
@@ -151,7 +155,7 @@ get_epmd_port() ->
             4369
     end.
 
-%% Send ping result back to cets_discovery
+%% @doc Sends ping result back to cets_discovery.
 -spec send_ping_result(pid(), node(), pong | pang) -> ok.
 send_ping_result(SendTo, Node, PingResult) ->
     SendTo ! {ping_result, Node, PingResult},

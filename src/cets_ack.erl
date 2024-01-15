@@ -1,4 +1,4 @@
-%% CETS Ack Helper Process
+%% @doc Helper module to keep track of unacked writes.
 %%
 %% Contains a list of processes, that are waiting for writes to finish.
 %% Collects acks from nodes in the cluster.
@@ -28,43 +28,51 @@
 -include_lib("kernel/include/logger.hrl").
 
 -type ack_pid() :: pid().
+%% Pid of the helper process to track unacked writes.
+
 -type server_pid() :: cets:server_pid().
+%% Pid of CETS gen_server.
+
 -type from() :: gen_server:from().
+%% gen_server's caller.
+
 -type state() :: #{
     servers := [server_pid()],
     %% We store tasks directly in the state map
     from() => [server_pid(), ...]
 }.
+%% State of the `gen_server' process.
 
 -export_type([ack_pid/0]).
 
 %% API functions
 
+%% @doc Starts a helper process to track unacked writes.
 -spec start_link(cets:table_name()) -> gen_server:start_ret().
 start_link(Tab) ->
     Name = list_to_atom(atom_to_list(Tab) ++ "_ack"),
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 
-%% Sets a list of servers to be used for newly added tasks
+%% @doc Sets a list of servers to be used for newly added tasks.
 -spec set_servers(ack_pid(), [server_pid()]) -> ok.
 set_servers(AckPid, Servers) ->
     gen_server:cast(AckPid, {set_servers, Servers}),
     ok.
 
-%% Adds a new task to wait for replies
+%% @doc Adds a new task to wait for replies.
 -spec add(ack_pid(), from()) -> ok.
 add(AckPid, From) ->
     AckPid ! {add, From},
     ok.
 
-%% Called by a remote server after an operation is applied.
+%% @doc Called by a remote server after an operation is applied.
 -spec ack(ack_pid(), from(), server_pid()) -> ok.
 ack(AckPid, From, RemotePid) ->
     %% nosuspend is not used, because it would make message sending unreliable
     erlang:send(AckPid, {ack, From, RemotePid}, [noconnect]),
     ok.
 
-%% Calls ack(AckPid, From, RemotePid) for all locally tracked From entries
+%% @doc Calls `ack(AckPid, From, RemotePid)' for all locally tracked From entries.
 -spec send_remote_down(ack_pid(), server_pid()) -> ok.
 send_remote_down(AckPid, RemotePid) ->
     AckPid ! {cets_remote_down, RemotePid},
@@ -72,21 +80,25 @@ send_remote_down(AckPid, RemotePid) ->
 
 %% gen_server callbacks
 
+%% @private
 -spec init(atom()) -> {ok, state()}.
 init(_) ->
     {ok, #{servers => []}}.
 
+%% @private
 -spec handle_call(term(), _From, state()) -> {reply, {error, unexpected_call}, state()}.
 handle_call(Msg, From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Msg, from => From}),
     {reply, {error, unexpected_call}, State}.
 
+%% @private
 handle_cast({set_servers, Servers}, State) ->
     {noreply, State#{servers := Servers}};
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
     {noreply, State}.
 
+%% @private
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({ack, From, RemotePid}, State) ->
     {noreply, handle_updated(From, RemotePid, State)};
@@ -98,9 +110,11 @@ handle_info(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_info, msg => Msg}),
     {noreply, State}.
 
+%% @private
 terminate(_Reason, _State) ->
     ok.
 
+%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

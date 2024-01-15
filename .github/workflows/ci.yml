@@ -64,3 +64,14 @@ jobs:
     - uses: actions/checkout@v3
     - name: Run erlfmt
       run: rebar3 format_check
+
+  docs:
+    runs-on: ubuntu-latest
+
+    container:
+      image: erlang:25
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Run ex_doc
+      run: rebar3 ex_doc

@@ -64,3 +64,11 @@ cluster partitions.
 The simplest `cets_discovery` backend is `cets_discovery_file`, which just reads
 a file with a list of nodes on each line. This file could be populated by an
 external program or by an admin.
+
+# Commands
+
+Before making a new pull request run tests:
+
+```
+rebar3 all
+```
