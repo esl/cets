@@ -1,5 +1,10 @@
 # Cluster ETS
 
+[![](https://github.com/esl/cets/workflows/CI/badge.svg)](https://github.com/esl/cets/actions?query=workflow%3ACI)
+[![Hex Package](http://img.shields.io/hexpm/v/cets.svg)](https://hex.pm/packages/cets)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/cets/)
+[![codecov](https://codecov.io/github/esl/cets/graph/badge.svg?token=R1zXAjO7H7)](https://codecov.io/github/esl/cets)
+
 The project adds replication support for Erlang Term Storage (ETS).
 
 It allows to insert or delete objects into ETS tables across several Erlang nodes.
@@ -11,6 +16,9 @@ Some features are not supported:
 - there is no persistency
 - there are no indexes
 - there are no transactions (there are bulk inserts/deletes instead).
+
+Developed by [Erlang Solutions](https://www.erlang-solutions.com/) to be used in [MongooseIM](https://github.com/esl/MongooseIM/).
+It could be used in other Erlang or Elixir projects.
 
 # Merging logic
 
