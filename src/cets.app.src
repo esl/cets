@@ -6,7 +6,6 @@
     {applications, [kernel, stdlib]},
     {env, []},
     {maintainers, ["ESL"]},
-    {pkg_name, "cets"},
-    {licenses, ["Apache License 2.0"]},
+    {licenses, ["Apache-2.0"]},
     {links, [{"GitHub", "https://github.com/esl/cets/"}]}
 ]}.

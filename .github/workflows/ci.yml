@@ -74,4 +74,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Run ex_doc
-      run: rebar3 docs
+      run: rebar3 ex_doc
