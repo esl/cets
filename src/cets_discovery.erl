@@ -88,7 +88,7 @@
 -type get_nodes_result() :: {ok, [node()]} | {error, term()}.
 %% Result of `get_nodes/2' call.
 
--type retry_type() :: initial | after_error | regular.
+-type retry_type() :: initial | after_error | regular | after_nodedown.
 %% Retry logic type.
 
 -type from() :: {pid(), reference()}.
@@ -455,8 +455,27 @@ choose_retry_type(#{last_get_nodes_result := {error, _}}) ->
     after_error;
 choose_retry_type(#{phase := initial}) ->
     initial;
-choose_retry_type(_) ->
-    regular.
+choose_retry_type(State) ->
+    case last_node_down(State) of
+        false ->
+            regular;
+        Node ->
+            %% Allow to reconnect after a netsplit but not too quick.
+            GracePeriod = retry_type_to_timeout(after_nodedown),
+            case get_downtime(Node, State) < GracePeriod of
+                true ->
+                    after_nodedown;
+                false ->
+                    regular
+            end
+    end.
+
+-spec last_node_down(state()) -> false | node().
+last_node_down(#{nodedown_timestamps := Map}) when map_size(Map) =:= 0 ->
+    false;
+last_node_down(#{nodedown_timestamps := Map}) ->
+    {Node, _TS} = lists:last(lists:keysort(2, maps:to_list(Map))),
+    Node.
 
 %% Returns timeout in milliseconds to retry calling the get_nodes function.
 %% get_nodes is called after add_table without waiting.
@@ -464,7 +483,8 @@ choose_retry_type(_) ->
 -spec retry_type_to_timeout(retry_type()) -> non_neg_integer().
 retry_type_to_timeout(initial) -> timer:seconds(5);
 retry_type_to_timeout(after_error) -> timer:seconds(1);
-retry_type_to_timeout(regular) -> timer:minutes(5).
+retry_type_to_timeout(regular) -> timer:minutes(5);
+retry_type_to_timeout(after_nodedown) -> timer:seconds(30).
 
 -spec cancel_old_timer(state()) -> ok.
 cancel_old_timer(#{timer_ref := OldRef}) when is_reference(OldRef) ->
@@ -620,6 +640,7 @@ calculate_uptime(undefined) ->
 calculate_uptime(StartTime) ->
     time_since(StartTime).
 
+-spec get_downtime(node(), state()) -> milliseconds().
 get_downtime(Node, #{nodedown_timestamps := Map}) ->
     case maps:get(Node, Map, undefined) of
         undefined ->
@@ -662,4 +683,10 @@ handle_receive_start_time(Node, StartTime, State = #{node_start_timestamps := Ma
             %% Restarted node reconnected, this is fine during the rolling updates
             ok
     end,
-    State#{node_start_timestamps := maps:put(Node, StartTime, Map)}.
+    %% We are in the regular phase,
+    %% once we get contact with another disco server.
+    %% It affects the check intervals.
+    State#{
+        node_start_timestamps := maps:put(Node, StartTime, Map),
+        phase := regular
+    }.
