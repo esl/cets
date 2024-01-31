@@ -2654,7 +2654,10 @@ disco_node_down_timestamp_is_remembered(Config) ->
 disco_logs_nodeup_after_downtime(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config, [wait, netsplit]),
-    %% At this point cets_disco should reconnect nodes back automatically.
+    %% At this point cets_disco should reconnect nodes back automatically
+    %% after retry_type_to_timeout(after_nodedown) time.
+    %% We want to speed this up for tests though.
+    Disco ! check,
     %% Receive a nodeup after the disconnect.
     %% This nodeup should contain the downtime_millisecond_duration field
     %% (initial nodeup should not contain this field).
