@@ -1450,7 +1450,7 @@ test_multinode_auto_discovery(Config) ->
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
     %% Disco is async, so we have to wait for the final state
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok = wait_for_ready(Disco, 5000),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
@@ -1471,7 +1471,7 @@ test_disco_add_table(Config) ->
     {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     %% Disco is async, so we have to wait for the final state
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok = wait_for_ready(Disco, 5000),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
@@ -1521,7 +1521,7 @@ test_disco_file_appears(Config) ->
     ),
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
     %% Disco is async, so we have to wait for the final state
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok = wait_for_ready(Disco, 5000),
     [Node2] = other_nodes(Node1, Tab),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco),
@@ -1540,7 +1540,7 @@ test_disco_handles_bad_node(Config) ->
     {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     %% Check that wait_for_ready would not block forever:
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok = wait_for_ready(Disco, 5000),
     %% Check if the node sent pang:
     #{unavailable_nodes := ['badnode@localhost']} = cets_discovery:system_info(Disco),
     %% Check that other nodes are discovered fine
@@ -1556,7 +1556,7 @@ cets_discovery_fun_backend_works(Config) ->
     F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
     {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(Disco, 5000),
+    ok = wait_for_ready(Disco, 5000),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
         cets_discovery:info(Disco).
 
@@ -1676,7 +1676,7 @@ disco_handles_node_up_and_down(Config) ->
     Disco ! {nodeup, BadNode},
     Disco ! {nodedown, BadNode},
     %% Check that wait_for_ready still works
-    ok = cets_discovery:wait_for_ready(Disco, 5000).
+    ok = wait_for_ready(Disco, 5000).
 
 status_available_nodes(Config) ->
     Node1 = node(),
@@ -1713,7 +1713,7 @@ status_unavailable_nodes(Config) ->
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)).
 
 status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
@@ -1733,7 +1733,7 @@ status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)),
     %% Remove badnode from disco
     meck:expect(BackendModule, get_nodes, GetFn2),
@@ -1761,7 +1761,7 @@ status_joined_nodes(Config) ->
     %% Add table using pids (i.e. no need to do RPCs here)
     cets_discovery:add_table(Disco1, Tab),
     cets_discovery:add_table(Disco2, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     cets_test_wait:wait_until(fun() -> maps:get(joined_nodes, cets_status:status(DiscoName)) end, [
         Node1, Node2
     ]).
@@ -1784,7 +1784,7 @@ status_discovery_works(Config) ->
     %% Add table using pids (i.e. no need to do RPCs here)
     cets_discovery:add_table(Disco1, Tab),
     cets_discovery:add_table(Disco2, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{discovery_works := true}, cets_status:status(DiscoName)).
 
 status_discovered_nodes(Config) ->
@@ -1802,7 +1802,7 @@ status_discovered_nodes(Config) ->
     {ok, _} = start(Node2, Tab),
     %% Add table using pids (i.e. no need to do RPCs here)
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{discovered_nodes := [Node1, Node2]}, cets_status:status(DiscoName)).
 
 status_remote_nodes_without_disco(Config) ->
@@ -1818,7 +1818,7 @@ status_remote_nodes_without_disco(Config) ->
     Tab = make_name(Config),
     {ok, _} = start(Node1, Tab),
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     ?assertMatch(#{remote_nodes_without_disco := [Node2]}, cets_status:status(DiscoName)).
 
 status_remote_nodes_with_unknown_tables(Config) ->
@@ -1843,7 +1843,7 @@ status_remote_nodes_with_unknown_tables(Config) ->
     cets_discovery:add_table(Disco1, Tab1),
     cets_discovery:add_table(Disco2, Tab1),
     cets_discovery:add_table(Disco2, Tab2),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     cets_test_wait:wait_until(
         fun() -> maps:get(remote_nodes_with_unknown_tables, cets_status:status(DiscoName)) end, [
             Node2
@@ -1876,7 +1876,7 @@ status_remote_nodes_with_missing_nodes(Config) ->
     cets_discovery:add_table(Disco1, Tab1),
     cets_discovery:add_table(Disco1, Tab2),
     cets_discovery:add_table(Disco2, Tab1),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+    ok = wait_for_ready(DiscoName, 5000),
     cets_test_wait:wait_until(
         fun() -> maps:get(remote_nodes_with_missing_tables, cets_status:status(DiscoName)) end, [
             Node2
@@ -1910,7 +1910,8 @@ status_conflict_nodes(Config) ->
     cets_discovery:add_table(Disco1, Tab2),
     cets_discovery:add_table(Disco2, Tab1),
     cets_discovery:add_table(Disco2, Tab2),
-    ok = cets_discovery:wait_for_ready(DiscoName, 5000),
+
+    ok = wait_for_ready(DiscoName, 5000),
     set_other_servers(Pid22, []),
     cets_test_wait:wait_until(
         fun() -> maps:get(conflict_nodes, cets_status:status(DiscoName)) end, [Node2]
@@ -2444,7 +2445,7 @@ disco_connects_to_unconnected_node(Config) ->
     end,
     {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
     cets_discovery:add_table(Disco, Tab),
-    ok = cets_discovery:wait_for_ready(Disco, 5000).
+    ok = wait_for_ready(Disco, 5000).
 
 %% Joins from a bad (not fully connected) node
 %% Join process should check if nodes could contact each other before allowing to join
@@ -3070,13 +3071,7 @@ setup_two_nodes_and_discovery(Config, Flags) ->
     cets_discovery:add_table(Disco, Tab),
     case lists:member(wait, Flags) of
         true ->
-            try
-                ok = cets_discovery:wait_for_ready(Disco, 5000)
-            catch
-                Class:Reason:Stacktrace ->
-                    ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
-                    erlang:raise(Class, Reason, Stacktrace)
-            end;
+            wait_for_ready(Disco, 5000);
         false ->
             ok
     end,
@@ -3274,3 +3269,12 @@ make_process() ->
             stop -> stop
         end
     end).
+
+wait_for_ready(Disco, Timeout) ->
+    try
+        ok = cets_discovery:wait_for_ready(Disco, Timeout)
+    catch
+        Class:Reason:Stacktrace ->
+            ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
+            erlang:raise(Class, Reason, Stacktrace)
+    end.
