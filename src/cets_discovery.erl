@@ -107,7 +107,7 @@
     phase := initial | regular,
     results := [join_result()],
     nodes := ordsets:ordset(node()),
-    %% The nodes that returned pang, sorted
+    %% The nodes that returned pang or nodedown, sorted
     unavailable_nodes := ordsets:ordset(node()),
     tables := [atom()],
     backend_module := module(),
@@ -308,8 +308,6 @@ handle_info({nodeup, Node}, State) ->
     {noreply, try_joining(State3)};
 handle_info({nodedown, Node}, State) ->
     State2 = handle_nodedown(Node, State),
-    %% Do another check to update unavailable_nodes list
-    self() ! check,
     {noreply, State2};
 handle_info({start_time, Node, StartTime}, State) ->
     {noreply, handle_receive_start_time(Node, StartTime, State)};
@@ -409,6 +407,9 @@ prune_unavailable_nodes_if_needed(State = #{nodes := Nodes, unavailable_nodes :=
     %% Unavailable nodes is a subset of discovered nodes
     State#{unavailable_nodes := ordsets:intersection(Nodes, UnNodes)}.
 
+%% We should not ping nodes that just got disconnected.
+%% Let the disconnected node to connect if it restarts on its own.
+%% Or reconnect to it after a timeout.
 -spec ping_not_connected_nodes([node()]) -> ok.
 ping_not_connected_nodes(Nodes) ->
     Self = self(),
@@ -482,8 +483,9 @@ flush_all_checks() ->
 
 -spec do_join(atom(), node()) -> join_result().
 do_join(Tab, Node) ->
+    %% Possible race condition: Node got disconnected
     LocalPid = whereis(Tab),
-    %% That would trigger autoconnect for the first time
+    %% That could trigger autoconnect if Node is not connected
     case rpc:call(Node, erlang, whereis, [Tab]) of
         Pid when is_pid(Pid), is_pid(LocalPid) ->
             Result = cets_join:join(cets_discovery, #{table => Tab}, LocalPid, Pid),
@@ -563,7 +565,7 @@ handle_system_info(State) ->
     State#{verify_ready => verify_ready(State)}.
 
 -spec handle_nodedown(node(), state()) -> state().
-handle_nodedown(Node, State) ->
+handle_nodedown(Node, State = #{unavailable_nodes := UnNodes}) ->
     State2 = remember_nodedown_timestamp(Node, State),
     {NodeUpTime, State3} = remove_nodeup_timestamp(Node, State2),
     ?LOG_WARNING(
@@ -574,7 +576,8 @@ handle_nodedown(Node, State) ->
             time_since_startup_in_milliseconds => time_since_startup_in_milliseconds(State)
         })
     ),
-    State3.
+    State4 = State3#{unavailable_nodes := ordsets:add_element(Node, UnNodes)},
+    trigger_verify_ready(State4).
 
 -spec handle_nodeup(node(), state()) -> state().
 handle_nodeup(Node, State) ->
