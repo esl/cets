@@ -216,7 +216,7 @@ wait_for_get_nodes(Server, Timeout) ->
 %% @private
 -spec init(term()) -> {ok, state()}.
 init(Opts) ->
-    StartTime = erlang:system_time(millisecond),
+    StartTime = get_time(),
     %% Sends nodeup / nodedown
     ok = net_kernel:monitor_nodes(true),
     Mod = maps:get(backend_module, Opts, cets_discovery_file),
@@ -618,13 +618,13 @@ handle_nodeup(Node, State) ->
 
 -spec remember_nodeup_timestamp(node(), state()) -> state().
 remember_nodeup_timestamp(Node, State = #{nodeup_timestamps := Map}) ->
-    Time = erlang:system_time(millisecond),
+    Time = get_time(),
     Map2 = Map#{Node => Time},
     State#{nodeup_timestamps := Map2}.
 
 -spec remember_nodedown_timestamp(node(), state()) -> state().
 remember_nodedown_timestamp(Node, State = #{nodedown_timestamps := Map}) ->
-    Time = erlang:system_time(millisecond),
+    Time = get_time(),
     Map2 = Map#{Node => Time},
     State#{nodedown_timestamps := Map2}.
 
@@ -640,7 +640,7 @@ calculate_uptime(undefined) ->
 calculate_uptime(StartTime) ->
     time_since(StartTime).
 
--spec get_downtime(node(), state()) -> milliseconds().
+-spec get_downtime(node(), state()) -> milliseconds() | undefined.
 get_downtime(Node, #{nodedown_timestamps := Map}) ->
     case maps:get(Node, Map, undefined) of
         undefined ->
@@ -657,8 +657,15 @@ set_defined(Key, Value, Map) ->
 time_since_startup_in_milliseconds(#{start_time := StartTime}) ->
     time_since(StartTime).
 
+-spec time_since(integer()) -> integer().
 time_since(StartTime) ->
-    erlang:system_time(millisecond) - StartTime.
+    %% Dialyzer thinks integer() - integer() could be float.
+    %% Do round to avoid the warning.
+    round(get_time() - StartTime).
+
+-spec get_time() -> milliseconds().
+get_time() ->
+    erlang:system_time(millisecond).
 
 send_start_time_to(Node, #{start_time := StartTime}) ->
     case erlang:process_info(self(), registered_name) of
