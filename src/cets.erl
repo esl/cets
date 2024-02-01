@@ -200,7 +200,16 @@
 }.
 %% Status information returned `info/1'.
 
--type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
+-type handle_down_fun() :: fun(
+    (
+        #{
+            remote_pid := server_pid(),
+            remote_pid := node(),
+            table := table_name(),
+            is_leader := boolean()
+        }
+    ) -> ok
+).
 %% Handler function which is called when the remote node goes down.
 
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
@@ -896,10 +905,17 @@ handle_get_info(
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
-call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
+call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts, is_leader := IsLeader}) ->
     case Opts of
         #{handle_down := F} ->
-            FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
+            FF = fun() ->
+                F(#{
+                    remote_node => node(RemotePid),
+                    remote_pid => RemotePid,
+                    table => Tab,
+                    is_leader => IsLeader
+                })
+            end,
             Info = #{
                 task => call_user_handle_down,
                 table => Tab,
