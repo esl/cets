@@ -1718,8 +1718,12 @@ status_unavailable_nodes(Config) ->
 
 status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
     Node1 = node(),
+    Self = self(),
     GetFn1 = fun(State) -> {{ok, [Node1, 'badnode@localhost']}, State} end,
-    GetFn2 = fun(State) -> {{ok, [Node1]}, State} end,
+    GetFn2 = fun(State) ->
+        Self ! get_fn2_called,
+        {{ok, [Node1]}, State}
+    end,
     %% Setup meck
     BackendModule = make_name(Config, disco_backend),
     meck:new(BackendModule, [non_strict]),
@@ -1739,6 +1743,7 @@ status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
     meck:expect(BackendModule, get_nodes, GetFn2),
     %% Force check.
     Disco ! check,
+    receive_message(get_fn2_called),
     %% The unavailable_nodes list is updated
     CondF = fun() -> maps:get(unavailable_nodes, cets_status:status(DiscoName)) end,
     cets_test_wait:wait_until(CondF, []).
