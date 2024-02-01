@@ -656,9 +656,12 @@ handle_down2(RemotePid, Reason, State = #{other_servers := Servers, ack_pid := A
     case lists:member(RemotePid, Servers) of
         true ->
             cets_ack:send_remote_down(AckPid, RemotePid),
-            call_user_handle_down(RemotePid, State),
             Servers2 = lists:delete(RemotePid, Servers),
-            update_node_down_history(RemotePid, Reason, set_other_servers(Servers2, State));
+            State3 = update_node_down_history(
+                RemotePid, Reason, set_other_servers(Servers2, State)
+            ),
+            call_user_handle_down(RemotePid, State3),
+            State3;
         false ->
             %% This should not happen
             ?LOG_ERROR(#{

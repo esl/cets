@@ -119,6 +119,7 @@ cases() ->
         get_nodes_request,
         test_locally,
         handle_down_is_called,
+        handle_down_gets_correct_leader_arg_when_leader_goes_down,
         events_are_applied_in_the_correct_order_after_unpause,
         pause_multiple_times,
         unpause_twice,
@@ -2028,6 +2029,18 @@ handle_down_is_called(Config) ->
         down_called -> ok
     after 5000 -> ct:fail(timeout)
     end.
+
+handle_down_gets_correct_leader_arg_when_leader_goes_down(Config) ->
+    Parent = self(),
+    DownFn = fun(#{is_leader := IsLeader}) ->
+        Parent ! {is_leader_arg, IsLeader}
+    end,
+    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_down => DownFn}),
+    {ok, Pid2} = start_local(make_name(Config, 2), #{handle_down => DownFn}),
+    ok = cets_join:join(lock_name(Config), #{table => [d1, d2]}, Pid1, Pid2),
+    Leader = cets:get_leader(Pid1),
+    exit(Leader, oops),
+    ?assertEqual(true, receive_message_with_arg(is_leader_arg)).
 
 events_are_applied_in_the_correct_order_after_unpause(Config) ->
     T = make_name(Config),
