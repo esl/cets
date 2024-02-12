@@ -204,7 +204,7 @@
     (
         #{
             remote_pid := server_pid(),
-            remote_pid := node(),
+            remote_node := node(),
             table := table_name(),
             is_leader := boolean()
         }
@@ -913,8 +913,8 @@ call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts, is_leader := IsLead
         #{handle_down := F} ->
             FF = fun() ->
                 F(#{
-                    remote_node => node(RemotePid),
                     remote_pid => RemotePid,
+                    remote_node => node(RemotePid),
                     table => Tab,
                     is_leader => IsLeader
                 })
