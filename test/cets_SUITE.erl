@@ -101,6 +101,8 @@ cases() ->
         test_disco_add_two_tables,
         disco_retried_if_get_nodes_fail,
         disco_uses_regular_retry_interval_in_the_regular_phase,
+        disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down,
+        disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down,
         disco_handles_node_up_and_down,
         status_available_nodes,
         status_available_nodes_do_not_contain_nodes_with_stopped_disco,
@@ -1643,6 +1645,27 @@ disco_retried_if_get_nodes_fail(Config) ->
     ok.
 
 disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
+    #{disco := Disco} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
+    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
+
+%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase, but has nodedown
+disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down(Config) ->
+    SysInfo = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
+    #{disco := Disco, node2 := Node2} = SysInfo,
+    Disco ! {nodedown, Node2},
+    #{phase := regular, retry_type := after_nodedown} = cets_discovery:system_info(Disco).
+
+%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down, but we simulate long downtime
+disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down(Config) ->
+    #{disco := Disco, node2 := Node2} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(
+        Config
+    ),
+    Disco ! {nodedown, Node2},
+    TestTimestamp = erlang:system_time(millisecond) - timer:seconds(1000),
+    set_nodedown_timestamp(Disco, Node2, TestTimestamp),
+    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
+
+generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
     Node1 = node(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
     Tab = make_name(Config),
@@ -1655,7 +1678,7 @@ disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
     cets_test_wait:wait_until(
         fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end, regular
     ),
-    #{phase := regular} = cets_discovery:system_info(Disco).
+    #{disco => Disco, node2 => Node2}.
 
 disco_handles_node_up_and_down(Config) ->
     BadNode = 'badnode@localhost',
@@ -3296,3 +3319,9 @@ wait_for_ready(Disco, Timeout) ->
             ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
             erlang:raise(Class, Reason, Stacktrace)
     end.
+
+%% Overwrites nodedown timestamp for the Node in the discovery server state
+set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
+    sys:replace_state(Disco, fun(#{nodedown_timestamps := Map} = State) ->
+        State#{nodedown_timestamps := maps:put(Node, NewTimestamp, Map)}
+    end).

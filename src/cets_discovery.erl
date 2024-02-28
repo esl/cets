@@ -582,7 +582,7 @@ has_join_result_for(Node, Table, #{results := Results}) ->
 
 -spec handle_system_info(state()) -> system_info().
 handle_system_info(State) ->
-    State#{verify_ready => verify_ready(State)}.
+    State#{verify_ready => verify_ready(State), retry_type => choose_retry_type(State)}.
 
 -spec handle_nodedown(node(), state()) -> state().
 handle_nodedown(Node, State = #{unavailable_nodes := UnNodes}) ->
