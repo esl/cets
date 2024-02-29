@@ -231,6 +231,7 @@ cets_seq_no_log_cases() ->
     ].
 
 init_per_suite(Config) ->
+    init_cleanup_table(),
     Names = [ct2, ct3, ct4, ct5, ct6, ct7],
     {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
     [
@@ -264,6 +265,7 @@ init_per_testcase_generic(Name, Config) ->
     [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
+    wait_for_cleanup(),
     ok.
 
 %% Modules that use a multiline LOG_ macro
@@ -1451,7 +1453,7 @@ test_multinode_auto_discovery(Config) ->
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco.txt"),
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start(#{tables => [Tab], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [Tab], disco_file => FileName}),
     %% Disco is async, so we have to wait for the final state
     ok = wait_for_ready(Disco, 5000),
     [Node2] = other_nodes(Node1, Tab),
@@ -1471,7 +1473,7 @@ test_disco_add_table(Config) ->
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco.txt"),
     ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     %% Disco is async, so we have to wait for the final state
     ok = wait_for_ready(Disco, 5000),
@@ -1482,7 +1484,9 @@ test_disco_add_table(Config) ->
 
 test_disco_delete_table(Config) ->
     F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     Tab = make_name(Config),
     cets_discovery:add_table(Disco, Tab),
     #{tables := [Tab]} = cets_discovery:system_info(Disco),
@@ -1491,14 +1495,18 @@ test_disco_delete_table(Config) ->
 
 test_disco_delete_unknown_table(Config) ->
     F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     Tab = make_name(Config),
     cets_discovery:delete_table(Disco, Tab),
     #{tables := []} = cets_discovery:system_info(Disco).
 
 test_disco_delete_table_twice(Config) ->
     F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     Tab = make_name(Config),
     cets_discovery:add_table(Disco, Tab),
     #{tables := [Tab]} = cets_discovery:system_info(Disco),
@@ -1516,7 +1524,7 @@ test_disco_file_appears(Config) ->
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco3.txt"),
     file:delete(FileName),
-    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     cets_test_wait:wait_until(
         fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
@@ -1540,7 +1548,7 @@ test_disco_handles_bad_node(Config) ->
     ct:pal("Dir ~p", [Dir]),
     FileName = filename:join(Dir, "disco_badnode.txt"),
     ok = file:write_file(FileName, io_lib:format("badnode@localhost~n~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
     cets_discovery:add_table(Disco, Tab),
     %% Check that wait_for_ready would not block forever:
     ok = wait_for_ready(Disco, 5000),
@@ -1557,7 +1565,9 @@ cets_discovery_fun_backend_works(Config) ->
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Node2, Tab),
     F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     cets_discovery:add_table(Disco, Tab),
     ok = wait_for_ready(Disco, 5000),
     [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
@@ -1566,7 +1576,7 @@ cets_discovery_fun_backend_works(Config) ->
 test_disco_add_table_twice(Config) ->
     Dir = proplists:get_value(priv_dir, Config),
     FileName = filename:join(Dir, "disco.txt"),
-    {ok, Disco} = cets_discovery:start(#{tables => [], disco_file => FileName}),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
     Tab = make_name(Config),
     {ok, _Pid} = start_local(Tab),
     cets_discovery:add_table(Disco, Tab),
@@ -1593,7 +1603,9 @@ test_disco_add_two_tables(Config) ->
             Me ! waited_for_sent_both,
             {{ok, [Node1, Node2]}, State#{waited => true}}
     end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     %% Add two tables async
     cets_discovery:add_table(Disco, Tab1),
     %% After the first table, Disco would get blocked in get_nodes function (see wait_till_test_stage in F above)
@@ -1636,7 +1648,9 @@ disco_retried_if_get_nodes_fail(Config) ->
     F = fun(State) ->
         {{error, simulate_error}, State}
     end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     cets_discovery:add_table(Disco, Tab),
     cets_test_wait:wait_until(
         fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
@@ -1672,7 +1686,9 @@ generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
     {ok, _} = start(Node1, Tab),
     {ok, _} = start(Node2, Tab),
     F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     Disco ! enter_regular_phase,
     cets_discovery:add_table(Disco, Tab),
     cets_test_wait:wait_until(
@@ -1690,7 +1706,9 @@ disco_handles_node_up_and_down(Config) ->
     F = fun(State) ->
         {{ok, [Node1, Node2, BadNode]}, State}
     end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     cets_discovery:add_table(Disco, Tab),
     %% get_nodes call is async, so wait for it
     cets_test_wait:wait_until(
@@ -1951,7 +1969,9 @@ status_conflict_nodes(Config) ->
 
 disco_wait_for_get_nodes_works(_Config) ->
     F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     ok = cets_discovery:wait_for_get_nodes(Disco, 5000).
 
 disco_wait_for_get_nodes_blocks_and_returns(Config) ->
@@ -1962,7 +1982,9 @@ disco_wait_for_get_nodes_blocks_and_returns(Config) ->
         wait_for_down(SignallingPid),
         {{ok, []}, State}
     end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     cets_discovery:add_table(Disco, Tab),
     %% Enter into a blocking get_nodes function
     Disco ! check,
@@ -1994,7 +2016,7 @@ disco_wait_for_get_nodes_when_get_nodes_needs_to_be_retried(Config) ->
             wait_for_down(SignallingPid2),
             {{ok, []}, State#{step => 2}}
     end,
-    {ok, Disco} = cets_discovery:start(#{
+    {ok, Disco} = cets_discovery:start_link(#{
         backend_module => cets_discovery_fun, get_nodes_fn => F, step => 1
     }),
     cets_discovery:add_table(Disco, Tab),
@@ -2484,7 +2506,9 @@ disco_connects_to_unconnected_node(Config) ->
     F = fun(State) ->
         {{ok, [Node1, Node5]}, State}
     end,
-    {ok, Disco} = cets_discovery:start(#{backend_module => cets_discovery_fun, get_nodes_fn => F}),
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     cets_discovery:add_table(Disco, Tab),
     ok = wait_for_ready(Disco, 5000).
 
@@ -2748,9 +2772,9 @@ disco_logs_node_reconnects_after_downtime(Config) ->
 disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
-    #{disco := Disco, node1 := Node1, node2 := Node2, peer2 := Peer2} = Setup,
+    #{disco := Disco, node2 := Node2} = Setup,
     OldTimestamp = get_disco_timestamp(Disco, nodeup_timestamps, Node2),
-    disconnect_node(Peer2, Node1),
+    disconnect_node_by_name(Config, ct2),
     wait_for_disco_timestamp_to_be_updated(Disco, nodeup_timestamps, Node2, OldTimestamp).
 
 disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
@@ -2892,15 +2916,30 @@ start_local(Name, Opts) ->
 
 schedule_cleanup(Pid) ->
     Me = self(),
-    proc_lib:spawn(fun() ->
+    Cleaner = proc_lib:spawn(fun() ->
         Ref = erlang:monitor(process, Me),
         receive
             {'DOWN', Ref, process, Me, _} ->
                 %% We do an RPC call, because erlang distribution
                 %% could not be always reliable (because we test netsplits)
-                rpc(node_to_peer(node(Pid)), cets, stop, [Pid])
+                rpc(node_to_peer(node(Pid)), cets, stop, [Pid]),
+                ets:delete_object(cleanup_table, {Me, self()})
         end
+    end),
+    ets:insert(cleanup_table, {Me, Cleaner}).
+
+init_cleanup_table() ->
+    spawn(fun() ->
+        ets:new(cleanup_table, [named_table, public, bag]),
+        timer:sleep(infinity)
     end).
+
+%% schedule_cleanup is async, so this function is waiting for it to finish
+wait_for_cleanup() ->
+    [
+        wait_for_down(Cleaner)
+     || {Owner, Cleaner} <- ets:tab2list(cleanup_table), not is_process_alive(Owner)
+    ].
 
 start(Node, Tab) ->
     catch rpc(Node, cets, stop, [Tab]),
@@ -2979,7 +3018,7 @@ start_node(Sname) ->
         name => Sname, connection => standard_io, args => extra_args(Sname)
     }),
     %% Register so we can find Peer process later in code
-    register(node_to_peer(Node), Peer),
+    register(node_to_peer_name(Node), Peer),
     %% Keep nodes running after init_per_suite is finished
     unlink(Peer),
     %% Do RPC using alternative connection method
@@ -2992,12 +3031,15 @@ node_to_peer(Node) when Node =:= node() ->
     %% There is no peer for the local CT node
     Node;
 node_to_peer(Node) when is_atom(Node) ->
-    case whereis(list_to_atom(atom_to_list(Node) ++ "_peer")) of
+    case whereis(node_to_peer_name(Node)) of
         Pid when is_pid(Pid) ->
             Pid;
         undefined ->
             ct:fail({node_to_peer_failed, Node})
     end.
+
+node_to_peer_name(Node) ->
+    list_to_atom(atom_to_list(Node) ++ "_peer").
 
 receive_message(M) ->
     receive
@@ -3092,13 +3134,11 @@ setup_two_nodes_and_discovery(Config) ->
 %% - disco2 - start discovery on Node2
 %% - wait - call wait_for_ready/2
 setup_two_nodes_and_discovery(Config, Flags) ->
-    ok = net_kernel:monitor_nodes(true),
     Me = self(),
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    disconnect_node(Peer2, Node1),
-    receive_message({nodedown, Node2}),
+    disconnect_node_by_name(Config, ct2),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Peer2, Tab),
@@ -3136,7 +3176,7 @@ setup_two_nodes_and_discovery(Config, Flags) ->
     case lists:member(netsplit, Flags) of
         true ->
             %% Simulate a loss of connection between nodes
-            disconnect_node(Peer2, Node1);
+            disconnect_node_by_name(Config, ct2);
         false ->
             ok
     end,
@@ -3209,6 +3249,17 @@ reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
 
 disconnect_node(RPCNode, DisconnectNode) ->
     rpc(RPCNode, erlang, disconnect_node, [DisconnectNode]).
+
+disconnect_node_by_name(Config, Id) ->
+    Peer = maps:get(Id, proplists:get_value(peers, Config)),
+    Node = maps:get(Id, proplists:get_value(nodes, Config)),
+    %% We could need to retry to disconnect, if the local node is currently trying to establish a connection
+    %% with Node2 (could be triggered by the previous tests)
+    F = fun() ->
+        disconnect_node(Peer, node()),
+        lists:member(Node, nodes())
+    end,
+    cets_test_wait:wait_until(F, false).
 
 not_leader(Leader, Other, Leader) ->
     Other;
