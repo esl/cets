@@ -328,7 +328,7 @@ insert_new_works_when_leader_is_back(Config) ->
     Leader = cets:get_leader(Pid1),
     NotLeader = not_leader(Pid1, Pid2, Leader),
     cets:set_leader(Leader, false),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         timer:sleep(100),
         cets:set_leader(Leader, true)
     end),
@@ -343,7 +343,7 @@ insert_new_when_new_leader_has_joined(Config) ->
     %% Pause insert into the first segment
     Leader = cets:get_leader(Pid1),
     PauseMon = cets:pause(Leader),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         timer:sleep(100),
         ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
         cets:unpause(Leader, PauseMon)
@@ -365,7 +365,7 @@ insert_new_when_new_leader_has_joined_duplicate(Config) ->
     %% Pause insert into the first segment
     Leader = cets:get_leader(Pid1),
     PauseMon = cets:pause(Leader),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         timer:sleep(100),
         ok = cets_join:join(insert_new_lock5, #{}, Pid1, Pid3),
         cets:unpause(Leader, PauseMon)
@@ -411,7 +411,7 @@ insert_new_is_retried_when_leader_is_reelected(Config) ->
     NotLeader = not_leader(Pid1, Pid2, Leader),
     %% Ask process to reject all the leader operations
     cets:set_leader(Leader, false),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         wait_till_test_stage(Leader, detected),
         %% Fix the leader, so it can process our insert_new call
         cets:set_leader(Leader, true)
@@ -440,7 +440,7 @@ insert_new_is_retried_when_leader_is_reelected(Config) ->
 insert_new_fails_if_the_leader_dies(Config) ->
     #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
     cets:pause(Pid2),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         timer:sleep(100),
         exit(Pid2, kill)
     end),
@@ -489,14 +489,14 @@ insert_overwrites_data_inconsistently(Config) ->
     Me = self(),
     #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} =
         given_two_joined_tables(Config),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid1, fun(State) ->
             Me ! replacing_state1,
             receive_message(continue_test),
             State
         end)
     end),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid2, fun(State) ->
             Me ! replacing_state2,
             receive_message(continue_test),
@@ -506,11 +506,11 @@ insert_overwrites_data_inconsistently(Config) ->
     receive_message(replacing_state1),
     receive_message(replacing_state2),
     %% Insert at the same time
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets:insert(Tab1, {a, 1}),
         Me ! inserted1
     end),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets:insert(Tab2, {a, 2}),
         Me ! inserted2
     end),
@@ -529,14 +529,14 @@ insert_new_does_not_overwrite_data(Config) ->
     Me = self(),
     #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
     Leader = cets:get_leader(Pid1),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid1, fun(State) ->
             Me ! replacing_state1,
             receive_message(continue_test),
             State
         end)
     end),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid2, fun(State) ->
             Me ! replacing_state2,
             receive_message(continue_test),
@@ -546,12 +546,12 @@ insert_new_does_not_overwrite_data(Config) ->
     receive_message(replacing_state1),
     receive_message(replacing_state2),
     %% Insert at the same time
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         true = cets:insert_new(Tab1, {a, 1}),
         Me ! inserted1
     end),
     wait_till_message_queue_length(Leader, 1),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         false = cets:insert_new(Tab2, {a, 2}),
         Me ! inserted2
     end),
@@ -572,14 +572,14 @@ insert_serial_overwrites_data_consistently(Config) ->
     Me = self(),
     #{pid1 := Pid1, pid2 := Pid2, tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
     Leader = cets:get_leader(Pid1),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid1, fun(State) ->
             Me ! replacing_state1,
             receive_message(continue_test),
             State
         end)
     end),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         sys:replace_state(Pid2, fun(State) ->
             Me ! replacing_state2,
             receive_message(continue_test),
@@ -589,7 +589,7 @@ insert_serial_overwrites_data_consistently(Config) ->
     receive_message(replacing_state1),
     receive_message(replacing_state2),
     %% Insert at the same time
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets:insert_serial(Tab1, {a, 1}),
         Me ! inserted1
     end),
@@ -597,7 +597,7 @@ insert_serial_overwrites_data_consistently(Config) ->
     %% (just to get a predictable value. The value would be still
     %%  consistent in case first insert comes after the second).
     wait_till_message_queue_length(Leader, 1),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets:insert_serial(Tab2, {a, 2}),
         Me ! inserted2
     end),
@@ -617,7 +617,7 @@ insert_serial_works_when_leader_is_back(Config) ->
     Leader = cets:get_leader(Pid1),
     NotLeader = not_leader(Pid1, Pid2, Leader),
     cets:set_leader(Leader, false),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         timer:sleep(100),
         cets:set_leader(Leader, true)
     end),
@@ -634,7 +634,7 @@ insert_serial_blocks_when_leader_is_not_back(Config) ->
     Leader = cets:get_leader(Pid1),
     NotLeader = not_leader(Pid1, Pid2, Leader),
     cets:set_leader(Leader, false),
-    InserterPid = spawn(fun() ->
+    InserterPid = proc_lib:spawn(fun() ->
         %% Will block indefinetely, because we set is_leader flag manually.
         ok = cets:insert_serial(NotLeader, {alice, 32})
     end),
@@ -991,12 +991,12 @@ join_retried_if_lock_is_busy(Config) ->
         (_) -> ok
     end,
     %% Get the lock in a separate process
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
     end),
     receive_message(join_start),
     %% We actually would not return from cets_join:join unless we get the lock
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
     end),
     receive_message(before_retry).
@@ -1014,12 +1014,12 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     F1 = send_join_start_back_and_wait_for_continue_joining(),
     F2 = fun(_) -> ok end,
     %% Get the lock in a separate process
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F1}),
         Me ! first_join_returns
     end),
     JoinPid = receive_message_with_arg(join_start),
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F2}),
         Me ! second_join_returns
     end),
@@ -1040,7 +1040,7 @@ pause_owner_crashed_is_logged(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     {ok, Pid1} = start_local(make_name(Config, 1)),
     Me = self(),
-    PausedByPid = spawn(fun() ->
+    PausedByPid = proc_lib:spawn(fun() ->
         cets:pause(Pid1),
         Me ! paused,
         error(oops)
@@ -1065,7 +1065,7 @@ pause_owner_crashed_is_not_logged_if_reason_is_normal(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     {ok, Pid1} = start_local(make_name(Config, 1)),
     Me = self(),
-    PausedByPid = spawn(fun() ->
+    PausedByPid = proc_lib:spawn(fun() ->
         cets:pause(Pid1),
         Me ! paused
     end),
@@ -1104,7 +1104,7 @@ shutdown_reason_is_not_logged_in_tracked(_Config) ->
         Me ! ready,
         timer:sleep(infinity)
     end,
-    Pid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    Pid = proc_lib:spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
     receive_message(ready),
     exit(Pid, shutdown),
     wait_for_down(Pid),
@@ -1119,7 +1119,7 @@ other_reason_is_logged_in_tracked(_Config) ->
         Me ! ready,
         timer:sleep(infinity)
     end,
-    Pid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    Pid = proc_lib:spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
     receive_message(ready),
     exit(Pid, bad_stuff_happened),
     wait_for_down(Pid),
@@ -1259,7 +1259,7 @@ pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
     JoinPid = make_process(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
     AllPids = [rpc(Node2, ?MODULE, make_process, [])],
-    TestPid = spawn(fun() ->
+    TestPid = proc_lib:spawn(fun() ->
         %% Would block
         cets_join:pause_on_remote_node(JoinPid, AllPids)
     end),
@@ -2146,7 +2146,7 @@ ack_process_handles_unknown_remote_server(Config) ->
     sys:suspend(Pid2),
     #{ack_pid := AckPid} = cets:info(Pid1),
     [Pid2] = cets:other_pids(Pid1),
-    RandomPid = spawn(fun() -> ok end),
+    RandomPid = proc_lib:spawn(fun() -> ok end),
     %% Request returns immediately,
     %% we actually need to send a ping to ensure it has been processed locally
     R = cets:insert_request(Pid1, {1}),
@@ -2299,7 +2299,7 @@ check_could_reach_each_other_fails(_Config) ->
 
 unknown_down_message_is_ignored(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
-    RandPid = spawn(fun() -> ok end),
+    RandPid = proc_lib:spawn(fun() -> ok end),
     Pid ! {'DOWN', make_ref(), process, RandPid, oops},
     still_works(Pid).
 
@@ -2390,10 +2390,10 @@ long_call_fails_because_linked_process_dies(_Config) ->
         Me ! task_started,
         timer:sleep(infinity)
     end,
-    RunPid = spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
+    RunPid = proc_lib:spawn(fun() -> cets_long:run_tracked(#{log_ref => LogRef}, F) end),
     %% To avoid race conditions
     receive_message(task_started),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         link(RunPid),
         error(sim_error_in_linked_process)
     end),
@@ -2892,11 +2892,13 @@ start_local(Name, Opts) ->
 
 schedule_cleanup(Pid) ->
     Me = self(),
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         Ref = erlang:monitor(process, Me),
         receive
             {'DOWN', Ref, process, Me, _} ->
-                cets:stop(Pid)
+                %% We do an RPC call, because erlang distribution
+                %% could not be always reliable (because we test netsplits)
+                rpc(node_to_peer(node(Pid)), cets, stop, [Pid])
         end
     end).
 
@@ -2976,11 +2978,26 @@ start_node(Sname) ->
     {ok, Peer, Node} = ?CT_PEER(#{
         name => Sname, connection => standard_io, args => extra_args(Sname)
     }),
+    %% Register so we can find Peer process later in code
+    register(node_to_peer(Node), Peer),
     %% Keep nodes running after init_per_suite is finished
     unlink(Peer),
     %% Do RPC using alternative connection method
     ok = peer:call(Peer, code, add_paths, [code:get_path()]),
     {Node, Peer}.
+
+%% Returns Peer or Node name which could be used to do RPC-s reliably
+%% (regardless if Erlang Distribution works or not)
+node_to_peer(Node) when Node =:= node() ->
+    %% There is no peer for the local CT node
+    Node;
+node_to_peer(Node) when is_atom(Node) ->
+    case whereis(list_to_atom(atom_to_list(Node) ++ "_peer")) of
+        Pid when is_pid(Pid) ->
+            Pid;
+        undefined ->
+            ct:fail({node_to_peer_failed, Node})
+    end.
 
 receive_message(M) ->
     receive
@@ -3279,7 +3296,7 @@ get_disco_timestamp(Disco, MapName, NodeKey) ->
     Timestamp.
 
 make_signalling_process() ->
-    spawn_link(fun() ->
+    proc_lib:spawn_link(fun() ->
         receive
             stop -> ok
         end
@@ -3305,7 +3322,7 @@ assert_unique(List) ->
     List.
 
 make_process() ->
-    spawn(fun() ->
+    proc_lib:spawn(fun() ->
         receive
             stop -> stop
         end

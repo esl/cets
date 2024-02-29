@@ -658,10 +658,8 @@ time_since_startup_in_milliseconds(#{start_time := StartTime}) ->
     time_since(StartTime).
 
 -spec time_since(integer()) -> integer().
-time_since(StartTime) ->
-    %% Dialyzer thinks integer() - integer() could be float.
-    %% Do round to avoid the warning.
-    round(get_time() - StartTime).
+time_since(StartTime) when is_integer(StartTime) ->
+    get_time() - StartTime.
 
 -spec get_time() -> milliseconds().
 get_time() ->
