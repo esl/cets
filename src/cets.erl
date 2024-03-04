@@ -200,7 +200,16 @@
 }.
 %% Status information returned `info/1'.
 
--type handle_down_fun() :: fun((#{remote_pid := server_pid(), table := table_name()}) -> ok).
+-type handle_down_fun() :: fun(
+    (
+        #{
+            remote_pid := server_pid(),
+            remote_node := node(),
+            table := table_name(),
+            is_leader := boolean()
+        }
+    ) -> ok
+).
 %% Handler function which is called when the remote node goes down.
 
 -type handle_conflict_fun() :: fun((tuple(), tuple()) -> tuple()).
@@ -647,9 +656,12 @@ handle_down2(RemotePid, Reason, State = #{other_servers := Servers, ack_pid := A
     case lists:member(RemotePid, Servers) of
         true ->
             cets_ack:send_remote_down(AckPid, RemotePid),
-            call_user_handle_down(RemotePid, State),
             Servers2 = lists:delete(RemotePid, Servers),
-            update_node_down_history(RemotePid, Reason, set_other_servers(Servers2, State));
+            State3 = update_node_down_history(
+                RemotePid, Reason, set_other_servers(Servers2, State)
+            ),
+            call_user_handle_down(RemotePid, State3),
+            State3;
         false ->
             %% This should not happen
             ?LOG_ERROR(#{
@@ -896,10 +908,17 @@ handle_get_info(
 
 %% Cleanup
 -spec call_user_handle_down(server_pid(), state()) -> ok.
-call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts}) ->
+call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts, is_leader := IsLeader}) ->
     case Opts of
         #{handle_down := F} ->
-            FF = fun() -> F(#{remote_pid => RemotePid, table => Tab}) end,
+            FF = fun() ->
+                F(#{
+                    remote_pid => RemotePid,
+                    remote_node => node(RemotePid),
+                    table => Tab,
+                    is_leader => IsLeader
+                })
+            end,
             Info = #{
                 task => call_user_handle_down,
                 table => Tab,

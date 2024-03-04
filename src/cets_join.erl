@@ -100,7 +100,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
-    Retries = 1,
+    Retries = 0,
     %% global could abort the transaction when one of the nodes goes down.
     %% It could usually abort it during startup or update.
     case global:trans(LockRequest, F, Nodes, Retries) of
