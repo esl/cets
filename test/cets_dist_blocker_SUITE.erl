@@ -12,7 +12,11 @@ groups() ->
 all_cases() ->
     [
         dist_blocker_waits_for_cleaning,
-        dist_blocker_unblocks_if_cleaner_goes_down
+        dist_blocker_unblocks_if_cleaner_goes_down,
+        unknown_down_message_is_ignored,
+        unknown_message_is_ignored,
+        unknown_cast_message_is_ignored,
+        code_change_returns_ok
     ].
 
 init_per_suite(Config) ->
@@ -76,3 +80,29 @@ dist_blocker_unblocks_if_cleaner_goes_down(Config) ->
     %% Connection is unblocked
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
+
+unknown_down_message_is_ignored(_Config) ->
+    {ok, Pid} = cets_dist_blocker:start_link(),
+    RandPid = proc_lib:spawn(fun() -> ok end),
+    Pid ! {'DOWN', make_ref(), process, RandPid, oops},
+    still_works(Pid).
+
+unknown_message_is_ignored(_Config) ->
+    {ok, Pid} = cets_dist_blocker:start_link(),
+    Pid ! oops,
+    still_works(Pid).
+
+unknown_cast_message_is_ignored(_Config) ->
+    {ok, Pid} = cets_dist_blocker:start_link(),
+    gen_server:cast(Pid, oops),
+    still_works(Pid).
+
+code_change_returns_ok(_Config) ->
+    {ok, Pid} = cets_dist_blocker:start_link(),
+    sys:suspend(Pid),
+    ok = sys:change_code(Pid, cets_dist_blocker, v2, []),
+    sys:resume(Pid),
+    still_works(Pid).
+
+still_works(Pid) ->
+    #{} = sys:get_state(Pid).
