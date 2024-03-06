@@ -39,15 +39,18 @@
     waiting := waiting()
 }.
 
+%% @doc Spawn `dist_blocker'
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% Register Pid as a cleaner.
+%% @doc Register CleanerPid as a cleaner.
 -spec add_cleaner(pid()) -> ok.
 add_cleaner(CleanerPid) ->
     gen_server:call(?MODULE, {add_cleaner, CleanerPid}).
 
-%% Cleaner calls must call this function.
+%% @doc Confirm that cleaning is done.
+%%
+%% This function is called by a cleaner after it receives nodedown.
 -spec cleaning_done(pid(), node()) -> ok.
 cleaning_done(CleanerPid, Node) ->
     gen_server:call(?MODULE, {cleaning_done, CleanerPid, Node}).
