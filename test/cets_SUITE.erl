@@ -233,7 +233,7 @@ cets_seq_no_log_cases() ->
 init_per_suite(Config) ->
     init_cleanup_table(),
     Names = [ct2, ct3, ct4, ct5, ct6, ct7],
-    {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
+    {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
         {peers, maps:from_list(lists:zip(Names, Peers))}
@@ -2922,7 +2922,7 @@ schedule_cleanup(Pid) ->
             {'DOWN', Ref, process, Me, _} ->
                 %% We do an RPC call, because erlang distribution
                 %% could not be always reliable (because we test netsplits)
-                rpc(node_to_peer(node(Pid)), cets, stop, [Pid]),
+                rpc(cets_test_peer:node_to_peer(node(Pid)), cets, stop, [Pid]),
                 ets:delete_object(cleanup_table, {Me, self()})
         end
     end),
@@ -3004,42 +3004,6 @@ rpc(Node, M, F, Args) when is_atom(Node) ->
         Other ->
             Other
     end.
-
-%% Set epmd_port for better coverage
-extra_args(ct2) ->
-    ["-epmd_port", "4369"];
-extra_args(X) when X == ct5; X == ct6; X == ct7 ->
-    ["-kernel", "prevent_overlapping_partitions", "false"];
-extra_args(_) ->
-    "".
-
-start_node(Sname) ->
-    {ok, Peer, Node} = ?CT_PEER(#{
-        name => Sname, connection => standard_io, args => extra_args(Sname)
-    }),
-    %% Register so we can find Peer process later in code
-    register(node_to_peer_name(Node), Peer),
-    %% Keep nodes running after init_per_suite is finished
-    unlink(Peer),
-    %% Do RPC using alternative connection method
-    ok = peer:call(Peer, code, add_paths, [code:get_path()]),
-    {Node, Peer}.
-
-%% Returns Peer or Node name which could be used to do RPC-s reliably
-%% (regardless if Erlang Distribution works or not)
-node_to_peer(Node) when Node =:= node() ->
-    %% There is no peer for the local CT node
-    Node;
-node_to_peer(Node) when is_atom(Node) ->
-    case whereis(node_to_peer_name(Node)) of
-        Pid when is_pid(Pid) ->
-            Pid;
-        undefined ->
-            ct:fail({node_to_peer_failed, Node})
-    end.
-
-node_to_peer_name(Node) ->
-    list_to_atom(atom_to_list(Node) ++ "_peer").
 
 receive_message(M) ->
     receive
