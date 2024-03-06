@@ -67,7 +67,7 @@ handle_call({cleaning_done, CleanerPid, Node}, _From, State) ->
     {reply, ok, maybe_unblock(State, handle_cleaning_done(CleanerPid, Node, State))};
 handle_call(Request, _From, State) ->
     ?LOG_ERROR(#{what => unexpected_call, msg => Request}),
-    {reply, ok, State}.
+    {reply, {error, unexpected_call}, State}.
 
 handle_cast(Msg, State) ->
     ?LOG_ERROR(#{what => unexpected_cast, msg => Msg}),
