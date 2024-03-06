@@ -4,19 +4,29 @@
 -compile([export_all, nowarn_export_all]).
 
 all() ->
-    [{group, all}].
+    [
+        {group, blocker},
+        {group, unknown}
+    ].
 
 groups() ->
-    [{all, [sequence, {repeat_until_any_fail, 2}], all_cases()}].
-
-all_cases() ->
     [
-        dist_blocker_waits_for_cleaning,
-        dist_blocker_unblocks_if_cleaner_goes_down,
-        dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done,
-        dist_blocker_unblocks_if_cleaner_says_done_and_second_cleaner_goes_down,
-        dist_blocker_blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack,
-        dist_blocker_skip_blocking_if_no_cleaners,
+        {blocker, [sequence, {repeat_until_any_fail, 2}], blocker_cases()},
+        {unknown, [sequence, {repeat_until_any_fail, 2}], unknown_cases()}
+    ].
+
+blocker_cases() ->
+    [
+        waits_for_cleaning,
+        unblocks_if_cleaner_goes_down,
+        unblocks_if_cleaner_goes_down_and_second_cleaner_says_done,
+        unblocks_if_cleaner_says_done_and_second_cleaner_goes_down,
+        blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack,
+        skip_blocking_if_no_cleaners
+    ].
+
+unknown_cases() ->
+    [
         unknown_down_message_is_ignored,
         unknown_message_is_ignored,
         unknown_cast_message_is_ignored,
@@ -51,7 +61,9 @@ init_per_testcase_generic(Name, Config) ->
 end_per_testcase(_, _Config) ->
     ok.
 
-dist_blocker_waits_for_cleaning(Config) ->
+%% Test blocking functionality
+
+waits_for_cleaning(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     cets_dist_blocker:add_cleaner(self()),
@@ -62,7 +74,7 @@ dist_blocker_waits_for_cleaning(Config) ->
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
-dist_blocker_unblocks_if_cleaner_goes_down(Config) ->
+unblocks_if_cleaner_goes_down(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     Cleaner = spawn_cleaner(),
@@ -73,7 +85,7 @@ dist_blocker_unblocks_if_cleaner_goes_down(Config) ->
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
-dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) ->
+unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
@@ -88,14 +100,14 @@ dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) 
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
-dist_blocker_unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) ->
+unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
     Cleaner = spawn_cleaner(),
     connect_and_disconnect(Node2),
-    %% Different order comparing to dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done
+    %% Different order comparing to unblocks_if_cleaner_goes_down_and_second_cleaner_says_done
     cets_dist_blocker:cleaning_done(self(), Node2),
     wait_for_waiting_count(Blocker, 1),
     erlang:exit(Cleaner, killed),
@@ -104,12 +116,12 @@ dist_blocker_unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) 
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
-dist_blocker_blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config) ->
+blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
-    Cleaner = spawn_cleaner(),
+    _Cleaner = spawn_cleaner(),
     connect_and_disconnect(Node2),
     cets_dist_blocker:cleaning_done(self(), Node2),
     wait_for_waiting_count(Blocker, 1),
@@ -118,13 +130,15 @@ dist_blocker_blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config)
     pang = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
-dist_blocker_skip_blocking_if_no_cleaners(Config) ->
+skip_blocking_if_no_cleaners(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     pong = net_adm:ping(Node2),
     true = erlang:disconnect_node(Node2),
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
+
+%% Cover unknown message handling / code_change
 
 unknown_down_message_is_ignored(_Config) ->
     {ok, Pid} = cets_dist_blocker:start_link(),
@@ -153,6 +167,8 @@ code_change_returns_ok(_Config) ->
     ok = sys:change_code(Pid, cets_dist_blocker, v2, []),
     sys:resume(Pid),
     still_works(Pid).
+
+%% Helpers
 
 still_works(Pid) ->
     #{} = sys:get_state(Pid).
