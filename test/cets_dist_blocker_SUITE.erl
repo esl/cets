@@ -15,6 +15,7 @@ all_cases() ->
         dist_blocker_unblocks_if_cleaner_goes_down,
         dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done,
         dist_blocker_unblocks_if_cleaner_says_done_and_second_cleaner_goes_down,
+        dist_blocker_blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack,
         dist_blocker_skip_blocking_if_no_cleaners,
         unknown_down_message_is_ignored,
         unknown_message_is_ignored,
@@ -54,11 +55,9 @@ dist_blocker_waits_for_cleaning(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     cets_dist_blocker:add_cleaner(self()),
-    pong = net_adm:ping(Node2),
-    true = erlang:disconnect_node(Node2),
-    %% Connection is blocked
-    pang = net_adm:ping(Node2),
+    connect_and_disconnect(Node2),
     cets_dist_blocker:cleaning_done(self(), Node2),
+    sync_blocker(Blocker),
     %% Connection is unblocked
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
@@ -67,11 +66,9 @@ dist_blocker_unblocks_if_cleaner_goes_down(Config) ->
     #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     Cleaner = spawn_cleaner(),
-    pong = net_adm:ping(Node2),
-    true = erlang:disconnect_node(Node2),
-    %% Connection is blocked
-    pang = net_adm:ping(Node2),
+    connect_and_disconnect(Node2),
     erlang:exit(Cleaner, killed),
+    sync_blocker(Blocker),
     %% Connection is unblocked
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
@@ -82,12 +79,11 @@ dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) 
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
     Cleaner = spawn_cleaner(),
-    pong = net_adm:ping(Node2),
-    true = erlang:disconnect_node(Node2),
-    %% Connection is blocked
-    pang = net_adm:ping(Node2),
+    connect_and_disconnect(Node2),
     erlang:exit(Cleaner, killed),
+    wait_for_waiting_count(Blocker, 1),
     cets_dist_blocker:cleaning_done(self(), Node2),
+    sync_blocker(Blocker),
     %% Connection is unblocked
     pong = net_adm:ping(Node2),
     gen_server:stop(Blocker).
@@ -98,15 +94,28 @@ dist_blocker_unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) 
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
     Cleaner = spawn_cleaner(),
-    pong = net_adm:ping(Node2),
-    true = erlang:disconnect_node(Node2),
-    %% Connection is blocked
-    pang = net_adm:ping(Node2),
+    connect_and_disconnect(Node2),
     %% Different order comparing to dist_blocker_unblocks_if_cleaner_goes_down_and_second_cleaner_says_done
     cets_dist_blocker:cleaning_done(self(), Node2),
+    wait_for_waiting_count(Blocker, 1),
     erlang:exit(Cleaner, killed),
+    sync_blocker(Blocker),
     %% Connection is unblocked
     pong = net_adm:ping(Node2),
+    gen_server:stop(Blocker).
+
+dist_blocker_blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config) ->
+    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    {ok, Blocker} = cets_dist_blocker:start_link(),
+    %% Two cleaners
+    cets_dist_blocker:add_cleaner(self()),
+    Cleaner = spawn_cleaner(),
+    connect_and_disconnect(Node2),
+    cets_dist_blocker:cleaning_done(self(), Node2),
+    wait_for_waiting_count(Blocker, 1),
+    sync_blocker(Blocker),
+    %% Connection is still blocked
+    pang = net_adm:ping(Node2),
     gen_server:stop(Blocker).
 
 dist_blocker_skip_blocking_if_no_cleaners(Config) ->
@@ -160,3 +169,19 @@ spawn_cleaner() ->
     after 5000 -> ct:fail(timeout)
     end,
     Cleaner.
+
+%% Wait for the blocker to process pending nodeup/nodedown messages
+sync_blocker(Blocker) ->
+    sys:get_state(Blocker),
+    ok.
+
+wait_for_waiting_count(Blocker, Count) ->
+    F = fun() -> length(maps:get(waiting, sys:get_state(Blocker))) end,
+    cets_test_wait:wait_until(F, Count).
+
+connect_and_disconnect(Node2) ->
+    pong = net_adm:ping(Node2),
+    true = erlang:disconnect_node(Node2),
+    %% Connection is blocked
+    pang = net_adm:ping(Node2),
+    ok.
