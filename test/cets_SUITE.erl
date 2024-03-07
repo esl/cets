@@ -153,8 +153,10 @@ cases() ->
         unknown_message_is_ignored_in_ack_process,
         unknown_cast_message_is_ignored_in_ack_process,
         unknown_call_returns_error_from_ack_process,
+        unknown_message_is_ignored_in_disco_process,
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
+        code_change_returns_ok_for_disco,
         run_spawn_forwards_errors,
         run_tracked_failed,
         run_tracked_logged,
@@ -2341,6 +2343,11 @@ unknown_message_is_ignored_in_ack_process(Config) ->
     AckPid ! oops,
     still_works(Pid).
 
+unknown_message_is_ignored_in_disco_process(_Config) ->
+    Pid = start_simple_disco(),
+    Pid ! oops,
+    #{} = sys:get_state(Pid).
+
 unknown_cast_message_is_ignored_in_ack_process(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
@@ -2365,6 +2372,12 @@ code_change_returns_ok_for_ack(Config) ->
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets_ack, v2, []),
     sys:resume(AckPid).
+
+code_change_returns_ok_for_disco(_Config) ->
+    Pid = start_simple_disco(),
+    sys:suspend(Pid),
+    ok = sys:change_code(Pid, cets_ack, v2, []),
+    sys:resume(Pid).
 
 run_spawn_forwards_errors(_Config) ->
     ?assertException(
@@ -2958,6 +2971,15 @@ start_disco(Node, Opts) ->
     end,
     {ok, Pid} = rpc(Node, cets_discovery, start, [Opts]),
     schedule_cleanup(Pid),
+    Pid.
+
+start_simple_disco() ->
+    F = fun(State) ->
+        {{ok, []}, State}
+    end,
+    {ok, Pid} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
     Pid.
 
 wait_for_name_to_be_free(Node, Name) ->
