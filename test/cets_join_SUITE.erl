@@ -71,8 +71,8 @@ all() ->
     [
         {group, cets},
         {group, cets_no_log},
-        {group, cets_seq}
-        %       {group, cets_seq_no_log}
+        {group, cets_seq},
+        {group, cets_seq_no_log}
     ].
 
 only_for_logger_cases() ->
@@ -121,11 +121,14 @@ cases() ->
 seq_cases() ->
     [
         joining_not_fully_connected_node_is_not_allowed,
-        joining_not_fully_connected_node_is_not_allowed2
+        joining_not_fully_connected_node_is_not_allowed2,
+        join_interrupted_when_ping_crashes
     ].
 
 cets_seq_no_log_cases() ->
-    [].
+    [
+        join_interrupted_when_ping_crashes
+    ].
 
 init_per_suite(Config) ->
     cets_test_setup:init_cleanup_table(),
@@ -603,6 +606,19 @@ joining_not_fully_connected_node_is_not_allowed2(Config) ->
         reconnect_node(Node5, Peer5)
     end,
     [] = cets:other_pids(Pid5).
+
+join_interrupted_when_ping_crashes(Config) ->
+    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
+    Tab3 = make_name(Config, 3),
+    {ok, Pid3} = start_local(Tab3, #{}),
+    meck:new(cets, [passthrough]),
+    meck:expect(cets_call, long_call, fun
+        (Server, ping) when Server == Pid2 -> error(simulate_crash);
+        (Server, Msg) -> meck:passthrough([Server, Msg])
+    end),
+    Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
+    meck:unload().
 
 %% Helpers
 
