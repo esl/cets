@@ -10,7 +10,9 @@
     wait_for_disco_timestamp_to_appear/3,
     wait_for_disco_timestamp_to_be_updated/4,
     wait_for_unpaused/3,
-    wait_for_join_ref_to_match/2
+    wait_for_join_ref_to_match/2,
+    wait_till_test_stage/2,
+    wait_till_message_queue_length/2
 ]).
 
 %% From mongoose_helper
@@ -144,3 +146,17 @@ wait_for_join_ref_to_match(Pid, JoinRef) ->
         maps:get(join_ref, cets:info(Pid))
     end,
     cets_test_wait:wait_until(Cond, JoinRef).
+
+get_pd(Pid, Key) ->
+    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
+    proplists:get_value(Key, Dict).
+
+wait_till_test_stage(Pid, Stage) ->
+    cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
+
+wait_till_message_queue_length(Pid, Len) ->
+    cets_test_wait:wait_until(fun() -> get_message_queue_length(Pid) end, Len).
+
+get_message_queue_length(Pid) ->
+    {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
+    Len.
