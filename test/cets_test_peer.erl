@@ -2,7 +2,6 @@
 -export([
     start/2,
     stop/1,
-    start_node/1,
     node_to_peer/1
 ]).
 
@@ -18,7 +17,7 @@
 -include_lib("common_test/include/ct.hrl").
 
 start(Names, Config) ->
-    {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(name(N)) || N <- Names]),
+    {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
         {peers, maps:from_list(lists:zip(Names, Peers))}
@@ -33,9 +32,9 @@ stop(Config) ->
 name(Node) ->
     list_to_atom(peer:random_name(atom_to_list(Node))).
 
-start_node(Sname) ->
+start_node(Id) ->
     {ok, Peer, Node} = ?CT_PEER(#{
-        name => Sname, connection => standard_io, args => extra_args(Sname)
+        name => name(Id), connection => standard_io, args => extra_args(Id)
     }),
     %% Register so we can find Peer process later in code
     register(node_to_peer_name(Node), Peer),
