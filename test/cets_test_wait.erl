@@ -4,7 +4,9 @@
 %% Helpers
 -export([
     wait_for_name_to_be_free/2,
-    wait_for_down/1
+    wait_for_down/1,
+    wait_for_remote_ops_in_the_message_box/2,
+    wait_for_ready/2
 ]).
 
 %% From mongoose_helper
@@ -93,4 +95,21 @@ wait_for_down(Pid) ->
     receive
         {'DOWN', Mon, process, Pid, Reason} -> Reason
     after 5000 -> ct:fail({wait_for_down_timeout, Pid})
+    end.
+
+wait_for_remote_ops_in_the_message_box(Pid, Count) ->
+    cets_test_wait:wait_until(fun() -> count_remote_ops_in_the_message_box(Pid) end, Count).
+
+count_remote_ops_in_the_message_box(Pid) ->
+    {messages, Messages} = erlang:process_info(Pid, messages),
+    Ops = [M || M <- Messages, element(1, M) =:= remote_op],
+    length(Ops).
+
+wait_for_ready(Disco, Timeout) ->
+    try
+        ok = cets_discovery:wait_for_ready(Disco, Timeout)
+    catch
+        Class:Reason:Stacktrace ->
+            ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
+            erlang:raise(Class, Reason, Stacktrace)
     end.

@@ -36,11 +36,24 @@
     start_local/1,
     start_local/2,
     start_disco/2,
-    start_simple_disco/0
+    start_simple_disco/0,
+    make_name/1,
+    make_name/2,
+    lock_name/1,
+    disco_name/1,
+    given_two_joined_tables/1,
+    given_two_joined_tables/2,
+    given_3_servers/1,
+    given_3_servers/2,
+    given_n_servers/3,
+    setup_two_nodes_and_discovery/1,
+    setup_two_nodes_and_discovery/2,
+    simulate_disco_restart/1
 ]).
 
 -import(cets_test_wait, [
-    wait_for_down/1
+    wait_for_down/1,
+    wait_for_ready/2
 ]).
 
 all() ->
@@ -893,7 +906,7 @@ join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
     receive_message(before_send_dump_called_for_pid1),
     cets:insert_request(Pid1, {1}),
     %% Check that the remote_op has reached Pid2 message box
-    cets_test_wait:wait_until(fun() -> count_remote_ops_in_the_message_box(Pid2) end, 1),
+    cets_test_wait:wait_for_remote_ops_in_the_message_box(Pid2, 1),
     sys:resume(Pid2),
     %% Wait till remote_op is processed
     cets:ping(Pid2),
@@ -2990,29 +3003,6 @@ flush_message(M) ->
         ok
     end.
 
-make_name(Config) ->
-    make_name(Config, 1).
-
-make_name(Config, Num) when is_integer(Num) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num));
-make_name(Config, Atom) when is_atom(Atom) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_" ++ atom_to_list(Atom)).
-
-lock_name(Config) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_lock").
-
-disco_name(Config) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_disco").
-
-count_remote_ops_in_the_message_box(Pid) ->
-    {messages, Messages} = erlang:process_info(Pid, messages),
-    Ops = [M || M <- Messages, element(1, M) =:= remote_op],
-    length(Ops).
-
 set_join_ref(Pid, JoinRef) ->
     sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
 
@@ -3020,118 +3010,6 @@ set_other_servers(Pid, Servers) ->
     sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
         State#{other_servers := Servers}
     end).
-
-given_two_joined_tables(Config) ->
-    given_two_joined_tables(Config, #{}).
-
-given_two_joined_tables(Config, Opts) ->
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(Tab1, Opts),
-    {ok, Pid2} = start_local(Tab2, Opts),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    #{
-        tab1 => Tab1,
-        tab2 => Tab2,
-        pid1 => Pid1,
-        pid2 => Pid2,
-        tabs => [Tab1, Tab2],
-        pids => [Pid1, Pid2]
-    }.
-
-given_3_servers(Config) ->
-    given_3_servers(Config, #{}).
-
-given_3_servers(Config, Opts) ->
-    given_n_servers(Config, 3, Opts).
-
-given_n_servers(Config, N, Opts) ->
-    Tabs = [make_name(Config, X) || X <- lists:seq(1, N)],
-    Pids = [
-        begin
-            {ok, Pid} = start_local(Tab, Opts),
-            Pid
-        end
-     || Tab <- Tabs
-    ],
-    #{pids => Pids, tabs => Tabs}.
-
-setup_two_nodes_and_discovery(Config) ->
-    setup_two_nodes_and_discovery(Config, []).
-
-%% Flags:
-%% - disco2 - start discovery on Node2
-%% - wait - call wait_for_ready/2
-setup_two_nodes_and_discovery(Config, Flags) ->
-    Me = self(),
-    Node1 = node(),
-    #{ct2 := Peer2} = proplists:get_value(peers, Config),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    disconnect_node_by_name(Config, ct2),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Peer2, Tab),
-    F = fun(State) ->
-        case lists:member(notify_get_nodes, Flags) of
-            true ->
-                Me ! get_nodes;
-            false ->
-                ok
-        end,
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco = start_disco(Node1, DiscoOpts),
-    %% Start Disco on second node (it is not always needed)
-    Res =
-        case lists:member(disco2, Flags) of
-            true ->
-                Disco2 = start_disco(Node2, DiscoOpts),
-                cets_discovery:add_table(Disco2, Tab),
-                #{disco2 => Disco2};
-            false ->
-                #{}
-        end,
-    cets_discovery:add_table(Disco, Tab),
-    case lists:member(wait, Flags) of
-        true ->
-            wait_for_ready(Disco, 5000);
-        false ->
-            ok
-    end,
-    case lists:member(netsplit, Flags) of
-        true ->
-            %% Simulate a loss of connection between nodes
-            disconnect_node_by_name(Config, ct2);
-        false ->
-            ok
-    end,
-    Res#{
-        disco_name => DiscoName,
-        disco_opts => DiscoOpts,
-        disco => Disco,
-        node1 => Node1,
-        node2 => Node2,
-        peer2 => Peer2
-    }.
-
-simulate_disco_restart(#{
-    disco_opts := DiscoOpts,
-    disco2 := Disco2,
-    node1 := Node1,
-    node2 := Node2,
-    peer2 := Peer2
-}) ->
-    %% Instead of restart the node, restart the process. It is enough to get
-    %% a new start_time.
-    disconnect_node(Peer2, Node1),
-    rpc(Peer2, cets, stop, [Disco2]),
-    %% We actually would not detect the case of us just stopping the remote disco
-    %% server. Because we use nodeup/nodedown to detect downs, not monitors.
-    _RestartedDisco2 = start_disco(Node2, DiscoOpts).
 
 stopped_pid() ->
     %% Get a pid for a stopped process
@@ -3258,15 +3136,6 @@ make_process() ->
             stop -> stop
         end
     end).
-
-wait_for_ready(Disco, Timeout) ->
-    try
-        ok = cets_discovery:wait_for_ready(Disco, Timeout)
-    catch
-        Class:Reason:Stacktrace ->
-            ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
-            erlang:raise(Class, Reason, Stacktrace)
-    end.
 
 %% Overwrites nodedown timestamp for the Node in the discovery server state
 set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
