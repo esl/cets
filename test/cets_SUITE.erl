@@ -237,16 +237,11 @@ cets_seq_no_log_cases() ->
 
 init_per_suite(Config) ->
     cets_test_setup:init_cleanup_table(),
-    Names = [ct2, ct3, ct4, ct5, ct6, ct7],
-    {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(N) || N <- Names]),
-    [
-        {nodes, maps:from_list(lists:zip(Names, Nodes))},
-        {peers, maps:from_list(lists:zip(Names, Peers))}
-        | Config
-    ].
+    cets_test_peer:start([ct2, ct3, ct4, ct5, ct6, ct7], Config).
 
 end_per_suite(Config) ->
     cets_test_setup:remove_cleanup_table(),
+    cets_test_peer:stop(Config),
     Config.
 
 init_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
