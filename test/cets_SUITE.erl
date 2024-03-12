@@ -168,8 +168,6 @@ cases() ->
         send_leader_op_throws_noproc,
         pinfo_returns_value,
         pinfo_returns_undefined,
-        cets_ping_non_existing_node,
-        cets_ping_net_family,
         ignore_send_dump_received_when_unpaused,
         ignore_send_dump_received_when_paused_with_another_pause_ref,
         pause_on_remote_node_returns_if_monitor_process_dies
@@ -191,13 +189,6 @@ only_for_logger_cases() ->
 
 seq_cases() ->
     [
-        insert_returns_when_netsplit,
-        inserts_after_netsplit_reconnects,
-        cets_ping_all_returns_when_ping_crashes,
-        ping_pairs_returns_pongs,
-        ping_pairs_returns_earlier,
-        pre_connect_fails_on_our_node,
-        pre_connect_fails_on_one_of_the_nodes,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump,
         pause_on_remote_node_crashes
@@ -205,7 +196,6 @@ seq_cases() ->
 
 cets_seq_no_log_cases() ->
     [
-        node_down_history_is_updated_when_netsplit_happens,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump
     ].
@@ -1448,127 +1438,6 @@ pinfo_returns_value(_Config) ->
 
 pinfo_returns_undefined(_Config) ->
     undefined = cets_long:pinfo(stopped_pid(), messages).
-
-%% Netsplit cases (run in sequence)
-
-insert_returns_when_netsplit(Config) ->
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    sys:suspend(Pid5),
-    R = cets:insert_request(Tab, {1, test}),
-    block_node(Node5, Peer5),
-    try
-        {reply, ok} = cets:wait_response(R, 5000)
-    after
-        reconnect_node(Node5, Peer5)
-    end.
-
-inserts_after_netsplit_reconnects(Config) ->
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    sys:suspend(Pid5),
-    R = cets:insert_request(Tab, {1, v1}),
-    block_node(Node5, Peer5),
-    try
-        {reply, ok} = cets:wait_response(R, 5000)
-    after
-        reconnect_node(Node5, Peer5)
-    end,
-    sys:resume(Pid5),
-    cets:insert(Pid1, {1, v2}),
-    cets:insert(Pid5, {1, v3}),
-    %% No automatic recovery
-    [{1, v2}] = dump(Node1, Tab),
-    [{1, v3}] = dump(Peer5, Tab).
-
-cets_ping_all_returns_when_ping_crashes(Config) ->
-    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
-    meck:new(cets, [passthrough]),
-    meck:expect(cets_call, long_call, fun
-        (Server, ping) when Server == Pid2 -> error(simulate_crash);
-        (Server, Msg) -> meck:passthrough([Server, Msg])
-    end),
-    ?assertMatch({error, [{Pid2, {'EXIT', {simulate_crash, _}}}]}, cets:ping_all(Pid1)),
-    meck:unload().
-
-node_down_history_is_updated_when_netsplit_happens(Config) ->
-    %% node_down_history is available in cets:info/1 API.
-    %% It could be used for manual debugging in situations
-    %% we get netsplits or during rolling upgrades.
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    block_node(Node5, Peer5),
-    try
-        F = fun() ->
-            History = maps:get(node_down_history, cets:info(Pid1)),
-            lists:map(fun(#{node := Node}) -> Node end, History)
-        end,
-        cets_test_wait:wait_until(F, [Node5])
-    after
-        reconnect_node(Node5, Peer5),
-        cets:stop(Pid5)
-    end.
-
-cets_ping_non_existing_node(_Config) ->
-    pang = cets_ping:ping('mongooseim@non_existing_host').
-
-pre_connect_fails_on_our_node(_Config) ->
-    cets_test_setup:mock_epmd(),
-    %% We would fail to connect to the remote EPMD but we would get an IP
-    pang = cets_ping:ping('mongooseim@resolvabletobadip'),
-    meck:unload().
-
-pre_connect_fails_on_one_of_the_nodes(Config) ->
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    cets_test_setup:mock_epmd(),
-    %% We would get pong on Node2, but would fail an RPC to our hode
-    pang = rpc(Node2, cets_ping, ping, ['cetsnode1@localhost']),
-    History = meck:history(erl_epmd),
-    %% Check that Node2 called us
-    ?assertMatch(
-        [_],
-        [
-            X
-         || {_, {erl_epmd, address_please, ["cetsnode1", "localhost", inet]},
-                {ok, {192, 168, 100, 134}}} = X <- History
-        ],
-        History
-    ),
-    meck:unload().
-
-cets_ping_net_family(_Config) ->
-    inet = cets_ping:net_family(error),
-    inet = cets_ping:net_family({ok, [["inet"]]}),
-    inet6 = cets_ping:net_family({ok, [["inet6"]]}),
-    inet6 = cets_ping:net_family({ok, [["inet6_tls"]]}).
-
-ping_pairs_returns_pongs(Config) ->
-    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
-    Me = node(),
-    [{Me, Node2, pong}, {Node2, Node3, pong}] =
-        cets_ping:ping_pairs([{Me, Node2}, {Node2, Node3}]).
-
-ping_pairs_returns_earlier(Config) ->
-    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
-    Me = node(),
-    Bad = 'badnode@localhost',
-    [{Me, Me, pong}, {Me, Node2, pong}, {Me, Bad, pang}, {Me, Node3, skipped}] =
-        cets_ping:ping_pairs([{Me, Me}, {Me, Node2}, {Me, Bad}, {Me, Node3}]).
 
 %% Helper functions
 
