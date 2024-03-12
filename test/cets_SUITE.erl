@@ -12,6 +12,25 @@
 
 -compile([export_all, nowarn_export_all]).
 
+-import(cets_test_node, [
+    block_node/2,
+    reconnect_node/2,
+    disconnect_node/2,
+    disconnect_node_by_name/2
+]).
+
+-import(cets_test_rpc, [
+    rpc/4,
+    insert/3,
+    insert_many/3,
+    delete/3,
+    delete_request/3,
+    delete_many/3,
+    dump/2,
+    other_nodes/2,
+    join/4
+]).
+
 all() ->
     [
         {group, cets},
@@ -3009,46 +3028,6 @@ wait_for_name_to_be_free(Node, Name) ->
     %% Cleaner is fast, but not instant.
     cets_test_wait:wait_until(fun() -> rpc(Node, erlang, whereis, [Name]) end, undefined).
 
-insert(Node, Tab, Rec) ->
-    rpc(Node, cets, insert, [Tab, Rec]).
-
-insert_many(Node, Tab, Records) ->
-    rpc(Node, cets, insert_many, [Tab, Records]).
-
-delete(Node, Tab, Key) ->
-    rpc(Node, cets, delete, [Tab, Key]).
-
-delete_request(Node, Tab, Key) ->
-    rpc(Node, cets, delete_request, [Tab, Key]).
-
-delete_many(Node, Tab, Keys) ->
-    rpc(Node, cets, delete_many, [Tab, Keys]).
-
-dump(Node, Tab) ->
-    rpc(Node, cets, dump, [Tab]).
-
-other_nodes(Node, Tab) ->
-    rpc(Node, cets, other_nodes, [Tab]).
-
-join(Node1, Tab, Pid1, Pid2) ->
-    rpc(Node1, cets_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
-
-%% Apply function using rpc or peer module
-rpc(Peer, M, F, Args) when is_pid(Peer) ->
-    case peer:call(Peer, M, F, Args) of
-        {badrpc, Error} ->
-            ct:fail({badrpc, Error});
-        Other ->
-            Other
-    end;
-rpc(Node, M, F, Args) when is_atom(Node) ->
-    case rpc:call(Node, M, F, Args) of
-        {badrpc, Error} ->
-            ct:fail({badrpc, Error});
-        Other ->
-            Other
-    end.
-
 receive_message(M) ->
     receive
         M -> ok
@@ -3240,34 +3219,6 @@ wait_for_down(Pid) ->
         {'DOWN', Mon, process, Pid, Reason} -> Reason
     after 5000 -> ct:fail({wait_for_down_timeout, Pid})
     end.
-
-%% Disconnect node until manually connected
-block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
-    rpc(Peer, erlang, set_cookie, [node(), invalid_cookie]),
-    disconnect_node(Peer, node()),
-    %% Wait till node() is notified about the disconnect
-    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pang),
-    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pang).
-
-reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
-    rpc(Peer, erlang, set_cookie, [node(), erlang:get_cookie()]),
-    %% Very rarely it could return pang
-    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pong),
-    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pong).
-
-disconnect_node(RPCNode, DisconnectNode) ->
-    rpc(RPCNode, erlang, disconnect_node, [DisconnectNode]).
-
-disconnect_node_by_name(Config, Id) ->
-    Peer = maps:get(Id, proplists:get_value(peers, Config)),
-    Node = maps:get(Id, proplists:get_value(nodes, Config)),
-    %% We could need to retry to disconnect, if the local node is currently trying to establish a connection
-    %% with Node2 (could be triggered by the previous tests)
-    F = fun() ->
-        disconnect_node(Peer, node()),
-        lists:member(Node, nodes())
-    end,
-    cets_test_wait:wait_until(F, false).
 
 not_leader(Leader, Other, Leader) ->
     Other;
