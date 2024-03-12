@@ -36,6 +36,11 @@
 
 -export([simulate_disco_restart/1]).
 
+-export([
+    make_signalling_process/0,
+    make_process/0
+]).
+
 -import(cets_test_node, [
     disconnect_node/2,
     disconnect_node_by_name/2
@@ -251,3 +256,17 @@ simulate_disco_restart(#{
     %% We actually would not detect the case of us just stopping the remote disco
     %% server. Because we use nodeup/nodedown to detect downs, not monitors.
     _RestartedDisco2 = start_disco(Node2, DiscoOpts).
+
+make_signalling_process() ->
+    proc_lib:spawn_link(fun() ->
+        receive
+            stop -> ok
+        end
+    end).
+
+make_process() ->
+    proc_lib:spawn(fun() ->
+        receive
+            stop -> stop
+        end
+    end).
