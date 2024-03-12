@@ -62,6 +62,14 @@
     wait_till_message_queue_length/2
 ]).
 
+-import(cets_test_receive, [
+    receive_message/1,
+    receive_message_with_arg/1,
+    flush_message/1,
+    receive_all_logs/1,
+    assert_nothing_is_logged/2
+]).
+
 all() ->
     [
         {group, cets},
@@ -2965,14 +2973,6 @@ ping_pairs_returns_earlier(Config) ->
 
 %% Helper functions
 
-receive_all_logs(Id) ->
-    receive
-        {log, Id, Log} ->
-            [Log | receive_all_logs(Id)]
-    after 100 ->
-        []
-    end.
-
 still_works(Pid) ->
     pong = cets:ping(Pid),
     %% The server works fine
@@ -2989,32 +2989,18 @@ start_link_local(Name, Opts) ->
     schedule_cleanup(Pid),
     {ok, Pid}.
 
-receive_message(M) ->
-    receive
-        M -> ok
-    after 5000 -> error({receive_message_timeout, M})
-    end.
-
-receive_message_with_arg(Tag) ->
-    receive
-        {Tag, Arg} -> Arg
-    after 5000 -> error({receive_message_with_arg_timeout, Tag})
-    end.
-
-flush_message(M) ->
-    receive
-        M ->
-            flush_message(M)
-    after 0 ->
-        ok
-    end.
-
 set_join_ref(Pid, JoinRef) ->
     sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
 
 set_other_servers(Pid, Servers) ->
     sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
         State#{other_servers := Servers}
+    end).
+
+%% Overwrites nodedown timestamp for the Node in the discovery server state
+set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
+    sys:replace_state(Disco, fun(#{nodedown_timestamps := Map} = State) ->
+        State#{nodedown_timestamps := maps:put(Node, NewTimestamp, Map)}
     end).
 
 stopped_pid() ->
@@ -3025,15 +3011,6 @@ stopped_pid() ->
     end,
     Pid.
 
-get_pd(Pid, Key) ->
-    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
-    proplists:get_value(Key, Dict).
-
-not_leader(Leader, Other, Leader) ->
-    Other;
-not_leader(Other, Leader, Leader) ->
-    Other.
-
 bad_node_pid() ->
     binary_to_term(bad_node_pid_binary()).
 
@@ -3042,16 +3019,10 @@ bad_node_pid_binary() ->
     <<131, 88, 100, 0, 17, 98, 97, 100, 110, 111, 100, 101, 64, 108, 111, 99, 97, 108, 104, 111,
         115, 116, 0, 0, 0, 90, 0, 0, 0, 0, 100, 206, 70, 92>>.
 
-assert_nothing_is_logged(LogHandlerId, LogRef) ->
-    receive
-        {log, LogHandlerId, #{
-            level := Level,
-            msg := {report, #{log_ref := LogRef}}
-        }} when Level =:= warning; Level =:= error ->
-            ct:fail(got_logging_but_should_not)
-    after 0 ->
-        ok
-    end.
+%% Fails if List has duplicates
+assert_unique(List) ->
+    ?assertEqual([], List -- lists:usort(List)),
+    List.
 
 send_join_start_back_and_wait_for_continue_joining() ->
     Me = self(),
@@ -3089,11 +3060,6 @@ make_signalling_process() ->
         end
     end).
 
-%% Fails if List has duplicates
-assert_unique(List) ->
-    ?assertEqual([], List -- lists:usort(List)),
-    List.
-
 make_process() ->
     proc_lib:spawn(fun() ->
         receive
@@ -3101,8 +3067,7 @@ make_process() ->
         end
     end).
 
-%% Overwrites nodedown timestamp for the Node in the discovery server state
-set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
-    sys:replace_state(Disco, fun(#{nodedown_timestamps := Map} = State) ->
-        State#{nodedown_timestamps := maps:put(Node, NewTimestamp, Map)}
-    end).
+not_leader(Leader, Other, Leader) ->
+    Other;
+not_leader(Other, Leader, Leader) ->
+    Other.
