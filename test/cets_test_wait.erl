@@ -6,7 +6,11 @@
     wait_for_name_to_be_free/2,
     wait_for_down/1,
     wait_for_remote_ops_in_the_message_box/2,
-    wait_for_ready/2
+    wait_for_ready/2,
+    wait_for_disco_timestamp_to_appear/3,
+    wait_for_disco_timestamp_to_be_updated/4,
+    wait_for_unpaused/3,
+    wait_for_join_ref_to_match/2
 ]).
 
 %% From mongoose_helper
@@ -113,3 +117,30 @@ wait_for_ready(Disco, Timeout) ->
             ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
             erlang:raise(Class, Reason, Stacktrace)
     end.
+
+wait_for_disco_timestamp_to_appear(Disco, MapName, NodeKey) ->
+    F = fun() ->
+        #{MapName := Map} = cets_discovery:system_info(Disco),
+        maps:is_key(NodeKey, Map)
+    end,
+    cets_test_wait:wait_until(F, true).
+
+wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
+    Cond = fun() ->
+        NewTimestamp = cets_test_helper:get_disco_timestamp(Disco, MapName, NodeKey),
+        NewTimestamp =/= OldTimestamp
+    end,
+    cets_test_wait:wait_until(Cond, true).
+
+wait_for_unpaused(Peer, Pid, PausedByPid) ->
+    Cond = fun() ->
+        {monitors, Info} = cets_test_rpc:rpc(Peer, erlang, process_info, [Pid, monitors]),
+        lists:member({process, PausedByPid}, Info)
+    end,
+    cets_test_wait:wait_until(Cond, false).
+
+wait_for_join_ref_to_match(Pid, JoinRef) ->
+    Cond = fun() ->
+        maps:get(join_ref, cets:info(Pid))
+    end,
+    cets_test_wait:wait_until(Cond, JoinRef).
