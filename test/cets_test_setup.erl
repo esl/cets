@@ -6,6 +6,7 @@
 
 -export([
     init_cleanup_table/0,
+    remove_cleanup_table/0,
     wait_for_cleanup/0
 ]).
 
@@ -41,7 +42,7 @@
     make_process/0
 ]).
 
--import(cets_test_node, [
+-import(cets_test_peer, [
     disconnect_node/2,
     disconnect_node_by_name/2
 ]).
@@ -117,8 +118,13 @@ schedule_cleanup(Pid) ->
 init_cleanup_table() ->
     spawn(fun() ->
         ets:new(cleanup_table, [named_table, public, bag]),
-        timer:sleep(infinity)
+        receive
+            stop -> ok
+        end
     end).
+
+remove_cleanup_table() ->
+    ets:info(cleanup_table, owner) ! stop.
 
 %% schedule_cleanup is async, so this function is waiting for it to finish
 wait_for_cleanup() ->
