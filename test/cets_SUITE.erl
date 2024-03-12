@@ -51,6 +51,11 @@
     simulate_disco_restart/1
 ]).
 
+-import(cets_test_setup, [
+    make_signalling_process/0,
+    make_process/0
+]).
+
 -import(cets_test_wait, [
     wait_for_down/1,
     wait_for_ready/2,
@@ -1332,7 +1337,7 @@ ignore_send_dump_received_when_unpaused(Config) ->
 pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
     JoinPid = make_process(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    AllPids = [rpc(Node2, ?MODULE, make_process, [])],
+    AllPids = [rpc(Node2, cets_test_setup, make_process, [])],
     TestPid = proc_lib:spawn(fun() ->
         %% Would block
         cets_join:pause_on_remote_node(JoinPid, AllPids)
@@ -3052,20 +3057,6 @@ test_data_for_duplicate_missing_table_in_status(Config) ->
 
 return_same(X) ->
     X.
-
-make_signalling_process() ->
-    proc_lib:spawn_link(fun() ->
-        receive
-            stop -> ok
-        end
-    end).
-
-make_process() ->
-    proc_lib:spawn(fun() ->
-        receive
-            stop -> stop
-        end
-    end).
 
 not_leader(Leader, Other, Leader) ->
     Other;
