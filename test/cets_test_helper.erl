@@ -7,7 +7,8 @@
 ]).
 
 -export([
-    set_nodedown_timestamp/3
+    set_nodedown_timestamp/3,
+    set_other_servers/2
 ]).
 
 get_disco_timestamp(Disco, MapName, NodeKey) ->
@@ -24,4 +25,9 @@ assert_unique(List) ->
 set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
     sys:replace_state(Disco, fun(#{nodedown_timestamps := Map} = State) ->
         State#{nodedown_timestamps := maps:put(Node, NewTimestamp, Map)}
+    end).
+
+set_other_servers(Pid, Servers) ->
+    sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
+        State#{other_servers := Servers}
     end).
