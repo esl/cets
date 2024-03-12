@@ -10,6 +10,7 @@
     start_local/1,
     start_local/2,
     start_disco/2,
+    start_simple_disco/0,
     make_name/1,
     make_name/2,
     disco_name/1
@@ -95,7 +96,9 @@ cases() ->
         disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down,
         disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down,
         disco_handles_node_up_and_down,
-        unexpected_nodedown_is_ignored_by_disco
+        unexpected_nodedown_is_ignored_by_disco,
+        unknown_message_is_ignored_in_disco_process,
+        code_change_returns_ok_for_disco
     ].
 
 seq_cases() ->
@@ -753,3 +756,14 @@ logging_when_failing_join_with_disco(Config) ->
         cets:stop(Pid2)
     end,
     ok.
+
+unknown_message_is_ignored_in_disco_process(_Config) ->
+    Pid = start_simple_disco(),
+    Pid ! oops,
+    #{} = sys:get_state(Pid).
+
+code_change_returns_ok_for_disco(_Config) ->
+    Pid = start_simple_disco(),
+    sys:suspend(Pid),
+    ok = sys:change_code(Pid, cets_ack, v2, []),
+    sys:resume(Pid).
