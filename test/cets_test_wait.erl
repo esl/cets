@@ -1,6 +1,12 @@
 -module(cets_test_wait).
 -export([wait_until/2]).
 
+%% Helpers
+-export([
+    wait_for_name_to_be_free/2,
+    wait_for_down/1
+]).
+
 %% From mongoose_helper
 
 %% @doc Waits `TimeLeft` for `Fun` to return `ExpectedValue`
@@ -72,3 +78,19 @@ wait_and_continue(
         time_left => TimeLeft - SleepTime,
         history => [FunResult | History]
     }).
+
+%% Helpers
+
+wait_for_name_to_be_free(Node, Name) ->
+    %% Wait for the old process to be killed by the cleaner in schedule_cleanup.
+    %% Cleaner is fast, but not instant.
+    cets_test_wait:wait_until(
+        fun() -> cets_test_rpc:rpc(Node, erlang, whereis, [Name]) end, undefined
+    ).
+
+wait_for_down(Pid) ->
+    Mon = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Mon, process, Pid, Reason} -> Reason
+    after 5000 -> ct:fail({wait_for_down_timeout, Pid})
+    end.

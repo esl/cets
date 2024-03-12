@@ -31,6 +31,18 @@
     join/4
 ]).
 
+-import(cets_test_setup, [
+    start/2,
+    start_local/1,
+    start_local/2,
+    start_disco/2,
+    start_simple_disco/0
+]).
+
+-import(cets_test_wait, [
+    wait_for_down/1
+]).
+
 all() ->
     [
         {group, cets},
@@ -254,7 +266,7 @@ cets_seq_no_log_cases() ->
     ].
 
 init_per_suite(Config) ->
-    init_cleanup_table(),
+    cets_test_setup:init_cleanup_table(),
     Names = [ct2, ct3, ct4, ct5, ct6, ct7],
     {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(N) || N <- Names]),
     [
@@ -288,7 +300,7 @@ init_per_testcase_generic(Name, Config) ->
     [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
-    wait_for_cleanup(),
+    cets_test_setup:wait_for_cleanup(),
     ok.
 
 %% Modules that use a multiline LOG_ macro
@@ -1317,7 +1329,7 @@ pause_on_remote_node_crashes(Config) ->
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
-    ok = rpc(Node2, ?MODULE, mock_pause_on_remote_node_failing, []),
+    ok = rpc(Node2, cets_test_setup, mock_pause_on_remote_node_failing, []),
     try
         {error,
             {task_failed,
@@ -2876,14 +2888,14 @@ cets_ping_non_existing_node(_Config) ->
     pang = cets_ping:ping('mongooseim@non_existing_host').
 
 pre_connect_fails_on_our_node(_Config) ->
-    mock_epmd(),
+    cets_test_setup:mock_epmd(),
     %% We would fail to connect to the remote EPMD but we would get an IP
     pang = cets_ping:ping('mongooseim@resolvabletobadip'),
     meck:unload().
 
 pre_connect_fails_on_one_of_the_nodes(Config) ->
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    mock_epmd(),
+    cets_test_setup:mock_epmd(),
     %% We would get pong on Node2, but would fail an RPC to our hode
     pang = rpc(Node2, cets_ping, ping, ['cetsnode1@localhost']),
     History = meck:history(erl_epmd),
@@ -2957,76 +2969,6 @@ start_link_local(Name, Opts) ->
     {ok, Pid} = cets:start_link(Name, Opts),
     schedule_cleanup(Pid),
     {ok, Pid}.
-
-start_local(Name) ->
-    start_local(Name, #{}).
-
-start_local(Name, Opts) ->
-    catch cets:stop(Name),
-    wait_for_name_to_be_free(node(), Name),
-    {ok, Pid} = cets:start(Name, Opts),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
-
-schedule_cleanup(Pid) ->
-    Me = self(),
-    Cleaner = proc_lib:spawn(fun() ->
-        Ref = erlang:monitor(process, Me),
-        receive
-            {'DOWN', Ref, process, Me, _} ->
-                %% We do an RPC call, because erlang distribution
-                %% could not be always reliable (because we test netsplits)
-                rpc(cets_test_peer:node_to_peer(node(Pid)), cets, stop, [Pid]),
-                ets:delete_object(cleanup_table, {Me, self()})
-        end
-    end),
-    ets:insert(cleanup_table, {Me, Cleaner}).
-
-init_cleanup_table() ->
-    spawn(fun() ->
-        ets:new(cleanup_table, [named_table, public, bag]),
-        timer:sleep(infinity)
-    end).
-
-%% schedule_cleanup is async, so this function is waiting for it to finish
-wait_for_cleanup() ->
-    [
-        wait_for_down(Cleaner)
-     || {Owner, Cleaner} <- ets:tab2list(cleanup_table), not is_process_alive(Owner)
-    ].
-
-start(Node, Tab) ->
-    catch rpc(Node, cets, stop, [Tab]),
-    wait_for_name_to_be_free(Node, Tab),
-    {ok, Pid} = rpc(Node, cets, start, [Tab, #{}]),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
-
-start_disco(Node, Opts) ->
-    case Opts of
-        #{name := Name} ->
-            catch rpc(Node, cets, stop, [Name]),
-            wait_for_name_to_be_free(Node, Name);
-        _ ->
-            ok
-    end,
-    {ok, Pid} = rpc(Node, cets_discovery, start, [Opts]),
-    schedule_cleanup(Pid),
-    Pid.
-
-start_simple_disco() ->
-    F = fun(State) ->
-        {{ok, []}, State}
-    end,
-    {ok, Pid} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Pid.
-
-wait_for_name_to_be_free(Node, Name) ->
-    %% Wait for the old process to be killed by the cleaner in schedule_cleanup.
-    %% Cleaner is fast, but not instant.
-    cets_test_wait:wait_until(fun() -> rpc(Node, erlang, whereis, [Name]) end, undefined).
 
 receive_message(M) ->
     receive
@@ -3213,13 +3155,6 @@ get_message_queue_length(Pid) ->
     {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
     Len.
 
-wait_for_down(Pid) ->
-    Mon = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', Mon, process, Pid, Reason} -> Reason
-    after 5000 -> ct:fail({wait_for_down_timeout, Pid})
-    end.
-
 not_leader(Leader, Other, Leader) ->
     Other;
 not_leader(Other, Leader, Leader) ->
@@ -3311,20 +3246,6 @@ make_signalling_process() ->
             stop -> ok
         end
     end).
-
-mock_epmd() ->
-    meck:new(erl_epmd, [passthrough, unstick]),
-    meck:expect(erl_epmd, address_please, fun
-        ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
-        (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
-    end).
-
-mock_pause_on_remote_node_failing() ->
-    meck:new(cets_join, [passthrough, no_link]),
-    meck:expect(cets_join, pause_on_remote_node, fun(_JoinerPid, _AllPids) ->
-        error(mock_pause_on_remote_node_failing)
-    end),
-    ok.
 
 %% Fails if List has duplicates
 assert_unique(List) ->
