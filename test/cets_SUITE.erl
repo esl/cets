@@ -34,11 +34,9 @@
     start/2,
     start_local/1,
     start_local/2,
-    start_simple_disco/0,
     make_name/1,
     make_name/2,
     lock_name/1,
-    disco_name/1,
     given_two_joined_tables/1,
     given_two_joined_tables/2,
     given_3_servers/1,
@@ -180,10 +178,8 @@ cases() ->
         unknown_message_is_ignored_in_ack_process,
         unknown_cast_message_is_ignored_in_ack_process,
         unknown_call_returns_error_from_ack_process,
-        unknown_message_is_ignored_in_disco_process,
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
-        code_change_returns_ok_for_disco,
         run_spawn_forwards_errors,
         run_tracked_failed,
         run_tracked_logged,
@@ -1759,11 +1755,6 @@ unknown_message_is_ignored_in_ack_process(Config) ->
     AckPid ! oops,
     still_works(Pid).
 
-unknown_message_is_ignored_in_disco_process(_Config) ->
-    Pid = start_simple_disco(),
-    Pid ! oops,
-    #{} = sys:get_state(Pid).
-
 unknown_cast_message_is_ignored_in_ack_process(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
@@ -1788,12 +1779,6 @@ code_change_returns_ok_for_ack(Config) ->
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets_ack, v2, []),
     sys:resume(AckPid).
-
-code_change_returns_ok_for_disco(_Config) ->
-    Pid = start_simple_disco(),
-    sys:suspend(Pid),
-    ok = sys:change_code(Pid, cets_ack, v2, []),
-    sys:resume(Pid).
 
 run_spawn_forwards_errors(_Config) ->
     ?assertException(
