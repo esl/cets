@@ -58,8 +58,7 @@
 
 -import(cets_test_receive, [
     receive_message/1,
-    receive_message_with_arg/1,
-    assert_nothing_is_logged/2
+    receive_message_with_arg/1
 ]).
 
 -import(cets_test_helper, [
@@ -1053,7 +1052,7 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     %% Ensure there is nothing logged, we use log_ref to ignore logs from other tests.
     %% The counter example for no logging is
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
-    assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
+    cets_test_log:assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
 
 pause_owner_crashed_is_logged(Config) ->
     ct:timetrap({seconds, 6}),

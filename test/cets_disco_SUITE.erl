@@ -35,8 +35,7 @@
 
 -import(cets_test_receive, [
     receive_message/1,
-    flush_message/1,
-    receive_all_logs/1
+    flush_message/1
 ]).
 
 -import(cets_test_peer, [
@@ -732,7 +731,7 @@ logging_when_failing_join_with_disco(Config) ->
     try
         cets_discovery:add_table(Disco, Tab),
         timer:sleep(100),
-        Logs = receive_all_logs(?FUNCTION_NAME),
+        Logs = cets_test_log:receive_all_logs(?FUNCTION_NAME),
         Reason = {{nodedown, Node2}, {gen_server, call, [Pid2, other_servers, infinity]}},
         MatchedLogs = [
             Log
