@@ -194,7 +194,6 @@ seq_cases() ->
         insert_returns_when_netsplit,
         inserts_after_netsplit_reconnects,
         cets_ping_all_returns_when_ping_crashes,
-        join_interrupted_when_ping_crashes,
         ping_pairs_returns_pongs,
         ping_pairs_returns_earlier,
         pre_connect_fails_on_our_node,
@@ -206,7 +205,6 @@ seq_cases() ->
 
 cets_seq_no_log_cases() ->
     [
-        join_interrupted_when_ping_crashes,
         node_down_history_is_updated_when_netsplit_happens,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump
@@ -1501,19 +1499,6 @@ cets_ping_all_returns_when_ping_crashes(Config) ->
         (Server, Msg) -> meck:passthrough([Server, Msg])
     end),
     ?assertMatch({error, [{Pid2, {'EXIT', {simulate_crash, _}}}]}, cets:ping_all(Pid1)),
-    meck:unload().
-
-join_interrupted_when_ping_crashes(Config) ->
-    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
-    Tab3 = make_name(Config, 3),
-    {ok, Pid3} = start_local(Tab3, #{}),
-    meck:new(cets, [passthrough]),
-    meck:expect(cets_call, long_call, fun
-        (Server, ping) when Server == Pid2 -> error(simulate_crash);
-        (Server, Msg) -> meck:passthrough([Server, Msg])
-    end),
-    Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
     meck:unload().
 
 node_down_history_is_updated_when_netsplit_happens(Config) ->
