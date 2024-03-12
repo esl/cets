@@ -70,8 +70,8 @@
 all() ->
     [
         {group, cets},
-        {group, cets_no_log}
-        %       {group, cets_seq},
+        {group, cets_no_log},
+        {group, cets_seq}
         %       {group, cets_seq_no_log}
     ].
 
@@ -119,14 +119,17 @@ cases() ->
     ].
 
 seq_cases() ->
-    [].
+    [
+        joining_not_fully_connected_node_is_not_allowed,
+        joining_not_fully_connected_node_is_not_allowed2
+    ].
 
 cets_seq_no_log_cases() ->
     [].
 
 init_per_suite(Config) ->
     cets_test_setup:init_cleanup_table(),
-    cets_test_peer:start([ct2, ct5], Config).
+    cets_test_peer:start([ct2, ct3, ct5], Config).
 
 end_per_suite(Config) ->
     cets_test_setup:remove_cleanup_table(),
@@ -541,7 +544,67 @@ join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
     %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
     cets_test_log:assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
 
-%% Heleprs
+%% Joins from a bad (not fully connected) node
+%% Join process should check if nodes could contact each other before allowing to join
+joining_not_fully_connected_node_is_not_allowed(Config) ->
+    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid3} = start(Peer3, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    %% No connection between Peer5 and Node1
+    block_node(Node5, Peer5),
+    try
+        %% Pid5 and Pid3 could contact each other.
+        %% Pid3 could contact Pid1 (they are joined).
+        %% But Pid5 cannot contact Pid1.
+        {error, {task_failed, check_could_reach_each_other_failed, _}} =
+            rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
+        %% Still connected
+        cets:insert(Pid1, {r1}),
+        {ok, [{r1}]} = cets:remote_dump(Pid3),
+        [Pid3] = cets:other_pids(Pid1),
+        [Pid1] = cets:other_pids(Pid3)
+    after
+        reconnect_node(Node5, Peer5)
+    end,
+    [] = cets:other_pids(Pid5).
+
+%% Joins from a good (fully connected) node
+joining_not_fully_connected_node_is_not_allowed2(Config) ->
+    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
+    #{ct5 := Node5} = proplists:get_value(nodes, Config),
+    Node1 = node(),
+    Tab = make_name(Config),
+    {ok, Pid1} = start(Node1, Tab),
+    {ok, Pid3} = start(Peer3, Tab),
+    {ok, Pid5} = start(Peer5, Tab),
+    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
+    %% No connection between Peer5 and Node1
+    block_node(Node5, Peer5),
+    try
+        %% Pid5 and Pid3 could contact each other.
+        %% Pid3 could contact Pid1 (they are joined).
+        %% But Pid5 cannot contact Pid1.
+        {error, {task_failed, check_could_reach_each_other_failed, _}} = rpc(
+            Peer3, cets_join, join, [
+                lock_name(Config), #{}, Pid5, Pid3
+            ]
+        ),
+        %% Still connected
+        cets:insert(Pid1, {r1}),
+        {ok, [{r1}]} = cets:remote_dump(Pid3),
+        [Pid3] = cets:other_pids(Pid1),
+        [Pid1] = cets:other_pids(Pid3)
+    after
+        reconnect_node(Node5, Peer5)
+    end,
+    [] = cets:other_pids(Pid5).
+
+%% Helpers
 
 send_join_start_back_and_wait_for_continue_joining() ->
     Me = self(),
