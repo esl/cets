@@ -61,7 +61,8 @@
 
 -import(cets_test_helper, [
     assert_unique/1,
-    set_other_servers/2
+    set_other_servers/2,
+    set_join_ref/2
 ]).
 
 all() ->
@@ -118,13 +119,6 @@ cases() ->
         insert_serial_works_when_leader_is_back,
         insert_serial_blocks_when_leader_is_not_back,
         leader_is_the_same_in_metadata_after_join,
-        send_dump_fails_during_join_because_receiver_exits,
-        join_fails_in_check_fully_connected,
-        join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
-        join_fails_because_pids_do_not_match_for_nodes_in_segment,
-        join_fails_because_servers_overlap,
-        remote_ops_are_ignored_if_join_ref_does_not_match,
-        join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
         servers_remove_each_other_if_join_refs_do_not_match_after_unpause,
         test_multinode,
@@ -185,10 +179,8 @@ only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
         long_call_fails_because_linked_process_dies,
-        logs_are_printed_when_join_fails_because_servers_overlap,
         pause_owner_crashed_is_logged,
         pause_owner_crashed_is_not_logged_if_reason_is_normal,
-        join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
         shutdown_reason_is_not_logged_in_tracked,
         other_reason_is_logged_in_tracked,
@@ -645,188 +637,6 @@ leader_is_the_same_in_metadata_after_join(Config) ->
     Leader = cets:get_leader(Pid2),
     Leader = cets_metadata:get(T1, leader),
     Leader = cets_metadata:get(T2, leader).
-
-send_dump_fails_during_join_because_receiver_exits(Config) ->
-    Me = self(),
-    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
-        Me ! {down_called, self(), RemotePid}
-    end,
-    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_down => DownFn}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    F = fun
-        ({before_send_dump, P}) when P =:= Pid1 ->
-            %% Kill Pid2 process.
-            %% It does not crash the join process.
-            %% Pid1 would receive a dump with Pid2 in the server list.
-            exit(Pid2, sim_error),
-            %% Ensure Pid1 got DOWN message from Pid2 already
-            pong = cets:ping(Pid1),
-            Me ! before_send_dump_called;
-        (_) ->
-            ok
-    end,
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
-    receive_message(before_send_dump_called),
-    pong = cets:ping(Pid1),
-    receive_message({down_called, Pid1, Pid2}),
-    [] = cets:other_pids(Pid1),
-    %% Pid1 still works
-    cets:insert(Pid1, {1}),
-    {ok, [{1}]} = cets:remote_dump(Pid1).
-
-join_fails_in_check_fully_connected(Config) ->
-    Me = self(),
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    [Pid3] = cets:other_pids(Pid2),
-    F = fun
-        (before_check_fully_connected) ->
-            %% Ask Pid2 to remove Pid3 from the list
-            Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
-            %% Ensure Pid2 did the cleaning
-            pong = cets:ping(Pid2),
-            [] = cets:other_pids(Pid2),
-            Me ! before_check_fully_connected_called;
-        (_) ->
-            ok
-    end,
-    ?assertMatch(
-        {error, {task_failed, check_fully_connected_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    ),
-    receive_message(before_check_fully_connected_called).
-
-join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    %% But for some reason Pid3 has a different join_ref
-    %% (probably could happen if it still haven't checked other nodes after a join)
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    set_join_ref(Pid3, make_ref()),
-    ?assertMatch(
-        {error, {task_failed, check_same_join_ref_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    %% But for some reason Pid3 has a different other_nodes list
-    %% (probably could happen if it still haven't checked other nodes after a join)
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    set_other_servers(Pid3, []),
-    ?assertMatch(
-        {error, {task_failed, check_fully_connected_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-join_fails_because_servers_overlap(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    set_other_servers(Pid1, [Pid3]),
-    set_other_servers(Pid2, [Pid3]),
-    ?assertMatch(
-        {error, {task_failed, check_do_not_overlap_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-%% join_fails_because_servers_overlap testcase, but we check the logging.
-%% We check that `?LOG_ERROR(#{what => check_do_not_overlap_failed})' is called.
-logs_are_printed_when_join_fails_because_servers_overlap(Config) ->
-    LogRef = make_ref(),
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    set_other_servers(Pid1, [Pid3]),
-    set_other_servers(Pid2, [Pid3]),
-    ?assertMatch(
-        {error, {task_failed, check_do_not_overlap_failed, #{}}},
-        cets_join:join(lock_name(Config), #{log_ref => LogRef}, Pid1, Pid2, #{})
-    ),
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := error,
-            msg :=
-                {report, #{
-                    what := check_do_not_overlap_failed, log_ref := LogRef
-                }}
-        }} ->
-            ok
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
-    #{join_ref := JoinRef} = cets:info(Pid1),
-    set_join_ref(Pid1, make_ref()),
-    cets:insert(Pid2, {1}),
-    %% fix and check again
-    set_join_ref(Pid1, JoinRef),
-    cets:insert(Pid2, {2}),
-    {ok, [{2}]} = cets:remote_dump(Pid1).
-
-join_retried_if_lock_is_busy(Config) ->
-    Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    Lock = lock_name(Config),
-    SleepyF = fun
-        (join_start) ->
-            Me ! join_start,
-            timer:sleep(infinity);
-        (_) ->
-            ok
-    end,
-    F = fun
-        (before_retry) -> Me ! before_retry;
-        (_) -> ok
-    end,
-    %% Get the lock in a separate process
-    proc_lib:spawn_link(fun() ->
-        cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
-    end),
-    receive_message(join_start),
-    %% We actually would not return from cets_join:join unless we get the lock
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    end),
-    receive_message(before_retry).
-
-join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Me = self(),
-    #{pids := [Pid1, Pid2, Pid3, Pid4]} = given_n_servers(Config, 4, #{}),
-    Lock = lock_name(Config),
-    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{}),
-    ok = cets_join:join(Lock, #{}, Pid3, Pid4, #{}),
-    %% It is to just match logs
-    LogRef = make_ref(),
-    Info = #{log_ref => LogRef},
-    F1 = send_join_start_back_and_wait_for_continue_joining(),
-    F2 = fun(_) -> ok end,
-    %% Get the lock in a separate process
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F1}),
-        Me ! first_join_returns
-    end),
-    JoinPid = receive_message_with_arg(join_start),
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F2}),
-        Me ! second_join_returns
-    end),
-    JoinPid ! continue_joining,
-    %% At this point our first join would finish, after that our second join should exit too.
-    receive_message(first_join_returns),
-    receive_message(second_join_returns),
-    %% Ensure all logs are received by removing the handler, it is a sync operation.
-    %% (we do not expect any logs anyway).
-    logger:remove_handler(?FUNCTION_NAME),
-    %% Ensure there is nothing logged, we use log_ref to ignore logs from other tests.
-    %% The counter example for no logging is
-    %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
-    cets_test_log:assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
 
 pause_owner_crashed_is_logged(Config) ->
     ct:timetrap({seconds, 6}),
@@ -1855,9 +1665,6 @@ start_link_local(Name, Opts) ->
     schedule_cleanup(Pid),
     {ok, Pid}.
 
-set_join_ref(Pid, JoinRef) ->
-    sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
-
 stopped_pid() ->
     %% Get a pid for a stopped process
     {Pid, Mon} = spawn_monitor(fun() -> ok end),
@@ -1873,19 +1680,6 @@ bad_node_pid_binary() ->
     %% Pid <0.90.0> on badnode@localhost
     <<131, 88, 100, 0, 17, 98, 97, 100, 110, 111, 100, 101, 64, 108, 111, 99, 97, 108, 104, 111,
         115, 116, 0, 0, 0, 90, 0, 0, 0, 0, 100, 206, 70, 92>>.
-
-send_join_start_back_and_wait_for_continue_joining() ->
-    Me = self(),
-    fun
-        (join_start) ->
-            Me ! {join_start, self()},
-            receive
-                continue_joining ->
-                    ok
-            end;
-        (_) ->
-            ok
-    end.
 
 not_leader(Leader, Other, Leader) ->
     Other;

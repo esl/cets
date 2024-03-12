@@ -8,7 +8,8 @@
 
 -export([
     set_nodedown_timestamp/3,
-    set_other_servers/2
+    set_other_servers/2,
+    set_join_ref/2
 ]).
 
 get_disco_timestamp(Disco, MapName, NodeKey) ->
@@ -31,3 +32,6 @@ set_other_servers(Pid, Servers) ->
     sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
         State#{other_servers := Servers}
     end).
+
+set_join_ref(Pid, JoinRef) ->
+    sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
