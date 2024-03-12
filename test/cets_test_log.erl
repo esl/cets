@@ -2,7 +2,9 @@
 -module(cets_test_log).
 -export([
     receive_all_logs_with_log_ref/2,
-    receive_all_logs_from_pid/2
+    receive_all_logs_from_pid/2,
+    receive_all_logs/1,
+    assert_nothing_is_logged/2
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -60,4 +62,23 @@ ensure_logger_is_working(LogHandlerId, LogRef) ->
             ok
     after 5000 ->
         ct:fail({timeout, logger_is_broken})
+    end.
+
+receive_all_logs(Id) ->
+    receive
+        {log, Id, Log} ->
+            [Log | receive_all_logs(Id)]
+    after 100 ->
+        []
+    end.
+
+assert_nothing_is_logged(LogHandlerId, LogRef) ->
+    receive
+        {log, LogHandlerId, #{
+            level := Level,
+            msg := {report, #{log_ref := LogRef}}
+        }} when Level =:= warning; Level =:= error ->
+            ct:fail(got_logging_but_should_not)
+    after 0 ->
+        ok
     end.

@@ -35,15 +35,10 @@ unknown_cases() ->
     ].
 
 init_per_suite(Config) ->
-    Names = [peer_ct2],
-    {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(N) || N <- Names]),
-    [
-        {nodes, maps:from_list(lists:zip(Names, Nodes))},
-        {peers, maps:from_list(lists:zip(Names, Peers))}
-        | Config
-    ].
+    cets_test_peer:start([ct2], Config).
 
 end_per_suite(Config) ->
+    cets_test_peer:stop(Config),
     Config.
 
 init_per_group(_Group, Config) ->
@@ -64,7 +59,7 @@ end_per_testcase(_, _Config) ->
 %% Test blocking functionality
 
 waits_for_cleaning(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     cets_dist_blocker:add_cleaner(self()),
     connect_and_disconnect(Node2),
@@ -75,7 +70,7 @@ waits_for_cleaning(Config) ->
     gen_server:stop(Blocker).
 
 unblocks_if_cleaner_goes_down(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     Cleaner = spawn_cleaner(),
     connect_and_disconnect(Node2),
@@ -86,7 +81,7 @@ unblocks_if_cleaner_goes_down(Config) ->
     gen_server:stop(Blocker).
 
 unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
@@ -101,7 +96,7 @@ unblocks_if_cleaner_goes_down_and_second_cleaner_says_done(Config) ->
     gen_server:stop(Blocker).
 
 unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
@@ -117,7 +112,7 @@ unblocks_if_cleaner_says_done_and_second_cleaner_goes_down(Config) ->
     gen_server:stop(Blocker).
 
 blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     %% Two cleaners
     cets_dist_blocker:add_cleaner(self()),
@@ -131,7 +126,7 @@ blocks_if_cleaner_says_done_and_second_cleaner_does_not_ack(Config) ->
     gen_server:stop(Blocker).
 
 skip_blocking_if_no_cleaners(Config) ->
-    #{peer_ct2 := Node2} = proplists:get_value(nodes, Config),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
     {ok, Blocker} = cets_dist_blocker:start_link(),
     pong = net_adm:ping(Node2),
     true = erlang:disconnect_node(Node2),
