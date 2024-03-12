@@ -53,21 +53,12 @@
 all() ->
     [
         {group, cets}
-        %       {group, cets_seq},
-        %       {group, cets_seq_no_log}
     ].
 
 groups() ->
     %% Cases should have unique names, because we name CETS servers based on case names
     [
-        {cets, [parallel, {repeat_until_any_fail, 3}], assert_unique(cases())},
-        %% These tests actually simulate a netsplit on the distribution level.
-        %% Though, global's prevent_overlapping_partitions option starts kicking
-        %% all nodes from the cluster, so we have to be careful not to break other cases.
-        %% Setting prevent_overlapping_partitions=false on ct5 helps.
-        {cets_seq, [sequence, {repeat_until_any_fail, 2}], assert_unique(seq_cases())},
-        {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}],
-            assert_unique(cets_seq_no_log_cases())}
+        {cets, [parallel, {repeat_until_any_fail, 3}], assert_unique(cases())}
     ].
 
 cases() ->
@@ -85,12 +76,6 @@ cases() ->
         status_conflict_nodes,
         format_data_does_not_return_table_duplicates
     ].
-
-seq_cases() ->
-    [].
-
-cets_seq_no_log_cases() ->
-    [].
 
 init_per_suite(Config) ->
     cets_test_setup:init_cleanup_table(),
