@@ -53,7 +53,11 @@
 
 -import(cets_test_wait, [
     wait_for_down/1,
-    wait_for_ready/2
+    wait_for_ready/2,
+    wait_for_disco_timestamp_to_appear/3,
+    wait_for_disco_timestamp_to_be_updated/4,
+    wait_for_unpaused/3,
+    wait_for_join_ref_to_match/2
 ]).
 
 all() ->
@@ -2842,7 +2846,7 @@ disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
     #{disco := Disco, node2 := Node2} = Setup,
-    OldTimestamp = get_disco_timestamp(Disco, nodeup_timestamps, Node2),
+    OldTimestamp = cets_test_helper:get_disco_timestamp(Disco, nodeup_timestamps, Node2),
     disconnect_node_by_name(Config, ct2),
     wait_for_disco_timestamp_to_be_updated(Disco, nodeup_timestamps, Node2, OldTimestamp).
 
@@ -2850,7 +2854,7 @@ disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
     Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
     #{disco := Disco, node2 := Node2} = Setup,
-    OldTimestamp = get_disco_timestamp(Disco, node_start_timestamps, Node2),
+    OldTimestamp = cets_test_helper:get_disco_timestamp(Disco, node_start_timestamps, Node2),
     simulate_disco_restart(Setup),
     wait_for_disco_timestamp_to_be_updated(Disco, node_start_timestamps, Node2, OldTimestamp).
 
@@ -3085,38 +3089,6 @@ test_data_for_duplicate_missing_table_in_status(Config) ->
 
 return_same(X) ->
     X.
-
-wait_for_disco_timestamp_to_appear(Disco, MapName, NodeKey) ->
-    F = fun() ->
-        #{MapName := Map} = cets_discovery:system_info(Disco),
-        maps:is_key(NodeKey, Map)
-    end,
-    cets_test_wait:wait_until(F, true).
-
-wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
-    Cond = fun() ->
-        NewTimestamp = get_disco_timestamp(Disco, MapName, NodeKey),
-        NewTimestamp =/= OldTimestamp
-    end,
-    cets_test_wait:wait_until(Cond, true).
-
-wait_for_unpaused(Peer, Pid, PausedByPid) ->
-    Cond = fun() ->
-        {monitors, Info} = rpc(Peer, erlang, process_info, [Pid, monitors]),
-        lists:member({process, PausedByPid}, Info)
-    end,
-    cets_test_wait:wait_until(Cond, false).
-
-wait_for_join_ref_to_match(Pid, JoinRef) ->
-    Cond = fun() ->
-        maps:get(join_ref, cets:info(Pid))
-    end,
-    cets_test_wait:wait_until(Cond, JoinRef).
-
-get_disco_timestamp(Disco, MapName, NodeKey) ->
-    Info = cets_discovery:system_info(Disco),
-    #{MapName := #{NodeKey := Timestamp}} = Info,
-    Timestamp.
 
 make_signalling_process() ->
     proc_lib:spawn_link(fun() ->
