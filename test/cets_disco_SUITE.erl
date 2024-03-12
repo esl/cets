@@ -6,6 +6,20 @@
 -compile([export_all, nowarn_export_all]).
 
 -import(cets_test_setup, [
+    start/2,
+    start_local/1,
+    start_local/2,
+    make_name/1,
+    make_name/2,
+    disco_name/1
+]).
+
+-import(cets_test_wait, [
+    wait_for_ready/2,
+    wait_till_test_stage/2
+]).
+
+-import(cets_test_setup, [
     setup_two_nodes_and_discovery/1,
     setup_two_nodes_and_discovery/2,
     simulate_disco_restart/1
@@ -28,8 +42,13 @@
 
 -import(cets_test_helper, [assert_unique/1]).
 
+-import(cets_test_rpc, [
+    other_nodes/2
+]).
+
 all() ->
     [
+        {group, cets},
         {group, cets_seq},
         {group, cets_seq_no_log}
     ].
@@ -37,6 +56,7 @@ all() ->
 groups() ->
     %% Cases should have unique names, because we name CETS servers based on case names
     [
+        {cets, [parallel, {repeat_until_any_fail, 3}], assert_unique(cases())},
         %% These tests actually simulate a netsplit on the distribution level.
         %% Though, global's prevent_overlapping_partitions option starts kicking
         %% all nodes from the cluster, so we have to be careful not to break other cases.
@@ -44,6 +64,25 @@ groups() ->
         {cets_seq, [sequence, {repeat_until_any_fail, 2}], assert_unique(seq_cases())},
         {cets_seq_no_log, [sequence, {repeat_until_any_fail, 2}],
             assert_unique(cets_seq_no_log_cases())}
+    ].
+
+cases() ->
+    [
+        test_multinode_auto_discovery,
+        test_disco_add_table,
+        test_disco_delete_table,
+        test_disco_delete_unknown_table,
+        test_disco_delete_table_twice,
+        test_disco_file_appears,
+        test_disco_handles_bad_node,
+        cets_discovery_fun_backend_works,
+        test_disco_add_table_twice,
+        test_disco_add_two_tables,
+        disco_retried_if_get_nodes_fail,
+        disco_uses_regular_retry_interval_in_the_regular_phase,
+        disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down,
+        disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down,
+        disco_handles_node_up_and_down
     ].
 
 seq_cases() ->
@@ -90,6 +129,9 @@ end_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log
 end_per_group(_Group, Config) ->
     Config.
 
+init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
+    ct:make_priv_dir(),
+    init_per_testcase_generic(Name, Config);
 init_per_testcase(Name, Config) ->
     init_per_testcase_generic(Name, Config).
 
@@ -103,6 +145,283 @@ end_per_testcase(_, _Config) ->
 %% Modules that use a multiline LOG_ macro
 log_modules() ->
     [cets, cets_call, cets_long, cets_join, cets_discovery].
+
+test_multinode_auto_discovery(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco.txt"),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [Tab], disco_file => FileName}),
+    %% Disco is async, so we have to wait for the final state
+    ok = wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco),
+    #{verify_ready := []} =
+        cets_discovery:system_info(Disco),
+    ok.
+
+test_disco_add_table(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco.txt"),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
+    cets_discovery:add_table(Disco, Tab),
+    %% Disco is async, so we have to wait for the final state
+    ok = wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco),
+    ok.
+
+test_disco_delete_table(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_unknown_table(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_delete_table_twice(Config) ->
+    F = fun(State) -> {{ok, []}, State} end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Tab = make_name(Config),
+    cets_discovery:add_table(Disco, Tab),
+    #{tables := [Tab]} = cets_discovery:system_info(Disco),
+    cets_discovery:delete_table(Disco, Tab),
+    cets_discovery:delete_table(Disco, Tab),
+    #{tables := []} = cets_discovery:system_info(Disco).
+
+test_disco_file_appears(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco3.txt"),
+    file:delete(FileName),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
+        after_error
+    ),
+    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
+    %% Disco is async, so we have to wait for the final state
+    ok = wait_for_ready(Disco, 5000),
+    [Node2] = other_nodes(Node1, Tab),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco),
+    ok.
+
+test_disco_handles_bad_node(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    Dir = proplists:get_value(priv_dir, Config),
+    ct:pal("Dir ~p", [Dir]),
+    FileName = filename:join(Dir, "disco_badnode.txt"),
+    ok = file:write_file(FileName, io_lib:format("badnode@localhost~n~s~n~s~n", [Node1, Node2])),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
+    cets_discovery:add_table(Disco, Tab),
+    %% Check that wait_for_ready would not block forever:
+    ok = wait_for_ready(Disco, 5000),
+    %% Check if the node sent pang:
+    #{unavailable_nodes := ['badnode@localhost']} = cets_discovery:system_info(Disco),
+    %% Check that other nodes are discovered fine
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco).
+
+cets_discovery_fun_backend_works(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _Pid1} = start(Node1, Tab),
+    {ok, _Pid2} = start(Node2, Tab),
+    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    ok = wait_for_ready(Disco, 5000),
+    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
+        cets_discovery:info(Disco).
+
+test_disco_add_table_twice(Config) ->
+    Dir = proplists:get_value(priv_dir, Config),
+    FileName = filename:join(Dir, "disco.txt"),
+    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
+    Tab = make_name(Config),
+    {ok, _Pid} = start_local(Tab),
+    cets_discovery:add_table(Disco, Tab),
+    cets_discovery:add_table(Disco, Tab),
+    %% Check that everything is fine
+    #{tables := [Tab]} = cets_discovery:system_info(Disco).
+
+test_disco_add_two_tables(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab1 = make_name(Config, 1),
+    Tab2 = make_name(Config, 2),
+    {ok, _} = start(Node1, Tab1),
+    {ok, _} = start(Node2, Tab1),
+    {ok, _} = start(Node1, Tab2),
+    {ok, _} = start(Node2, Tab2),
+    Me = self(),
+    F = fun
+        (State = #{waited := true}) ->
+            Me ! called_after_waited,
+            {{ok, [Node1, Node2]}, State};
+        (State) ->
+            wait_till_test_stage(Me, sent_both),
+            Me ! waited_for_sent_both,
+            {{ok, [Node1, Node2]}, State#{waited => true}}
+    end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    %% Add two tables async
+    cets_discovery:add_table(Disco, Tab1),
+    %% After the first table, Disco would get blocked in get_nodes function (see wait_till_test_stage in F above)
+    cets_discovery:add_table(Disco, Tab2),
+    put(test_stage, sent_both),
+    %% Just ensure wait_till_test_stage function works:
+    wait_till_test_stage(Me, sent_both),
+    %% First check is done, the second check should be triggered asap
+    %% (i.e. because of should_retry_get_nodes=true set in state)
+    receive_message(waited_for_sent_both),
+    %% try_joining would be called after set_nodes,
+    %% but it is async, so wait until it is done:
+    cets_test_wait:wait_until(
+        fun() ->
+            maps:with(
+                [get_nodes_status, should_retry_get_nodes, join_status, should_retry_join],
+                cets_discovery:system_info(Disco)
+            )
+        end,
+        #{
+            get_nodes_status => not_running,
+            should_retry_get_nodes => false,
+            join_status => not_running,
+            should_retry_join => false
+        }
+    ),
+    [
+        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab1},
+        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab2}
+    ] =
+        cets_discovery:info(Disco),
+    ok.
+
+disco_retried_if_get_nodes_fail(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) ->
+        {{error, simulate_error}, State}
+    end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
+        after_error
+    ),
+    ok.
+
+disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
+    #{disco := Disco} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
+    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
+
+%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase, but has nodedown
+disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down(Config) ->
+    SysInfo = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
+    #{disco := Disco, node2 := Node2} = SysInfo,
+    Disco ! {nodedown, Node2},
+    #{phase := regular, retry_type := after_nodedown} = cets_discovery:system_info(Disco).
+
+%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down, but we simulate long downtime
+disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down(Config) ->
+    #{disco := Disco, node2 := Node2} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(
+        Config
+    ),
+    Disco ! {nodedown, Node2},
+    TestTimestamp = erlang:system_time(millisecond) - timer:seconds(1000),
+    cets_test_helper:set_nodedown_timestamp(Disco, Node2, TestTimestamp),
+    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
+
+generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    Disco ! enter_regular_phase,
+    cets_discovery:add_table(Disco, Tab),
+    cets_test_wait:wait_until(
+        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end, regular
+    ),
+    #{disco => Disco, node2 => Node2}.
+
+disco_handles_node_up_and_down(Config) ->
+    BadNode = 'badnode@localhost',
+    Node1 = node(),
+    #{ct2 := Node2} = proplists:get_value(nodes, Config),
+    Tab = make_name(Config),
+    {ok, _} = start(Node1, Tab),
+    {ok, _} = start(Node2, Tab),
+    F = fun(State) ->
+        {{ok, [Node1, Node2, BadNode]}, State}
+    end,
+    {ok, Disco} = cets_discovery:start_link(#{
+        backend_module => cets_discovery_fun, get_nodes_fn => F
+    }),
+    cets_discovery:add_table(Disco, Tab),
+    %% get_nodes call is async, so wait for it
+    cets_test_wait:wait_until(
+        fun() -> length(maps:get(nodes, cets_discovery:system_info(Disco))) end,
+        3
+    ),
+    Disco ! {nodeup, BadNode},
+    Disco ! {nodedown, BadNode},
+    %% Check that wait_for_ready still works
+    ok = wait_for_ready(Disco, 5000).
 
 disco_logs_nodeup(Config) ->
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
