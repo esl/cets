@@ -28,6 +28,7 @@
 -behaviour(gen_server).
 
 -export([
+    start_link/2,
     start/2,
     stop/1,
     insert/2,
@@ -70,6 +71,7 @@
 ]).
 
 -ignore_xref([
+    start_link/2,
     start/2,
     stop/1,
     insert/2,
@@ -248,6 +250,17 @@
 ]).
 
 %% API functions
+
+%% @doc Starts a linked process serving an ETS table.
+%% @see start/2
+-spec start_link(table_name(), start_opts()) -> gen_server:start_ret().
+start_link(Tab, Opts) when is_atom(Tab) ->
+    case check_opts(Opts) of
+        [] ->
+            gen_server:start_link({local, Tab}, ?MODULE, {Tab, Opts}, []);
+        Errors ->
+            {error, Errors}
+    end.
 
 %% @doc Starts a process serving an ETS table.
 %%

@@ -39,6 +39,7 @@ groups() ->
 
 cases() ->
     [
+        start_link_inits_and_accepts_records,
         inserted_records_could_be_read_back,
         insert_many_with_one_record,
         insert_many_with_two_records,
@@ -52,6 +53,7 @@ cases() ->
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
+        bag_with_conflict_handler_not_allowed_for_start_link,
         insert_new_works,
         insert_new_works_with_table_name,
         insert_new_works_when_leader_is_back,
@@ -273,6 +275,12 @@ end_per_testcase(_, _Config) ->
 %% Modules that use a multiline LOG_ macro
 log_modules() ->
     [cets, cets_call, cets_long, cets_join, cets_discovery].
+
+start_link_inits_and_accepts_records(Config) ->
+    Tab = make_name(Config),
+    start_link_local(Tab),
+    cets:insert(Tab, {alice, 32}),
+    [{alice, 32}] = ets:lookup(Tab, alice).
 
 inserted_records_could_be_read_back(Config) ->
     Tab = make_name(Config),
@@ -746,6 +754,10 @@ resolve_highest({K, A}, {K, B}) ->
 bag_with_conflict_handler_not_allowed(Config) ->
     {error, [bag_with_conflict_handler]} =
         cets:start(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
+
+bag_with_conflict_handler_not_allowed_for_start_link(Config) ->
+    {error, [bag_with_conflict_handler]} =
+        cets:start_link(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
 
 join_with_the_same_pid(Config) ->
     Tab = make_name(Config),
@@ -2916,6 +2928,16 @@ still_works(Pid) ->
     %% The server works fine
     ok = cets:insert(Pid, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid).
+
+start_link_local(Name) ->
+    start_link_local(Name, #{}).
+
+start_link_local(Name, Opts) ->
+    catch cets:stop(Name),
+    wait_for_name_to_be_free(node(), Name),
+    {ok, Pid} = cets:start_link(Name, Opts),
+    schedule_cleanup(Pid),
+    {ok, Pid}.
 
 start_local(Name) ->
     start_local(Name, #{}).
