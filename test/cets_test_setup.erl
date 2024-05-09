@@ -13,6 +13,8 @@
 -export([
     start_local/1,
     start_local/2,
+    start_link_local/1,
+    start_link_local/2,
     start/2,
     start_disco/2,
     start_simple_disco/0
@@ -77,6 +79,16 @@ start(Node, Tab) ->
     catch rpc(Node, cets, stop, [Tab]),
     cets_test_wait:wait_for_name_to_be_free(Node, Tab),
     {ok, Pid} = rpc(Node, cets, start, [Tab, #{}]),
+    schedule_cleanup(Pid),
+    {ok, Pid}.
+
+start_link_local(Name) ->
+    start_link_local(Name, #{}).
+
+start_link_local(Name, Opts) ->
+    catch cets:stop(Name),
+    cets_test_wait:wait_for_name_to_be_free(node(), Name),
+    {ok, Pid} = cets:start_link(Name, Opts),
     schedule_cleanup(Pid),
     {ok, Pid}.
 

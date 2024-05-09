@@ -99,7 +99,6 @@ cases() ->
         delete_works,
         delete_many_works,
         inserted_records_could_be_read_back_from_replicated_table,
-        bag_with_conflict_handler_not_allowed_for_start_link,
         insert_new_works,
         insert_new_works_with_table_name,
         insert_new_works_when_leader_is_back,
@@ -237,7 +236,7 @@ log_modules() ->
 
 start_link_inits_and_accepts_records(Config) ->
     Tab = make_name(Config),
-    start_link_local(Tab),
+    cets_test_setup:start_link_local(Tab),
     cets:insert(Tab, {alice, 32}),
     [{alice, 32}] = ets:lookup(Tab, alice).
 
@@ -1446,16 +1445,6 @@ still_works(Pid) ->
     %% The server works fine
     ok = cets:insert(Pid, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid).
-
-start_link_local(Name) ->
-    start_link_local(Name, #{}).
-
-start_link_local(Name, Opts) ->
-    catch cets:stop(Name),
-    wait_for_name_to_be_free(node(), Name),
-    {ok, Pid} = cets:start_link(Name, Opts),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
 
 stopped_pid() ->
     %% Get a pid for a stopped process

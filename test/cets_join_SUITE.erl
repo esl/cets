@@ -99,10 +99,13 @@ groups() ->
 cases() ->
     [
         join_works,
+        join_works_with_existing_data,
+        join_works_with_existing_data_with_conflicts,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
         join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
         bag_with_conflict_handler_not_allowed,
+        bag_with_conflict_handler_not_allowed_for_start_link,
         join_with_the_same_pid,
         join_ref_is_same_after_join,
         join_fails_because_server_process_not_found,
@@ -194,6 +197,14 @@ join_works_with_existing_data_with_conflicts(Config) ->
     [{alice, 33}] = ets:lookup(Tab1, alice),
     [{alice, 32}] = ets:lookup(Tab2, alice).
 
+bag_with_conflict_handler_not_allowed(Config) ->
+    {error, [bag_with_conflict_handler]} =
+        cets:start(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
+
+bag_with_conflict_handler_not_allowed_for_start_link(Config) ->
+    {error, [bag_with_conflict_handler]} =
+        cets:start_link(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
+
 join_works_with_existing_data_with_conflicts_and_defined_conflict_handler(Config) ->
     Opts = #{handle_conflict => fun resolve_highest/2},
     Tab1 = make_name(Config, 1),
@@ -250,10 +261,6 @@ resolve_user_conflict(_U1, U2) ->
 
 resolve_highest({K, A}, {K, B}) ->
     {K, max(A, B)}.
-
-bag_with_conflict_handler_not_allowed(Config) ->
-    {error, [bag_with_conflict_handler]} =
-        cets:start(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
 
 join_with_the_same_pid(Config) ->
     Tab = make_name(Config),
