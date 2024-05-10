@@ -1,4 +1,6 @@
 -module(cets_test_setup).
+-export([suite/0]).
+
 -export([
     mock_epmd/0,
     mock_pause_on_remote_node_failing/0
@@ -50,6 +52,9 @@
 ]).
 
 -import(cets_test_rpc, [rpc/4]).
+
+suite() ->
+    [{timetrap, {seconds, 10}}].
 
 mock_epmd() ->
     meck:new(erl_epmd, [passthrough, unstick]),

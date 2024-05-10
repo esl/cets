@@ -56,6 +56,9 @@
     other_nodes/2
 ]).
 
+suite() ->
+    cets_test_setup:suite().
+
 all() ->
     [
         {group, cets},

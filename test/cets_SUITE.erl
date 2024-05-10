@@ -65,6 +65,9 @@
     set_join_ref/2
 ]).
 
+suite() ->
+    cets_test_setup:suite().
+
 all() ->
     [
         {group, cets},
