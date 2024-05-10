@@ -34,7 +34,10 @@ name(Node) ->
 
 start_node(Id) ->
     {ok, Peer, Node} = ?CT_PEER(#{
-        name => name(Id), connection => standard_io, args => extra_args(Id)
+        name => name(Id),
+        connection => standard_io,
+        args => extra_args(Id),
+        shutdown => 3000
     }),
     %% Register so we can find Peer process later in code
     register(node_to_peer_name(Node), Peer),
