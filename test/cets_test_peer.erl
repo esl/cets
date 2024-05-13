@@ -26,7 +26,14 @@ start(Names, Config) ->
 
 stop(Config) ->
     Peers = proplists:get_value(peers, Config),
-    [peer:stop(Peer) || Peer <- maps:values(Peers)],
+    [
+        slow_task(
+            "peer:stop:self",
+            self(),
+            fun() -> slow_task("peer:stop", Peer, fun() -> peer:stop(Peer) end) end
+        )
+     || Peer <- maps:values(Peers)
+    ],
     ok.
 
 name(Node) ->
@@ -98,3 +105,18 @@ disconnect_node_by_name(Config, Id) ->
         lists:member(Node, nodes())
     end,
     cets_test_wait:wait_until(F, false).
+
+slow_task(What, Self, F) ->
+    Pid = spawn_link(fun() -> monitor_loop(What, Self) end),
+    Res = F(),
+    Pid ! stop,
+    Res.
+
+monitor_loop(What, Pid) ->
+    receive
+        stop ->
+            ok
+    after 1000 ->
+        ct:pal("monitor_loop ~p ~p", [What, erlang:process_info(Pid, current_stacktrace)]),
+        monitor_loop(What, Pid)
+    end.
