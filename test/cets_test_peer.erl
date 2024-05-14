@@ -17,7 +17,7 @@
 -include_lib("common_test/include/ct.hrl").
 
 start(Names, Config) ->
-    {Nodes, Peers} = lists:unzip([start_node(N) || N <- Names]),
+    {Nodes, Peers} = lists:unzip([find_or_start_node(N) || N <- Names]),
     [
         {nodes, maps:from_list(lists:zip(Names, Nodes))},
         {peers, maps:from_list(lists:zip(Names, Peers))}
@@ -25,19 +25,26 @@ start(Names, Config) ->
     ].
 
 stop(Config) ->
-    Peers = proplists:get_value(peers, Config),
+    %% peer:stop/1 freezes in the code cover logic.
+    %% So, we reuse nodes between different suites.
+    %% Ensure that the nodes are connected again.
+    Nodes = proplists:get_value(nodes, Config),
     [
-        slow_task(
-            "peer:stop:self",
-            self(),
-            fun() -> slow_task("peer:stop", Peer, fun() -> peer:stop(Peer) end) end
-        )
-     || Peer <- maps:values(Peers)
+        reconnect_node(Node, node_to_peer(Node))
+     || Node <- maps:values(Nodes)
     ],
     ok.
 
 name(Node) ->
     list_to_atom(peer:random_name(atom_to_list(Node))).
+
+find_or_start_node(Id) ->
+    case persistent_term:get({id_to_node_peer, Id}, undefined) of
+        undefined ->
+            start_node(Id);
+        NodePeer ->
+            NodePeer
+    end.
 
 start_node(Id) ->
     {ok, Peer, Node} = ?CT_PEER(#{
@@ -47,7 +54,8 @@ start_node(Id) ->
         shutdown => 3000
     }),
     %% Register so we can find Peer process later in code
-    register(node_to_peer_name(Node), Peer),
+    persistent_term:put({node_to_peer, Node}, Peer),
+    persistent_term:put({id_to_node_peer, Id}, {Node, Peer}),
     %% Keep nodes running after init_per_suite is finished
     unlink(Peer),
     %% Do RPC using alternative connection method
@@ -60,15 +68,12 @@ node_to_peer(Node) when Node =:= node() ->
     %% There is no peer for the local CT node
     Node;
 node_to_peer(Node) when is_atom(Node) ->
-    case whereis(node_to_peer_name(Node)) of
+    case persistent_term:get({node_to_peer, Node}) of
         Pid when is_pid(Pid) ->
             Pid;
         undefined ->
             ct:fail({node_to_peer_failed, Node})
     end.
-
-node_to_peer_name(Node) ->
-    list_to_atom(atom_to_list(Node) ++ "_peer").
 
 %% Set epmd_port for better coverage
 extra_args(ct2) ->
@@ -88,6 +93,7 @@ block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
 
 reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
     rpc(Peer, erlang, set_cookie, [node(), erlang:get_cookie()]),
+    erlang:set_cookie(Node, erlang:get_cookie()),
     %% Very rarely it could return pang
     cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pong),
     cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pong).
@@ -105,18 +111,3 @@ disconnect_node_by_name(Config, Id) ->
         lists:member(Node, nodes())
     end,
     cets_test_wait:wait_until(F, false).
-
-slow_task(What, Self, F) ->
-    Pid = spawn_link(fun() -> monitor_loop(What, Self) end),
-    Res = F(),
-    Pid ! stop,
-    Res.
-
-monitor_loop(What, Pid) ->
-    receive
-        stop ->
-            ok
-    after 1000 ->
-        ct:pal("monitor_loop ~p ~p", [What, erlang:process_info(Pid, current_stacktrace)]),
-        monitor_loop(What, Pid)
-    end.
