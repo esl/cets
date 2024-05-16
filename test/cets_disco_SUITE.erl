@@ -43,7 +43,7 @@
     block_node/2,
     reconnect_node/2,
     disconnect_node/2,
-    disconnect_node_by_name/2
+    disconnect_node_by_id/2
 ]).
 
 -import(cets_test_rpc, [
@@ -636,7 +636,7 @@ disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
     Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
     #{disco := Disco, node2 := Node2} = Setup,
     OldTimestamp = cets_test_helper:get_disco_timestamp(Disco, nodeup_timestamps, Node2),
-    disconnect_node_by_name(Config, ct2),
+    disconnect_node_by_id(Config, ct2),
     wait_for_disco_timestamp_to_be_updated(Disco, nodeup_timestamps, Node2, OldTimestamp).
 
 disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->

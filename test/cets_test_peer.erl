@@ -9,18 +9,18 @@
     block_node/2,
     reconnect_node/2,
     disconnect_node/2,
-    disconnect_node_by_name/2
+    disconnect_node_by_id/2
 ]).
 
 -import(cets_test_rpc, [rpc/4]).
 
 -include_lib("common_test/include/ct.hrl").
 
-start(Names, Config) ->
-    {Nodes, Peers} = lists:unzip([find_or_start_node(N) || N <- Names]),
+start(Ids, Config) ->
+    {Nodes, Peers} = lists:unzip([find_or_start_node(Id) || Id <- Ids]),
     [
-        {nodes, maps:from_list(lists:zip(Names, Nodes))},
-        {peers, maps:from_list(lists:zip(Names, Peers))}
+        {nodes, maps:from_list(lists:zip(Ids, Nodes))},
+        {peers, maps:from_list(lists:zip(Ids, Peers))}
         | Config
     ].
 
@@ -101,7 +101,7 @@ reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
 disconnect_node(RPCNode, DisconnectNode) ->
     rpc(RPCNode, erlang, disconnect_node, [DisconnectNode]).
 
-disconnect_node_by_name(Config, Id) ->
+disconnect_node_by_id(Config, Id) ->
     Peer = maps:get(Id, proplists:get_value(peers, Config)),
     Node = maps:get(Id, proplists:get_value(nodes, Config)),
     %% We could need to retry to disconnect, if the local node is currently trying to establish a connection

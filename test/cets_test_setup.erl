@@ -48,7 +48,7 @@
 
 -import(cets_test_peer, [
     disconnect_node/2,
-    disconnect_node_by_name/2
+    disconnect_node_by_id/2
 ]).
 
 -import(cets_test_rpc, [rpc/4]).
@@ -214,7 +214,7 @@ setup_two_nodes_and_discovery(Config, Flags) ->
     Node1 = node(),
     #{ct2 := Peer2} = proplists:get_value(peers, Config),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    disconnect_node_by_name(Config, ct2),
+    disconnect_node_by_id(Config, ct2),
     Tab = make_name(Config),
     {ok, _Pid1} = start(Node1, Tab),
     {ok, _Pid2} = start(Peer2, Tab),
@@ -252,7 +252,7 @@ setup_two_nodes_and_discovery(Config, Flags) ->
     case lists:member(netsplit, Flags) of
         true ->
             %% Simulate a loss of connection between nodes
-            disconnect_node_by_name(Config, ct2);
+            disconnect_node_by_id(Config, ct2);
         false ->
             ok
     end,
