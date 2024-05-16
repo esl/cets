@@ -7,45 +7,18 @@
 
 -import(cets_test_setup, [
     start/2,
-    start_local/1,
-    start_local/2,
-    start_disco/2,
-    start_simple_disco/0,
     make_name/1,
     make_name/2,
-    lock_name/1,
-    disco_name/1
-]).
-
--import(cets_test_wait, [
-    wait_for_down/1,
-    wait_for_ready/2,
-    wait_till_test_stage/2
+    lock_name/1
 ]).
 
 -import(cets_test_setup, [
-    setup_two_nodes_and_discovery/1,
-    setup_two_nodes_and_discovery/2,
-    simulate_disco_restart/1,
-    make_signalling_process/0,
     given_two_joined_tables/1
-]).
-
--import(cets_test_wait, [
-    wait_for_disco_timestamp_to_appear/3,
-    wait_for_disco_timestamp_to_be_updated/4
-]).
-
--import(cets_test_receive, [
-    receive_message/1,
-    flush_message/1
 ]).
 
 -import(cets_test_peer, [
     block_node/2,
-    reconnect_node/2,
-    disconnect_node/2,
-    disconnect_node_by_name/2
+    reconnect_node/2
 ]).
 
 -import(cets_test_rpc, [

@@ -7,8 +7,6 @@
 
 -import(cets_test_setup, [
     start/2,
-    start_local/1,
-    start_local/2,
     start_disco/2,
     make_name/1,
     make_name/2,
@@ -26,28 +24,13 @@
     simulate_disco_restart/1
 ]).
 
--import(cets_test_wait, [
-    wait_for_disco_timestamp_to_appear/3,
-    wait_for_disco_timestamp_to_be_updated/4
-]).
-
 -import(cets_test_receive, [
-    receive_message/1,
-    flush_message/1
-]).
-
--import(cets_test_peer, [
-    disconnect_node/2,
-    disconnect_node_by_name/2
+    receive_message/1
 ]).
 
 -import(cets_test_helper, [
     assert_unique/1,
     set_other_servers/2
-]).
-
--import(cets_test_rpc, [
-    other_nodes/2
 ]).
 
 suite() ->
