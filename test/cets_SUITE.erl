@@ -13,8 +13,6 @@
 -compile([export_all, nowarn_export_all]).
 
 -import(cets_test_peer, [
-    block_node/2,
-    reconnect_node/2,
     disconnect_node/2
 ]).
 
@@ -40,14 +38,11 @@
     given_two_joined_tables/1,
     given_two_joined_tables/2,
     given_3_servers/1,
-    given_3_servers/2,
-    given_n_servers/3,
     make_process/0
 ]).
 
 -import(cets_test_wait, [
     wait_for_down/1,
-    wait_for_ready/2,
     wait_for_unpaused/3,
     wait_for_join_ref_to_match/2,
     wait_till_test_stage/2,
@@ -61,7 +56,6 @@
 
 -import(cets_test_helper, [
     assert_unique/1,
-    set_other_servers/2,
     set_join_ref/2
 ]).
 
