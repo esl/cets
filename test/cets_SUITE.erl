@@ -12,6 +12,56 @@
 
 -compile([export_all, nowarn_export_all]).
 
+-import(cets_test_peer, [
+    disconnect_node/2
+]).
+
+-import(cets_test_rpc, [
+    rpc/4,
+    insert/3,
+    insert_many/3,
+    delete/3,
+    delete_request/3,
+    delete_many/3,
+    dump/2,
+    other_nodes/2,
+    join/4
+]).
+
+-import(cets_test_setup, [
+    start/2,
+    start_local/1,
+    start_local/2,
+    make_name/1,
+    make_name/2,
+    lock_name/1,
+    given_two_joined_tables/1,
+    given_two_joined_tables/2,
+    given_3_servers/1,
+    make_process/0
+]).
+
+-import(cets_test_wait, [
+    wait_for_down/1,
+    wait_for_unpaused/3,
+    wait_for_join_ref_to_match/2,
+    wait_till_test_stage/2,
+    wait_till_message_queue_length/2
+]).
+
+-import(cets_test_receive, [
+    receive_message/1,
+    receive_message_with_arg/1
+]).
+
+-import(cets_test_helper, [
+    assert_unique/1,
+    set_join_ref/2
+]).
+
+suite() ->
+    cets_test_setup:suite().
+
 all() ->
     [
         {group, cets},
@@ -45,15 +95,7 @@ cases() ->
         insert_many_with_two_records,
         delete_works,
         delete_many_works,
-        join_works,
         inserted_records_could_be_read_back_from_replicated_table,
-        join_works_with_existing_data,
-        join_works_with_existing_data_with_conflicts,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys,
-        join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2,
-        bag_with_conflict_handler_not_allowed,
-        bag_with_conflict_handler_not_allowed_for_start_link,
         insert_new_works,
         insert_new_works_with_table_name,
         insert_new_works_when_leader_is_back,
@@ -73,53 +115,10 @@ cases() ->
         insert_serial_works_when_leader_is_back,
         insert_serial_blocks_when_leader_is_not_back,
         leader_is_the_same_in_metadata_after_join,
-        join_with_the_same_pid,
-        join_ref_is_same_after_join,
-        join_fails_because_server_process_not_found,
-        join_fails_because_server_process_not_found_before_get_pids,
-        join_fails_before_send_dump,
-        join_fails_before_send_dump_and_there_are_pending_remote_ops,
-        send_dump_fails_during_join_because_receiver_exits,
-        join_fails_in_check_fully_connected,
-        join_fails_because_join_refs_do_not_match_for_nodes_in_segment,
-        join_fails_because_pids_do_not_match_for_nodes_in_segment,
-        join_fails_because_servers_overlap,
-        remote_ops_are_ignored_if_join_ref_does_not_match,
-        join_retried_if_lock_is_busy,
         send_dump_contains_already_added_servers,
-        servers_remove_each_other_if_join_refs_do_not_match_after_unpause,
         test_multinode,
         test_multinode_remote_insert,
         node_list_is_correct,
-        test_multinode_auto_discovery,
-        test_disco_add_table,
-        test_disco_delete_table,
-        test_disco_delete_unknown_table,
-        test_disco_delete_table_twice,
-        test_disco_file_appears,
-        test_disco_handles_bad_node,
-        cets_discovery_fun_backend_works,
-        test_disco_add_table_twice,
-        test_disco_add_two_tables,
-        disco_retried_if_get_nodes_fail,
-        disco_uses_regular_retry_interval_in_the_regular_phase,
-        disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down,
-        disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down,
-        disco_handles_node_up_and_down,
-        status_available_nodes,
-        status_available_nodes_do_not_contain_nodes_with_stopped_disco,
-        status_unavailable_nodes,
-        status_unavailable_nodes_is_subset_of_discovery_nodes,
-        status_joined_nodes,
-        status_discovery_works,
-        status_discovered_nodes,
-        status_remote_nodes_without_disco,
-        status_remote_nodes_with_unknown_tables,
-        status_remote_nodes_with_missing_nodes,
-        status_conflict_nodes,
-        disco_wait_for_get_nodes_works,
-        disco_wait_for_get_nodes_blocks_and_returns,
-        disco_wait_for_get_nodes_when_get_nodes_needs_to_be_retried,
         get_nodes_request,
         test_locally,
         handle_down_is_called,
@@ -155,10 +154,8 @@ cases() ->
         unknown_message_is_ignored_in_ack_process,
         unknown_cast_message_is_ignored_in_ack_process,
         unknown_call_returns_error_from_ack_process,
-        unknown_message_is_ignored_in_disco_process,
         code_change_returns_ok,
         code_change_returns_ok_for_ack,
-        code_change_returns_ok_for_disco,
         run_spawn_forwards_errors,
         run_tracked_failed,
         run_tracked_logged,
@@ -166,10 +163,6 @@ cases() ->
         send_leader_op_throws_noproc,
         pinfo_returns_value,
         pinfo_returns_undefined,
-        format_data_does_not_return_table_duplicates,
-        cets_ping_non_existing_node,
-        cets_ping_net_family,
-        unexpected_nodedown_is_ignored_by_disco,
         ignore_send_dump_received_when_unpaused,
         ignore_send_dump_received_when_paused_with_another_pause_ref,
         pause_on_remote_node_returns_if_monitor_process_dies
@@ -179,10 +172,8 @@ only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
         long_call_fails_because_linked_process_dies,
-        logs_are_printed_when_join_fails_because_servers_overlap,
         pause_owner_crashed_is_logged,
         pause_owner_crashed_is_not_logged_if_reason_is_normal,
-        join_done_already_while_waiting_for_lock_so_do_nothing,
         atom_error_is_logged_in_tracked,
         shutdown_reason_is_not_logged_in_tracked,
         other_reason_is_logged_in_tracked,
@@ -193,29 +184,6 @@ only_for_logger_cases() ->
 
 seq_cases() ->
     [
-        insert_returns_when_netsplit,
-        inserts_after_netsplit_reconnects,
-        disco_connects_to_unconnected_node,
-        joining_not_fully_connected_node_is_not_allowed,
-        joining_not_fully_connected_node_is_not_allowed2,
-        %% Cannot be run in parallel with other tests because checks all logging messages.
-        logging_when_failing_join_with_disco,
-        cets_ping_all_returns_when_ping_crashes,
-        join_interrupted_when_ping_crashes,
-        disco_logs_nodeup,
-        disco_logs_nodedown,
-        disco_logs_nodeup_after_downtime,
-        disco_logs_node_reconnects_after_downtime,
-        disco_node_up_timestamp_is_remembered,
-        disco_node_down_timestamp_is_remembered,
-        disco_nodeup_timestamp_is_updated_after_node_reconnects,
-        disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_late_pang_result_arrives_after_node_went_up,
-        disco_nodeup_triggers_check_and_get_nodes,
-        ping_pairs_returns_pongs,
-        ping_pairs_returns_earlier,
-        pre_connect_fails_on_our_node,
-        pre_connect_fails_on_one_of_the_nodes,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump,
         pause_on_remote_node_crashes
@@ -223,28 +191,17 @@ seq_cases() ->
 
 cets_seq_no_log_cases() ->
     [
-        join_interrupted_when_ping_crashes,
-        node_down_history_is_updated_when_netsplit_happens,
-        disco_node_up_timestamp_is_remembered,
-        disco_node_down_timestamp_is_remembered,
-        disco_nodeup_timestamp_is_updated_after_node_reconnects,
-        disco_node_start_timestamp_is_updated_after_node_restarts,
-        disco_late_pang_result_arrives_after_node_went_up,
         send_check_servers_is_called_before_last_server_got_dump,
         remote_ops_are_not_sent_before_last_server_got_dump
     ].
 
 init_per_suite(Config) ->
-    init_cleanup_table(),
-    Names = [ct2, ct3, ct4, ct5, ct6, ct7],
-    {Nodes, Peers} = lists:unzip([cets_test_peer:start_node(N) || N <- Names]),
-    [
-        {nodes, maps:from_list(lists:zip(Names, Nodes))},
-        {peers, maps:from_list(lists:zip(Names, Peers))}
-        | Config
-    ].
+    cets_test_setup:init_cleanup_table(),
+    cets_test_peer:start([ct2, ct3, ct4, ct5, ct6, ct7], Config).
 
 end_per_suite(Config) ->
+    cets_test_setup:remove_cleanup_table(),
+    cets_test_peer:stop(Config),
     Config.
 
 init_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log ->
@@ -259,9 +216,6 @@ end_per_group(Group, Config) when Group == cets_seq_no_log; Group == cets_no_log
 end_per_group(_Group, Config) ->
     Config.
 
-init_per_testcase(test_multinode_auto_discovery = Name, Config) ->
-    ct:make_priv_dir(),
-    init_per_testcase_generic(Name, Config);
 init_per_testcase(Name, Config) ->
     init_per_testcase_generic(Name, Config).
 
@@ -269,7 +223,7 @@ init_per_testcase_generic(Name, Config) ->
     [{testcase, Name} | Config].
 
 end_per_testcase(_, _Config) ->
-    wait_for_cleanup(),
+    cets_test_setup:wait_for_cleanup(),
     ok.
 
 %% Modules that use a multiline LOG_ macro
@@ -278,7 +232,7 @@ log_modules() ->
 
 start_link_inits_and_accepts_records(Config) ->
     Tab = make_name(Config),
-    start_link_local(Tab),
+    cets_test_setup:start_link_local(Tab),
     cets:insert(Tab, {alice, 32}),
     [{alice, 32}] = ets:lookup(Tab, alice).
 
@@ -313,9 +267,6 @@ delete_many_works(Config) ->
     cets:insert(Tab, {alice, 32}),
     cets:delete_many(Tab, [alice]),
     [] = ets:lookup(Tab, alice).
-
-join_works(Config) ->
-    given_two_joined_tables(Config).
 
 inserted_records_could_be_read_back_from_replicated_table(Config) ->
     #{tab1 := Tab1, tab2 := Tab2} = given_two_joined_tables(Config),
@@ -668,389 +619,6 @@ leader_is_the_same_in_metadata_after_join(Config) ->
     Leader = cets_metadata:get(T1, leader),
     Leader = cets_metadata:get(T2, leader).
 
-join_works_with_existing_data(Config) ->
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(Tab1),
-    {ok, Pid2} = start_local(Tab2),
-    cets:insert(Tab1, {alice, 32}),
-    %% Join will copy and merge existing tables
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    [{alice, 32}] = ets:lookup(Tab2, alice).
-
-%% This testcase tests an edgecase: inserting with the same key from two nodes.
-%% Usually, inserting with the same key from two different nodes is not possible
-%% (because the node-name is a part of the key).
-join_works_with_existing_data_with_conflicts(Config) ->
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(Tab1),
-    {ok, Pid2} = start_local(Tab2),
-    cets:insert(Tab1, {alice, 32}),
-    cets:insert(Tab2, {alice, 33}),
-    %% Join will copy and merge existing tables
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    %% We insert data from other table into our table when merging, so the values get swapped
-    [{alice, 33}] = ets:lookup(Tab1, alice),
-    [{alice, 32}] = ets:lookup(Tab2, alice).
-
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler(Config) ->
-    Opts = #{handle_conflict => fun resolve_highest/2},
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(Tab1, Opts),
-    {ok, Pid2} = start_local(Tab2, Opts),
-    cets:insert(Tab1, {alice, 32}),
-    cets:insert(Tab2, {alice, 33}),
-    %% Join will copy and merge existing tables
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    %% Key with the highest Number remains
-    [{alice, 33}] = ets:lookup(Tab1, alice),
-    [{alice, 33}] = ets:lookup(Tab2, alice).
-
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_more_keys(Config) ->
-    %% Deeper testing of cets_join:apply_resolver function
-    Opts = #{handle_conflict => fun resolve_highest/2},
-    #{tabs := [T1, T2, T3], pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config, Opts),
-    cets:insert_many(T1, [{alice, 32}, {bob, 10}, {michal, 40}]),
-    cets:insert_many(T2, [{alice, 33}, {kate, 3}, {michal, 2}]),
-    %% Join will copy and merge existing tables
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% Key with the highest Number remains
-    Dump = [{alice, 33}, {bob, 10}, {kate, 3}, {michal, 40}],
-    Dump = cets:dump(T1),
-    Dump = cets:dump(T2),
-    Dump = cets:dump(T3).
-
--record(user, {name, age, updated}).
-
-%% Test with records (which require keypos = 2 option)
-join_works_with_existing_data_with_conflicts_and_defined_conflict_handler_and_keypos2(Config) ->
-    Opts = #{handle_conflict => fun resolve_user_conflict/2, keypos => 2},
-    T1 = make_name(Config, 1),
-    T2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(T1, Opts),
-    {ok, Pid2} = start_local(T2, Opts),
-    cets:insert(T1, #user{name = alice, age = 30, updated = erlang:system_time()}),
-    cets:insert(T2, #user{name = alice, age = 25, updated = erlang:system_time()}),
-    %% Join will copy and merge existing tables
-    ok = cets_join:join(keypos2_lock, #{}, Pid1, Pid2),
-    %% Last inserted record is in the table
-    [#user{age = 25}] = ets:lookup(T1, alice),
-    [#user{age = 25}] = ets:lookup(T2, alice).
-
-%% Keep record with highest timestamp
-resolve_user_conflict(U1 = #user{updated = TS1}, _U2 = #user{updated = TS2}) when
-    TS1 > TS2
-->
-    U1;
-resolve_user_conflict(_U1, U2) ->
-    U2.
-
-resolve_highest({K, A}, {K, B}) ->
-    {K, max(A, B)}.
-
-bag_with_conflict_handler_not_allowed(Config) ->
-    {error, [bag_with_conflict_handler]} =
-        cets:start(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
-
-bag_with_conflict_handler_not_allowed_for_start_link(Config) ->
-    {error, [bag_with_conflict_handler]} =
-        cets:start_link(make_name(Config), #{handle_conflict => fun resolve_highest/2, type => bag}).
-
-join_with_the_same_pid(Config) ->
-    Tab = make_name(Config),
-    {ok, Pid} = start_local(Tab),
-    %% Just insert something into a table to check later the size
-    cets:insert(Tab, {1, 1}),
-    link(Pid),
-    {error, join_with_the_same_pid} = cets_join:join(lock_name(Config), #{}, Pid, Pid),
-    Nodes = [node()],
-    %% The process is still running and no data loss (i.e. size is not zero)
-    #{nodes := Nodes, size := 1} = cets:info(Pid).
-
-join_ref_is_same_after_join(Config) ->
-    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
-    #{join_ref := JoinRef} = cets:info(Pid1),
-    #{join_ref := JoinRef} = cets:info(Pid2).
-
-join_fails_because_server_process_not_found(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    F = fun
-        (join_start) ->
-            exit(Pid1, sim_error);
-        (_) ->
-            ok
-    end,
-    {error, {task_failed, {noproc, {gen_server, call, [Pid1, get_info, infinity]}}, _}} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
-
-join_fails_because_server_process_not_found_before_get_pids(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    F = fun
-        (before_get_pids) ->
-            exit(Pid1, sim_error);
-        (_) ->
-            ok
-    end,
-    {error, {task_failed, {noproc, {gen_server, call, [Pid1, other_servers, infinity]}}, _}} =
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}).
-
-join_fails_before_send_dump(Config) ->
-    Me = self(),
-    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
-        Me ! {down_called, self(), RemotePid}
-    end,
-    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_down => DownFn}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    cets:insert(Pid1, {1}),
-    cets:insert(Pid2, {2}),
-    F = fun
-        ({before_send_dump, P}) when Pid1 =:= P ->
-            Me ! before_send_dump_called_for_pid1;
-        ({before_send_dump, P}) when Pid2 =:= P ->
-            error(sim_error);
-        (_) ->
-            ok
-    end,
-    ?assertMatch(
-        {error, {task_failed, sim_error, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    ),
-    %% Ensure we sent dump to Pid1
-    receive_message(before_send_dump_called_for_pid1),
-    %% Not joined, some data exchanged
-    cets:ping_all(Pid1),
-    cets:ping_all(Pid2),
-    [] = cets:other_pids(Pid1),
-    [] = cets:other_pids(Pid2),
-    %% Pid1 applied new version of dump
-    %% Though, it got disconnected after
-    {ok, [{1}, {2}]} = cets:remote_dump(Pid1),
-    %% Pid2 rejected changes
-    {ok, [{2}]} = cets:remote_dump(Pid2),
-    receive_message({down_called, Pid1, Pid2}).
-
-%% Checks that remote ops are dropped if join_ref does not match in the state and in remote_op message
-join_fails_before_send_dump_and_there_are_pending_remote_ops(Config) ->
-    Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    F = fun
-        ({before_send_dump, P}) when Pid1 =:= P ->
-            Me ! before_send_dump_called_for_pid1;
-        ({before_send_dump, P}) when Pid2 =:= P ->
-            sys:suspend(Pid2),
-            error(sim_error);
-        (before_unpause) ->
-            %% Crash in before_unpause, otherwise cets_join will block in cets:unpause/2
-            %% (because Pid2 is suspended).
-            %% Servers would be unpaused automatically though, because cets_join process exits
-            %% (i.e. cets:unpause/2 call is totally optional)
-            error(sim_error2);
-        (_) ->
-            ok
-    end,
-    ?assertMatch(
-        {error, {task_failed, sim_error2, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    ),
-    %% Ensure we sent dump to Pid1
-    receive_message(before_send_dump_called_for_pid1),
-    cets:insert_request(Pid1, {1}),
-    %% Check that the remote_op has reached Pid2 message box
-    cets_test_wait:wait_until(fun() -> count_remote_ops_in_the_message_box(Pid2) end, 1),
-    sys:resume(Pid2),
-    %% Wait till remote_op is processed
-    cets:ping(Pid2),
-    %% Check that the insert was ignored
-    {ok, []} = cets:remote_dump(Pid2).
-
-send_dump_fails_during_join_because_receiver_exits(Config) ->
-    Me = self(),
-    DownFn = fun(#{remote_pid := RemotePid, table := _Tab}) ->
-        Me ! {down_called, self(), RemotePid}
-    end,
-    {ok, Pid1} = start_local(make_name(Config, 1), #{handle_down => DownFn}),
-    {ok, Pid2} = start_local(make_name(Config, 2), #{}),
-    F = fun
-        ({before_send_dump, P}) when P =:= Pid1 ->
-            %% Kill Pid2 process.
-            %% It does not crash the join process.
-            %% Pid1 would receive a dump with Pid2 in the server list.
-            exit(Pid2, sim_error),
-            %% Ensure Pid1 got DOWN message from Pid2 already
-            pong = cets:ping(Pid1),
-            Me ! before_send_dump_called;
-        (_) ->
-            ok
-    end,
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F}),
-    receive_message(before_send_dump_called),
-    pong = cets:ping(Pid1),
-    receive_message({down_called, Pid1, Pid2}),
-    [] = cets:other_pids(Pid1),
-    %% Pid1 still works
-    cets:insert(Pid1, {1}),
-    {ok, [{1}]} = cets:remote_dump(Pid1).
-
-join_fails_in_check_fully_connected(Config) ->
-    Me = self(),
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    [Pid3] = cets:other_pids(Pid2),
-    F = fun
-        (before_check_fully_connected) ->
-            %% Ask Pid2 to remove Pid3 from the list
-            Pid2 ! {'DOWN', make_ref(), process, Pid3, sim_error},
-            %% Ensure Pid2 did the cleaning
-            pong = cets:ping(Pid2),
-            [] = cets:other_pids(Pid2),
-            Me ! before_check_fully_connected_called;
-        (_) ->
-            ok
-    end,
-    ?assertMatch(
-        {error, {task_failed, check_fully_connected_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    ),
-    receive_message(before_check_fully_connected_called).
-
-join_fails_because_join_refs_do_not_match_for_nodes_in_segment(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    %% But for some reason Pid3 has a different join_ref
-    %% (probably could happen if it still haven't checked other nodes after a join)
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    set_join_ref(Pid3, make_ref()),
-    ?assertMatch(
-        {error, {task_failed, check_same_join_ref_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-join_fails_because_pids_do_not_match_for_nodes_in_segment(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    %% Pid2 and Pid3 are connected
-    %% But for some reason Pid3 has a different other_nodes list
-    %% (probably could happen if it still haven't checked other nodes after a join)
-    ok = cets_join:join(lock_name(Config), #{}, Pid2, Pid3, #{}),
-    set_other_servers(Pid3, []),
-    ?assertMatch(
-        {error, {task_failed, check_fully_connected_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-join_fails_because_servers_overlap(Config) ->
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    set_other_servers(Pid1, [Pid3]),
-    set_other_servers(Pid2, [Pid3]),
-    ?assertMatch(
-        {error, {task_failed, check_do_not_overlap_failed, #{}}},
-        cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{})
-    ).
-
-%% join_fails_because_servers_overlap testcase, but we check the logging.
-%% We check that `?LOG_ERROR(#{what => check_do_not_overlap_failed})' is called.
-logs_are_printed_when_join_fails_because_servers_overlap(Config) ->
-    LogRef = make_ref(),
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    #{pids := [Pid1, Pid2, Pid3]} = given_3_servers(Config),
-    set_other_servers(Pid1, [Pid3]),
-    set_other_servers(Pid2, [Pid3]),
-    ?assertMatch(
-        {error, {task_failed, check_do_not_overlap_failed, #{}}},
-        cets_join:join(lock_name(Config), #{log_ref => LogRef}, Pid1, Pid2, #{})
-    ),
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := error,
-            msg :=
-                {report, #{
-                    what := check_do_not_overlap_failed, log_ref := LogRef
-                }}
-        }} ->
-            ok
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-remote_ops_are_ignored_if_join_ref_does_not_match(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
-    #{join_ref := JoinRef} = cets:info(Pid1),
-    set_join_ref(Pid1, make_ref()),
-    cets:insert(Pid2, {1}),
-    %% fix and check again
-    set_join_ref(Pid1, JoinRef),
-    cets:insert(Pid2, {2}),
-    {ok, [{2}]} = cets:remote_dump(Pid1).
-
-join_retried_if_lock_is_busy(Config) ->
-    Me = self(),
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    Lock = lock_name(Config),
-    SleepyF = fun
-        (join_start) ->
-            Me ! join_start,
-            timer:sleep(infinity);
-        (_) ->
-            ok
-    end,
-    F = fun
-        (before_retry) -> Me ! before_retry;
-        (_) -> ok
-    end,
-    %% Get the lock in a separate process
-    proc_lib:spawn_link(fun() ->
-        cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
-    end),
-    receive_message(join_start),
-    %% We actually would not return from cets_join:join unless we get the lock
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
-    end),
-    receive_message(before_retry).
-
-join_done_already_while_waiting_for_lock_so_do_nothing(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Me = self(),
-    #{pids := [Pid1, Pid2, Pid3, Pid4]} = given_n_servers(Config, 4, #{}),
-    Lock = lock_name(Config),
-    ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{}),
-    ok = cets_join:join(Lock, #{}, Pid3, Pid4, #{}),
-    %% It is to just match logs
-    LogRef = make_ref(),
-    Info = #{log_ref => LogRef},
-    F1 = send_join_start_back_and_wait_for_continue_joining(),
-    F2 = fun(_) -> ok end,
-    %% Get the lock in a separate process
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F1}),
-        Me ! first_join_returns
-    end),
-    JoinPid = receive_message_with_arg(join_start),
-    proc_lib:spawn_link(fun() ->
-        ok = cets_join:join(Lock, Info, Pid1, Pid3, #{checkpoint_handler => F2}),
-        Me ! second_join_returns
-    end),
-    JoinPid ! continue_joining,
-    %% At this point our first join would finish, after that our second join should exit too.
-    receive_message(first_join_returns),
-    receive_message(second_join_returns),
-    %% Ensure all logs are received by removing the handler, it is a sync operation.
-    %% (we do not expect any logs anyway).
-    logger:remove_handler(?FUNCTION_NAME),
-    %% Ensure there is nothing logged, we use log_ref to ignore logs from other tests.
-    %% The counter example for no logging is
-    %% the logs_are_printed_when_join_fails_because_servers_overlap testcase.
-    assert_nothing_is_logged(?FUNCTION_NAME, LogRef).
-
 pause_owner_crashed_is_logged(Config) ->
     ct:timetrap({seconds, 6}),
     logger_debug_h:start(#{id => ?FUNCTION_NAME}),
@@ -1214,20 +782,6 @@ send_dump_contains_already_added_servers(Config) ->
     cets:unpause(Pid1, PauseRef),
     {ok, [{1}]} = cets:remote_dump(Pid1).
 
-servers_remove_each_other_if_join_refs_do_not_match_after_unpause(Config) ->
-    {ok, Pid1} = start_local(make_name(Config, 1)),
-    {ok, Pid2} = start_local(make_name(Config, 2)),
-    %% cets:send_check_servers function is only called after all pauses are unpaused
-    PauseRef1 = cets:pause(Pid1),
-    PauseRef2 = cets:pause(Pid2),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2, #{}),
-    %% send_check_servers is not called yet, because we are still pausing.
-    %% Mess with join_ref in the state.
-    set_join_ref(Pid1, make_ref()),
-    cets:unpause(Pid1, PauseRef1),
-    cets:unpause(Pid2, PauseRef2),
-    cets_test_wait:wait_until(fun() -> maps:get(other_servers, cets:info(Pid1)) end, []).
-
 ignore_send_dump_received_when_paused_with_another_pause_ref(Config) ->
     ignore_send_dump_received_when_unpaused([{extra_pause, true} | Config]).
 
@@ -1274,7 +828,7 @@ ignore_send_dump_received_when_unpaused(Config) ->
 pause_on_remote_node_returns_if_monitor_process_dies(Config) ->
     JoinPid = make_process(),
     #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    AllPids = [rpc(Node2, ?MODULE, make_process, [])],
+    AllPids = [rpc(Node2, cets_test_setup, make_process, [])],
     TestPid = proc_lib:spawn(fun() ->
         %% Would block
         cets_join:pause_on_remote_node(JoinPid, AllPids)
@@ -1298,7 +852,7 @@ pause_on_remote_node_crashes(Config) ->
     Tab = make_name(Config),
     {ok, Pid1} = start(Node1, Tab),
     {ok, Pid2} = start(Node2, Tab),
-    ok = rpc(Node2, ?MODULE, mock_pause_on_remote_node_failing, []),
+    ok = rpc(Node2, cets_test_setup, mock_pause_on_remote_node_failing, []),
     try
         {error,
             {task_failed,
@@ -1455,605 +1009,6 @@ node_list_is_correct(Config) ->
     [Node1, Node3, Node4] = other_nodes(Node2, Tab),
     [Node1, Node2, Node4] = other_nodes(Node3, Tab),
     [Node1, Node2, Node3] = other_nodes(Node4, Tab),
-    ok.
-
-test_multinode_auto_discovery(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    Dir = proplists:get_value(priv_dir, Config),
-    ct:pal("Dir ~p", [Dir]),
-    FileName = filename:join(Dir, "disco.txt"),
-    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start_link(#{tables => [Tab], disco_file => FileName}),
-    %% Disco is async, so we have to wait for the final state
-    ok = wait_for_ready(Disco, 5000),
-    [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco),
-    #{verify_ready := []} =
-        cets_discovery:system_info(Disco),
-    ok.
-
-test_disco_add_table(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    Dir = proplists:get_value(priv_dir, Config),
-    ct:pal("Dir ~p", [Dir]),
-    FileName = filename:join(Dir, "disco.txt"),
-    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
-    cets_discovery:add_table(Disco, Tab),
-    %% Disco is async, so we have to wait for the final state
-    ok = wait_for_ready(Disco, 5000),
-    [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco),
-    ok.
-
-test_disco_delete_table(Config) ->
-    F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Tab = make_name(Config),
-    cets_discovery:add_table(Disco, Tab),
-    #{tables := [Tab]} = cets_discovery:system_info(Disco),
-    cets_discovery:delete_table(Disco, Tab),
-    #{tables := []} = cets_discovery:system_info(Disco).
-
-test_disco_delete_unknown_table(Config) ->
-    F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Tab = make_name(Config),
-    cets_discovery:delete_table(Disco, Tab),
-    #{tables := []} = cets_discovery:system_info(Disco).
-
-test_disco_delete_table_twice(Config) ->
-    F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Tab = make_name(Config),
-    cets_discovery:add_table(Disco, Tab),
-    #{tables := [Tab]} = cets_discovery:system_info(Disco),
-    cets_discovery:delete_table(Disco, Tab),
-    cets_discovery:delete_table(Disco, Tab),
-    #{tables := []} = cets_discovery:system_info(Disco).
-
-test_disco_file_appears(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    Dir = proplists:get_value(priv_dir, Config),
-    ct:pal("Dir ~p", [Dir]),
-    FileName = filename:join(Dir, "disco3.txt"),
-    file:delete(FileName),
-    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
-    cets_discovery:add_table(Disco, Tab),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
-        after_error
-    ),
-    ok = file:write_file(FileName, io_lib:format("~s~n~s~n", [Node1, Node2])),
-    %% Disco is async, so we have to wait for the final state
-    ok = wait_for_ready(Disco, 5000),
-    [Node2] = other_nodes(Node1, Tab),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco),
-    ok.
-
-test_disco_handles_bad_node(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    Dir = proplists:get_value(priv_dir, Config),
-    ct:pal("Dir ~p", [Dir]),
-    FileName = filename:join(Dir, "disco_badnode.txt"),
-    ok = file:write_file(FileName, io_lib:format("badnode@localhost~n~s~n~s~n", [Node1, Node2])),
-    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
-    cets_discovery:add_table(Disco, Tab),
-    %% Check that wait_for_ready would not block forever:
-    ok = wait_for_ready(Disco, 5000),
-    %% Check if the node sent pang:
-    #{unavailable_nodes := ['badnode@localhost']} = cets_discovery:system_info(Disco),
-    %% Check that other nodes are discovered fine
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco).
-
-cets_discovery_fun_backend_works(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Node2, Tab),
-    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(Disco, 5000),
-    [#{memory := _, nodes := [Node1, Node2], size := 0, table := Tab}] =
-        cets_discovery:info(Disco).
-
-test_disco_add_table_twice(Config) ->
-    Dir = proplists:get_value(priv_dir, Config),
-    FileName = filename:join(Dir, "disco.txt"),
-    {ok, Disco} = cets_discovery:start_link(#{tables => [], disco_file => FileName}),
-    Tab = make_name(Config),
-    {ok, _Pid} = start_local(Tab),
-    cets_discovery:add_table(Disco, Tab),
-    cets_discovery:add_table(Disco, Tab),
-    %% Check that everything is fine
-    #{tables := [Tab]} = cets_discovery:system_info(Disco).
-
-test_disco_add_two_tables(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, _} = start(Node1, Tab1),
-    {ok, _} = start(Node2, Tab1),
-    {ok, _} = start(Node1, Tab2),
-    {ok, _} = start(Node2, Tab2),
-    Me = self(),
-    F = fun
-        (State = #{waited := true}) ->
-            Me ! called_after_waited,
-            {{ok, [Node1, Node2]}, State};
-        (State) ->
-            wait_till_test_stage(Me, sent_both),
-            Me ! waited_for_sent_both,
-            {{ok, [Node1, Node2]}, State#{waited => true}}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    %% Add two tables async
-    cets_discovery:add_table(Disco, Tab1),
-    %% After the first table, Disco would get blocked in get_nodes function (see wait_till_test_stage in F above)
-    cets_discovery:add_table(Disco, Tab2),
-    put(test_stage, sent_both),
-    %% Just ensure wait_till_test_stage function works:
-    wait_till_test_stage(Me, sent_both),
-    %% First check is done, the second check should be triggered asap
-    %% (i.e. because of should_retry_get_nodes=true set in state)
-    receive_message(waited_for_sent_both),
-    %% try_joining would be called after set_nodes,
-    %% but it is async, so wait until it is done:
-    cets_test_wait:wait_until(
-        fun() ->
-            maps:with(
-                [get_nodes_status, should_retry_get_nodes, join_status, should_retry_join],
-                cets_discovery:system_info(Disco)
-            )
-        end,
-        #{
-            get_nodes_status => not_running,
-            should_retry_get_nodes => false,
-            join_status => not_running,
-            should_retry_join => false
-        }
-    ),
-    [
-        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab1},
-        #{memory := _, nodes := [Node1, Node2], size := 0, table := Tab2}
-    ] =
-        cets_discovery:info(Disco),
-    ok.
-
-disco_retried_if_get_nodes_fail(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    F = fun(State) ->
-        {{error, simulate_error}, State}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end,
-        after_error
-    ),
-    ok.
-
-disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
-    #{disco := Disco} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
-    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
-
-%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase, but has nodedown
-disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down(Config) ->
-    SysInfo = generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config),
-    #{disco := Disco, node2 := Node2} = SysInfo,
-    Disco ! {nodedown, Node2},
-    #{phase := regular, retry_type := after_nodedown} = cets_discovery:system_info(Disco).
-
-%% Similar to disco_uses_regular_retry_interval_in_the_regular_phase_after_node_down, but we simulate long downtime
-disco_uses_regular_retry_interval_in_the_regular_phase_after_expired_node_down(Config) ->
-    #{disco := Disco, node2 := Node2} = generic_disco_uses_regular_retry_interval_in_the_regular_phase(
-        Config
-    ),
-    Disco ! {nodedown, Node2},
-    TestTimestamp = erlang:system_time(millisecond) - timer:seconds(1000),
-    set_nodedown_timestamp(Disco, Node2, TestTimestamp),
-    #{phase := regular, retry_type := regular} = cets_discovery:system_info(Disco).
-
-generic_disco_uses_regular_retry_interval_in_the_regular_phase(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    F = fun(State) -> {{ok, [Node1, Node2]}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Disco ! enter_regular_phase,
-    cets_discovery:add_table(Disco, Tab),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(last_get_nodes_retry_type, cets_discovery:system_info(Disco)) end, regular
-    ),
-    #{disco => Disco, node2 => Node2}.
-
-disco_handles_node_up_and_down(Config) ->
-    BadNode = 'badnode@localhost',
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    F = fun(State) ->
-        {{ok, [Node1, Node2, BadNode]}, State}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    %% get_nodes call is async, so wait for it
-    cets_test_wait:wait_until(
-        fun() -> length(maps:get(nodes, cets_discovery:system_info(Disco))) end,
-        3
-    ),
-    Disco ! {nodeup, BadNode},
-    Disco ! {nodedown, BadNode},
-    %% Check that wait_for_ready still works
-    ok = wait_for_ready(Disco, 5000).
-
-status_available_nodes(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, []}, State}
-    end,
-    DiscoName = disco_name(Config),
-    start_disco(Node1, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
-    start_disco(Node2, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
-    ?assertMatch(#{available_nodes := [Node1, Node2]}, cets_status:status(DiscoName)).
-
-status_available_nodes_do_not_contain_nodes_with_stopped_disco(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    start_disco(Node1, #{name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F}),
-    %% Disco not running
-    ?assertMatch(#{available_nodes := [Node1]}, cets_status:status(DiscoName)).
-
-status_unavailable_nodes(Config) ->
-    Node1 = node(),
-    F = fun(State) ->
-        {{ok, [Node1, 'badnode@localhost']}, State}
-    end,
-    DiscoName = disco_name(Config),
-    Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    %% Disco needs at least one table to start calling get_nodes function
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)).
-
-status_unavailable_nodes_is_subset_of_discovery_nodes(Config) ->
-    Node1 = node(),
-    Self = self(),
-    GetFn1 = fun(State) -> {{ok, [Node1, 'badnode@localhost']}, State} end,
-    GetFn2 = fun(State) ->
-        Self ! get_fn2_called,
-        {{ok, [Node1]}, State}
-    end,
-    %% Setup meck
-    BackendModule = make_name(Config, disco_backend),
-    meck:new(BackendModule, [non_strict]),
-    meck:expect(BackendModule, init, fun(_Opts) -> undefined end),
-    meck:expect(BackendModule, get_nodes, GetFn1),
-    DiscoName = disco_name(Config),
-    Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => BackendModule
-    }),
-    %% Disco needs at least one table to start calling get_nodes function
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    ?assertMatch(#{unavailable_nodes := ['badnode@localhost']}, cets_status:status(DiscoName)),
-    %% Remove badnode from disco
-    meck:expect(BackendModule, get_nodes, GetFn2),
-    %% Force check.
-    Disco ! check,
-    receive_message(get_fn2_called),
-    %% The unavailable_nodes list is updated
-    CondF = fun() -> maps:get(unavailable_nodes, cets_status:status(DiscoName)) end,
-    cets_test_wait:wait_until(CondF, []).
-
-status_joined_nodes(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco1 = start_disco(Node1, DiscoOpts),
-    Disco2 = start_disco(Node2, DiscoOpts),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    %% Add table using pids (i.e. no need to do RPCs here)
-    cets_discovery:add_table(Disco1, Tab),
-    cets_discovery:add_table(Disco2, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    cets_test_wait:wait_until(fun() -> maps:get(joined_nodes, cets_status:status(DiscoName)) end, [
-        Node1, Node2
-    ]).
-
-status_discovery_works(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco1 = start_disco(Node1, DiscoOpts),
-    Disco2 = start_disco(Node2, DiscoOpts),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    %% Add table using pids (i.e. no need to do RPCs here)
-    cets_discovery:add_table(Disco1, Tab),
-    cets_discovery:add_table(Disco2, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    ?assertMatch(#{discovery_works := true}, cets_status:status(DiscoName)).
-
-status_discovered_nodes(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Node2, Tab),
-    %% Add table using pids (i.e. no need to do RPCs here)
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    ?assertMatch(#{discovered_nodes := [Node1, Node2]}, cets_status:status(DiscoName)).
-
-status_remote_nodes_without_disco(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(DiscoName, 5000),
-    ?assertMatch(#{remote_nodes_without_disco := [Node2]}, cets_status:status(DiscoName)).
-
-status_remote_nodes_with_unknown_tables(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco1 = start_disco(Node1, DiscoOpts),
-    Disco2 = start_disco(Node2, DiscoOpts),
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    %% Node1 does not have Tab2
-    {ok, _} = start(Node1, Tab2),
-    {ok, _} = start(Node2, Tab1),
-    {ok, _} = start(Node2, Tab2),
-    %% Add table using pids (i.e. no need to do RPCs here)
-    cets_discovery:add_table(Disco1, Tab1),
-    cets_discovery:add_table(Disco2, Tab1),
-    cets_discovery:add_table(Disco2, Tab2),
-    ok = wait_for_ready(DiscoName, 5000),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(remote_nodes_with_unknown_tables, cets_status:status(DiscoName)) end, [
-            Node2
-        ]
-    ),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(remote_unknown_tables, cets_status:status(DiscoName)) end, [
-            Tab2
-        ]
-    ).
-
-status_remote_nodes_with_missing_nodes(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco1 = start_disco(Node1, DiscoOpts),
-    Disco2 = start_disco(Node2, DiscoOpts),
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    %% Node2 does not have Tab2
-    {ok, _} = start(Node1, Tab1),
-    {ok, _} = start(Node1, Tab2),
-    {ok, _} = start(Node2, Tab1),
-    cets_discovery:add_table(Disco1, Tab1),
-    cets_discovery:add_table(Disco1, Tab2),
-    cets_discovery:add_table(Disco2, Tab1),
-    ok = wait_for_ready(DiscoName, 5000),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(remote_nodes_with_missing_tables, cets_status:status(DiscoName)) end, [
-            Node2
-        ]
-    ),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(remote_missing_tables, cets_status:status(DiscoName)) end, [
-            Tab2
-        ]
-    ).
-
-status_conflict_nodes(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco1 = start_disco(Node1, DiscoOpts),
-    Disco2 = start_disco(Node2, DiscoOpts),
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, _} = start(Node1, Tab1),
-    {ok, _} = start(Node1, Tab2),
-    {ok, _} = start(Node2, Tab1),
-    {ok, Pid22} = start(Node2, Tab2),
-    cets_discovery:add_table(Disco1, Tab1),
-    cets_discovery:add_table(Disco1, Tab2),
-    cets_discovery:add_table(Disco2, Tab1),
-    cets_discovery:add_table(Disco2, Tab2),
-
-    ok = wait_for_ready(DiscoName, 5000),
-    set_other_servers(Pid22, []),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(conflict_nodes, cets_status:status(DiscoName)) end, [Node2]
-    ),
-    cets_test_wait:wait_until(
-        fun() -> maps:get(conflict_tables, cets_status:status(DiscoName)) end, [Tab2]
-    ).
-
-disco_wait_for_get_nodes_works(_Config) ->
-    F = fun(State) -> {{ok, []}, State} end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    ok = cets_discovery:wait_for_get_nodes(Disco, 5000).
-
-disco_wait_for_get_nodes_blocks_and_returns(Config) ->
-    Tab = make_name(Config, 1),
-    {ok, _Pid} = start_local(Tab, #{}),
-    SignallingPid = make_signalling_process(),
-    F = fun(State) ->
-        wait_for_down(SignallingPid),
-        {{ok, []}, State}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    %% Enter into a blocking get_nodes function
-    Disco ! check,
-    %% Do it async, because it would block is
-    WaitPid = spawn_link(fun() -> ok = cets_discovery:wait_for_get_nodes(Disco, 5000) end),
-    Cond = fun() ->
-        length(maps:get(pending_wait_for_get_nodes, cets_discovery:system_info(Disco)))
-    end,
-    cets_test_wait:wait_until(Cond, 1),
-    %% Unblock get_nodes call
-    SignallingPid ! stop,
-    %% wait_for_get_nodes returns
-    wait_for_down(WaitPid),
-    ok.
-
-%% Check that wait_for_get_nodes waits in case get_nodes should be retried
-disco_wait_for_get_nodes_when_get_nodes_needs_to_be_retried(Config) ->
-    Me = self(),
-    Tab = make_name(Config, 1),
-    {ok, _Pid} = start_local(Tab, #{}),
-    SignallingPid1 = make_signalling_process(),
-    SignallingPid2 = make_signalling_process(),
-    F = fun
-        (State = #{step := 1}) ->
-            wait_for_down(SignallingPid1),
-            {{ok, []}, State#{step => 2}};
-        (State = #{step := 2}) ->
-            Me ! entered_get_nodes2,
-            wait_for_down(SignallingPid2),
-            {{ok, []}, State#{step => 2}}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F, step => 1
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    %% Enter into a blocking get_nodes function
-    Disco ! check,
-    %% Do it async, because it would block is
-    WaitPid = spawn_link(fun() -> ok = cets_discovery:wait_for_get_nodes(Disco, 5000) end),
-    Cond = fun() ->
-        length(maps:get(pending_wait_for_get_nodes, cets_discovery:system_info(Disco)))
-    end,
-    cets_test_wait:wait_until(Cond, 1),
-    %% Set should_retry_get_nodes
-    Disco ! check,
-    %% Ensure check message is received
-    cets_discovery:system_info(Disco),
-    %% Unblock first get_nodes call
-    SignallingPid1 ! stop,
-    receive_message(entered_get_nodes2),
-    %% Still waiting for get_nodes being retried
-    true = erlang:is_process_alive(WaitPid),
-    %% It returns finally after second get_nodes call
-    SignallingPid2 ! stop,
-    wait_for_down(WaitPid),
     ok.
 
 get_nodes_request(Config) ->
@@ -2355,11 +1310,6 @@ unknown_message_is_ignored_in_ack_process(Config) ->
     AckPid ! oops,
     still_works(Pid).
 
-unknown_message_is_ignored_in_disco_process(_Config) ->
-    Pid = start_simple_disco(),
-    Pid ! oops,
-    #{} = sys:get_state(Pid).
-
 unknown_cast_message_is_ignored_in_ack_process(Config) ->
     {ok, Pid} = start_local(make_name(Config)),
     #{ack_pid := AckPid} = cets:info(Pid),
@@ -2384,12 +1334,6 @@ code_change_returns_ok_for_ack(Config) ->
     sys:suspend(AckPid),
     ok = sys:change_code(AckPid, cets_ack, v2, []),
     sys:resume(AckPid).
-
-code_change_returns_ok_for_disco(_Config) ->
-    Pid = start_simple_disco(),
-    sys:suspend(Pid),
-    ok = sys:change_code(Pid, cets_ack, v2, []),
-    sys:resume(Pid).
 
 run_spawn_forwards_errors(_Config) ->
     ?assertException(
@@ -2476,741 +1420,13 @@ pinfo_returns_value(_Config) ->
 pinfo_returns_undefined(_Config) ->
     undefined = cets_long:pinfo(stopped_pid(), messages).
 
-%% Netsplit cases (run in sequence)
-
-insert_returns_when_netsplit(Config) ->
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    sys:suspend(Pid5),
-    R = cets:insert_request(Tab, {1, test}),
-    block_node(Node5, Peer5),
-    try
-        {reply, ok} = cets:wait_response(R, 5000)
-    after
-        reconnect_node(Node5, Peer5)
-    end.
-
-inserts_after_netsplit_reconnects(Config) ->
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    sys:suspend(Pid5),
-    R = cets:insert_request(Tab, {1, v1}),
-    block_node(Node5, Peer5),
-    try
-        {reply, ok} = cets:wait_response(R, 5000)
-    after
-        reconnect_node(Node5, Peer5)
-    end,
-    sys:resume(Pid5),
-    cets:insert(Pid1, {1, v2}),
-    cets:insert(Pid5, {1, v3}),
-    %% No automatic recovery
-    [{1, v2}] = dump(Node1, Tab),
-    [{1, v3}] = dump(Peer5, Tab).
-
-disco_connects_to_unconnected_node(Config) ->
-    Node1 = node(),
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    ok = net_kernel:monitor_nodes(true),
-    disconnect_node(Peer5, Node1),
-    receive_message({nodedown, Node5}),
-    Tab = make_name(Config),
-    {ok, _} = start(Node1, Tab),
-    {ok, _} = start(Peer5, Tab),
-    F = fun(State) ->
-        {{ok, [Node1, Node5]}, State}
-    end,
-    {ok, Disco} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    cets_discovery:add_table(Disco, Tab),
-    ok = wait_for_ready(Disco, 5000).
-
-%% Joins from a bad (not fully connected) node
-%% Join process should check if nodes could contact each other before allowing to join
-joining_not_fully_connected_node_is_not_allowed(Config) ->
-    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid3} = start(Peer3, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Peer5 and Node1
-    block_node(Node5, Peer5),
-    try
-        %% Pid5 and Pid3 could contact each other.
-        %% Pid3 could contact Pid1 (they are joined).
-        %% But Pid5 cannot contact Pid1.
-        {error, {task_failed, check_could_reach_each_other_failed, _}} =
-            rpc(Peer5, cets_join, join, [lock_name(Config), #{}, Pid5, Pid3]),
-        %% Still connected
-        cets:insert(Pid1, {r1}),
-        {ok, [{r1}]} = cets:remote_dump(Pid3),
-        [Pid3] = cets:other_pids(Pid1),
-        [Pid1] = cets:other_pids(Pid3)
-    after
-        reconnect_node(Node5, Peer5)
-    end,
-    [] = cets:other_pids(Pid5).
-
-%% Joins from a good (fully connected) node
-joining_not_fully_connected_node_is_not_allowed2(Config) ->
-    #{ct3 := Peer3, ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid3} = start(Peer3, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    %% No connection between Peer5 and Node1
-    block_node(Node5, Peer5),
-    try
-        %% Pid5 and Pid3 could contact each other.
-        %% Pid3 could contact Pid1 (they are joined).
-        %% But Pid5 cannot contact Pid1.
-        {error, {task_failed, check_could_reach_each_other_failed, _}} = rpc(
-            Peer3, cets_join, join, [
-                lock_name(Config), #{}, Pid5, Pid3
-            ]
-        ),
-        %% Still connected
-        cets:insert(Pid1, {r1}),
-        {ok, [{r1}]} = cets:remote_dump(Pid3),
-        [Pid3] = cets:other_pids(Pid1),
-        [Pid1] = cets:other_pids(Pid3)
-    after
-        reconnect_node(Node5, Peer5)
-    end,
-    [] = cets:other_pids(Pid5).
-
-logging_when_failing_join_with_disco(Config) ->
-    %% Simulate cets:other_pids/1 failing with reason:
-    %%  {{nodedown,'mongooseim@mongooseim-1.mongooseim.default.svc.cluster.local'},
-    %%   {gen_server,call,[<30887.438.0>,other_servers,infinity]}}
-    %% We use peer module to still have a connection after a disconnect from the remote node.
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Node1 = node(),
-    #{ct2 := Peer2} = proplists:get_value(peers, Config),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, Pid2} = start(Peer2, Tab),
-    meck:new(cets, [passthrough]),
-    meck:expect(cets, other_pids, fun
-        (Server) when Server =:= Pid2 ->
-            block_node(Node2, Peer2),
-            wait_for_down(Pid2),
-            meck:passthrough([Server]);
-        (Server) ->
-            meck:passthrough([Server])
-    end),
-    F = fun(State) ->
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    Disco = start_disco(Node1, #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    try
-        cets_discovery:add_table(Disco, Tab),
-        timer:sleep(100),
-        Logs = receive_all_logs(?FUNCTION_NAME),
-        Reason = {{nodedown, Node2}, {gen_server, call, [Pid2, other_servers, infinity]}},
-        MatchedLogs = [
-            Log
-         || #{
-                level := error,
-                msg :=
-                    {report, #{
-                        what := task_failed,
-                        reason := Reason2
-                    }}
-            } = Log <- Logs,
-            Reason =:= Reason2
-        ],
-        %% Only one message is logged
-        ?assertMatch([_], MatchedLogs, Logs)
-    after
-        meck:unload(),
-        reconnect_node(Node2, Peer2),
-        cets:stop(Pid2)
-    end,
-    ok.
-
-cets_ping_all_returns_when_ping_crashes(Config) ->
-    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
-    meck:new(cets, [passthrough]),
-    meck:expect(cets_call, long_call, fun
-        (Server, ping) when Server == Pid2 -> error(simulate_crash);
-        (Server, Msg) -> meck:passthrough([Server, Msg])
-    end),
-    ?assertMatch({error, [{Pid2, {'EXIT', {simulate_crash, _}}}]}, cets:ping_all(Pid1)),
-    meck:unload().
-
-join_interrupted_when_ping_crashes(Config) ->
-    #{pid1 := Pid1, pid2 := Pid2} = given_two_joined_tables(Config),
-    Tab3 = make_name(Config, 3),
-    {ok, Pid3} = start_local(Tab3, #{}),
-    meck:new(cets, [passthrough]),
-    meck:expect(cets_call, long_call, fun
-        (Server, ping) when Server == Pid2 -> error(simulate_crash);
-        (Server, Msg) -> meck:passthrough([Server, Msg])
-    end),
-    Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
-    ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
-    meck:unload().
-
-node_down_history_is_updated_when_netsplit_happens(Config) ->
-    %% node_down_history is available in cets:info/1 API.
-    %% It could be used for manual debugging in situations
-    %% we get netsplits or during rolling upgrades.
-    #{ct5 := Peer5} = proplists:get_value(peers, Config),
-    #{ct5 := Node5} = proplists:get_value(nodes, Config),
-    Node1 = node(),
-    Tab = make_name(Config),
-    {ok, Pid1} = start(Node1, Tab),
-    {ok, Pid5} = start(Peer5, Tab),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid5),
-    block_node(Node5, Peer5),
-    try
-        F = fun() ->
-            History = maps:get(node_down_history, cets:info(Pid1)),
-            lists:map(fun(#{node := Node}) -> Node end, History)
-        end,
-        cets_test_wait:wait_until(F, [Node5])
-    after
-        reconnect_node(Node5, Peer5),
-        cets:stop(Pid5)
-    end.
-
-disco_logs_nodeup(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config),
-    %% There could be several disco processes still running from the previous tests,
-    %% filter out logs by pid.
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := warning,
-            meta := #{pid := Disco},
-            msg := {report, #{what := nodeup, remote_node := Node2} = R}
-        }} = M ->
-            ?assert(is_integer(maps:get(connected_nodes, R)), M),
-            ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M)
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-disco_node_up_timestamp_is_remembered(Config) ->
-    #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config),
-    %% Check that nodeup is remembered
-    wait_for_disco_timestamp_to_appear(Disco, nodeup_timestamps, Node2).
-
-disco_logs_nodedown(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    ok = net_kernel:monitor_nodes(true),
-    #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config, [wait, netsplit]),
-    receive_message({nodedown, Node2}),
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := warning,
-            meta := #{pid := Disco},
-            msg := {report, #{what := nodedown, remote_node := Node2} = R}
-        }} = M ->
-            ?assert(is_integer(maps:get(connected_nodes, R)), M),
-            ?assert(is_integer(maps:get(time_since_startup_in_milliseconds, R)), M),
-            ?assert(is_integer(maps:get(connected_millisecond_duration, R)), M)
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-disco_node_down_timestamp_is_remembered(Config) ->
-    #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config, [wait, netsplit]),
-    %% Check that nodedown is remembered
-    wait_for_disco_timestamp_to_appear(Disco, nodedown_timestamps, Node2).
-
-disco_logs_nodeup_after_downtime(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    #{disco := Disco, node2 := Node2} = setup_two_nodes_and_discovery(Config, [wait, netsplit]),
-    %% At this point cets_disco should reconnect nodes back automatically
-    %% after retry_type_to_timeout(after_nodedown) time.
-    %% We want to speed this up for tests though.
-    Disco ! check,
-    %% Receive a nodeup after the disconnect.
-    %% This nodeup should contain the downtime_millisecond_duration field
-    %% (initial nodeup should not contain this field).
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := warning,
-            meta := #{pid := Disco},
-            msg :=
-                {report,
-                    #{
-                        what := nodeup,
-                        remote_node := Node2,
-                        downtime_millisecond_duration := Downtime
-                    } = R}
-        }} = M ->
-            ?assert(is_integer(maps:get(connected_nodes, R)), M),
-            ?assert(is_integer(Downtime), M)
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-disco_logs_node_reconnects_after_downtime(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
-    #{disco := Disco, node1 := Node1, node2 := Node2, peer2 := Peer2} = Setup,
-    %% Check that a start timestamp from a remote node is stored
-    Info = cets_discovery:system_info(Disco),
-    ?assertMatch(#{node_start_timestamps := #{Node2 := _}}, Info),
-    disconnect_node(Peer2, Node1),
-    receive
-        {log, ?FUNCTION_NAME, #{
-            level := warning,
-            meta := #{pid := Disco},
-            msg :=
-                {report, #{
-                    what := node_reconnects,
-                    start_time := StartTime,
-                    remote_node := Node2
-                }}
-        }} = M ->
-            ?assert(is_integer(StartTime), M)
-    after 5000 ->
-        ct:fail(timeout)
-    end.
-
-disco_nodeup_timestamp_is_updated_after_node_reconnects(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
-    #{disco := Disco, node2 := Node2} = Setup,
-    OldTimestamp = get_disco_timestamp(Disco, nodeup_timestamps, Node2),
-    disconnect_node_by_name(Config, ct2),
-    wait_for_disco_timestamp_to_be_updated(Disco, nodeup_timestamps, Node2, OldTimestamp).
-
-disco_node_start_timestamp_is_updated_after_node_restarts(Config) ->
-    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
-    Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
-    #{disco := Disco, node2 := Node2} = Setup,
-    OldTimestamp = get_disco_timestamp(Disco, node_start_timestamps, Node2),
-    simulate_disco_restart(Setup),
-    wait_for_disco_timestamp_to_be_updated(Disco, node_start_timestamps, Node2, OldTimestamp).
-
-disco_late_pang_result_arrives_after_node_went_up(Config) ->
-    Node1 = node(),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    %% unavailable_nodes list contains nodes which have not responded to pings.
-    %% Ping is async though.
-    %% So, there could be the situation when the result of ping would be processed
-    %% after the node actually got connected.
-    meck:new(cets_ping, [passthrough]),
-    Me = self(),
-    meck:expect(cets_ping, send_ping_result, fun(Pid, Node, _PingResult) ->
-        %% Wait until Node is up
-        Cond = fun() -> lists:member(Node, nodes()) end,
-        cets_test_wait:wait_until(Cond, true),
-        Me ! send_ping_result_called,
-        %% Return pang to cets_discovery.
-        %% cets_join does not use send_ping_result function
-        %% and would receive pong and join correctly.
-        meck:passthrough([Pid, Node, pang])
-    end),
-    try
-        %% setup_two_nodes_and_discovery would call disconnect_node/2 function
-        Setup = setup_two_nodes_and_discovery(Config, [wait, disco2]),
-        receive_message(send_ping_result_called),
-        #{disco_name := DiscoName} = Setup,
-        Status = cets_status:status(DiscoName),
-        %% Check that pang is ignored and unavailable_nodes list is empty.
-        ?assertMatch([], maps:get(unavailable_nodes, Status)),
-        ?assertMatch([Node1, Node2], maps:get(joined_nodes, Status))
-    after
-        meck:unload()
-    end.
-
-disco_nodeup_triggers_check_and_get_nodes(Config) ->
-    Setup = setup_two_nodes_and_discovery(Config, [wait, notify_get_nodes]),
-    #{disco := Disco, node2 := Node2} = Setup,
-    flush_message(get_nodes),
-    Disco ! {nodeup, Node2},
-    receive_message(get_nodes).
-
-format_data_does_not_return_table_duplicates(Config) ->
-    Res = cets_status:format_data(test_data_for_duplicate_missing_table_in_status(Config)),
-    ?assertMatch(#{remote_unknown_tables := [], remote_nodes_with_missing_tables := []}, Res).
-
-cets_ping_non_existing_node(_Config) ->
-    pang = cets_ping:ping('mongooseim@non_existing_host').
-
-pre_connect_fails_on_our_node(_Config) ->
-    mock_epmd(),
-    %% We would fail to connect to the remote EPMD but we would get an IP
-    pang = cets_ping:ping('mongooseim@resolvabletobadip'),
-    meck:unload().
-
-pre_connect_fails_on_one_of_the_nodes(Config) ->
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    mock_epmd(),
-    %% We would get pong on Node2, but would fail an RPC to our hode
-    pang = rpc(Node2, cets_ping, ping, ['cetsnode1@localhost']),
-    History = meck:history(erl_epmd),
-    %% Check that Node2 called us
-    ?assertMatch(
-        [_],
-        [
-            X
-         || {_, {erl_epmd, address_please, ["cetsnode1", "localhost", inet]},
-                {ok, {192, 168, 100, 134}}} = X <- History
-        ],
-        History
-    ),
-    meck:unload().
-
-cets_ping_net_family(_Config) ->
-    inet = cets_ping:net_family(error),
-    inet = cets_ping:net_family({ok, [["inet"]]}),
-    inet6 = cets_ping:net_family({ok, [["inet6"]]}),
-    inet6 = cets_ping:net_family({ok, [["inet6_tls"]]}).
-
-unexpected_nodedown_is_ignored_by_disco(Config) ->
-    %% Theoretically, should not happen
-    %% Still, check that we do not crash in this case
-    DiscoName = disco_name(Config),
-    F = fun(State) -> {{ok, []}, State} end,
-    Disco = start_disco(node(), #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    #{start_time := StartTime} = cets_discovery:system_info(Disco),
-    Disco ! {nodedown, 'cets@badnode'},
-    %% Check that we are still running
-    #{start_time := StartTime} = cets_discovery:system_info(Disco),
-    ok.
-
-ping_pairs_returns_pongs(Config) ->
-    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
-    Me = node(),
-    [{Me, Node2, pong}, {Node2, Node3, pong}] =
-        cets_ping:ping_pairs([{Me, Node2}, {Node2, Node3}]).
-
-ping_pairs_returns_earlier(Config) ->
-    #{ct2 := Node2, ct3 := Node3} = proplists:get_value(nodes, Config),
-    Me = node(),
-    Bad = 'badnode@localhost',
-    [{Me, Me, pong}, {Me, Node2, pong}, {Me, Bad, pang}, {Me, Node3, skipped}] =
-        cets_ping:ping_pairs([{Me, Me}, {Me, Node2}, {Me, Bad}, {Me, Node3}]).
-
 %% Helper functions
-
-receive_all_logs(Id) ->
-    receive
-        {log, Id, Log} ->
-            [Log | receive_all_logs(Id)]
-    after 100 ->
-        []
-    end.
 
 still_works(Pid) ->
     pong = cets:ping(Pid),
     %% The server works fine
     ok = cets:insert(Pid, {1}),
     {ok, [{1}]} = cets:remote_dump(Pid).
-
-start_link_local(Name) ->
-    start_link_local(Name, #{}).
-
-start_link_local(Name, Opts) ->
-    catch cets:stop(Name),
-    wait_for_name_to_be_free(node(), Name),
-    {ok, Pid} = cets:start_link(Name, Opts),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
-
-start_local(Name) ->
-    start_local(Name, #{}).
-
-start_local(Name, Opts) ->
-    catch cets:stop(Name),
-    wait_for_name_to_be_free(node(), Name),
-    {ok, Pid} = cets:start(Name, Opts),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
-
-schedule_cleanup(Pid) ->
-    Me = self(),
-    Cleaner = proc_lib:spawn(fun() ->
-        Ref = erlang:monitor(process, Me),
-        receive
-            {'DOWN', Ref, process, Me, _} ->
-                %% We do an RPC call, because erlang distribution
-                %% could not be always reliable (because we test netsplits)
-                rpc(cets_test_peer:node_to_peer(node(Pid)), cets, stop, [Pid]),
-                ets:delete_object(cleanup_table, {Me, self()})
-        end
-    end),
-    ets:insert(cleanup_table, {Me, Cleaner}).
-
-init_cleanup_table() ->
-    spawn(fun() ->
-        ets:new(cleanup_table, [named_table, public, bag]),
-        timer:sleep(infinity)
-    end).
-
-%% schedule_cleanup is async, so this function is waiting for it to finish
-wait_for_cleanup() ->
-    [
-        wait_for_down(Cleaner)
-     || {Owner, Cleaner} <- ets:tab2list(cleanup_table), not is_process_alive(Owner)
-    ].
-
-start(Node, Tab) ->
-    catch rpc(Node, cets, stop, [Tab]),
-    wait_for_name_to_be_free(Node, Tab),
-    {ok, Pid} = rpc(Node, cets, start, [Tab, #{}]),
-    schedule_cleanup(Pid),
-    {ok, Pid}.
-
-start_disco(Node, Opts) ->
-    case Opts of
-        #{name := Name} ->
-            catch rpc(Node, cets, stop, [Name]),
-            wait_for_name_to_be_free(Node, Name);
-        _ ->
-            ok
-    end,
-    {ok, Pid} = rpc(Node, cets_discovery, start, [Opts]),
-    schedule_cleanup(Pid),
-    Pid.
-
-start_simple_disco() ->
-    F = fun(State) ->
-        {{ok, []}, State}
-    end,
-    {ok, Pid} = cets_discovery:start_link(#{
-        backend_module => cets_discovery_fun, get_nodes_fn => F
-    }),
-    Pid.
-
-wait_for_name_to_be_free(Node, Name) ->
-    %% Wait for the old process to be killed by the cleaner in schedule_cleanup.
-    %% Cleaner is fast, but not instant.
-    cets_test_wait:wait_until(fun() -> rpc(Node, erlang, whereis, [Name]) end, undefined).
-
-insert(Node, Tab, Rec) ->
-    rpc(Node, cets, insert, [Tab, Rec]).
-
-insert_many(Node, Tab, Records) ->
-    rpc(Node, cets, insert_many, [Tab, Records]).
-
-delete(Node, Tab, Key) ->
-    rpc(Node, cets, delete, [Tab, Key]).
-
-delete_request(Node, Tab, Key) ->
-    rpc(Node, cets, delete_request, [Tab, Key]).
-
-delete_many(Node, Tab, Keys) ->
-    rpc(Node, cets, delete_many, [Tab, Keys]).
-
-dump(Node, Tab) ->
-    rpc(Node, cets, dump, [Tab]).
-
-other_nodes(Node, Tab) ->
-    rpc(Node, cets, other_nodes, [Tab]).
-
-join(Node1, Tab, Pid1, Pid2) ->
-    rpc(Node1, cets_join, join, [lock1, #{table => Tab}, Pid1, Pid2]).
-
-%% Apply function using rpc or peer module
-rpc(Peer, M, F, Args) when is_pid(Peer) ->
-    case peer:call(Peer, M, F, Args) of
-        {badrpc, Error} ->
-            ct:fail({badrpc, Error});
-        Other ->
-            Other
-    end;
-rpc(Node, M, F, Args) when is_atom(Node) ->
-    case rpc:call(Node, M, F, Args) of
-        {badrpc, Error} ->
-            ct:fail({badrpc, Error});
-        Other ->
-            Other
-    end.
-
-receive_message(M) ->
-    receive
-        M -> ok
-    after 5000 -> error({receive_message_timeout, M})
-    end.
-
-receive_message_with_arg(Tag) ->
-    receive
-        {Tag, Arg} -> Arg
-    after 5000 -> error({receive_message_with_arg_timeout, Tag})
-    end.
-
-flush_message(M) ->
-    receive
-        M ->
-            flush_message(M)
-    after 0 ->
-        ok
-    end.
-
-make_name(Config) ->
-    make_name(Config, 1).
-
-make_name(Config, Num) when is_integer(Num) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_" ++ integer_to_list(Num));
-make_name(Config, Atom) when is_atom(Atom) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_" ++ atom_to_list(Atom)).
-
-lock_name(Config) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_lock").
-
-disco_name(Config) ->
-    Testcase = proplists:get_value(testcase, Config),
-    list_to_atom(atom_to_list(Testcase) ++ "_disco").
-
-count_remote_ops_in_the_message_box(Pid) ->
-    {messages, Messages} = erlang:process_info(Pid, messages),
-    Ops = [M || M <- Messages, element(1, M) =:= remote_op],
-    length(Ops).
-
-set_join_ref(Pid, JoinRef) ->
-    sys:replace_state(Pid, fun(#{join_ref := _} = State) -> State#{join_ref := JoinRef} end).
-
-set_other_servers(Pid, Servers) ->
-    sys:replace_state(Pid, fun(#{other_servers := _} = State) ->
-        State#{other_servers := Servers}
-    end).
-
-given_two_joined_tables(Config) ->
-    given_two_joined_tables(Config, #{}).
-
-given_two_joined_tables(Config, Opts) ->
-    Tab1 = make_name(Config, 1),
-    Tab2 = make_name(Config, 2),
-    {ok, Pid1} = start_local(Tab1, Opts),
-    {ok, Pid2} = start_local(Tab2, Opts),
-    ok = cets_join:join(lock_name(Config), #{}, Pid1, Pid2),
-    #{
-        tab1 => Tab1,
-        tab2 => Tab2,
-        pid1 => Pid1,
-        pid2 => Pid2,
-        tabs => [Tab1, Tab2],
-        pids => [Pid1, Pid2]
-    }.
-
-given_3_servers(Config) ->
-    given_3_servers(Config, #{}).
-
-given_3_servers(Config, Opts) ->
-    given_n_servers(Config, 3, Opts).
-
-given_n_servers(Config, N, Opts) ->
-    Tabs = [make_name(Config, X) || X <- lists:seq(1, N)],
-    Pids = [
-        begin
-            {ok, Pid} = start_local(Tab, Opts),
-            Pid
-        end
-     || Tab <- Tabs
-    ],
-    #{pids => Pids, tabs => Tabs}.
-
-setup_two_nodes_and_discovery(Config) ->
-    setup_two_nodes_and_discovery(Config, []).
-
-%% Flags:
-%% - disco2 - start discovery on Node2
-%% - wait - call wait_for_ready/2
-setup_two_nodes_and_discovery(Config, Flags) ->
-    Me = self(),
-    Node1 = node(),
-    #{ct2 := Peer2} = proplists:get_value(peers, Config),
-    #{ct2 := Node2} = proplists:get_value(nodes, Config),
-    disconnect_node_by_name(Config, ct2),
-    Tab = make_name(Config),
-    {ok, _Pid1} = start(Node1, Tab),
-    {ok, _Pid2} = start(Peer2, Tab),
-    F = fun(State) ->
-        case lists:member(notify_get_nodes, Flags) of
-            true ->
-                Me ! get_nodes;
-            false ->
-                ok
-        end,
-        {{ok, [Node1, Node2]}, State}
-    end,
-    DiscoName = disco_name(Config),
-    DiscoOpts = #{
-        name => DiscoName, backend_module => cets_discovery_fun, get_nodes_fn => F
-    },
-    Disco = start_disco(Node1, DiscoOpts),
-    %% Start Disco on second node (it is not always needed)
-    Res =
-        case lists:member(disco2, Flags) of
-            true ->
-                Disco2 = start_disco(Node2, DiscoOpts),
-                cets_discovery:add_table(Disco2, Tab),
-                #{disco2 => Disco2};
-            false ->
-                #{}
-        end,
-    cets_discovery:add_table(Disco, Tab),
-    case lists:member(wait, Flags) of
-        true ->
-            wait_for_ready(Disco, 5000);
-        false ->
-            ok
-    end,
-    case lists:member(netsplit, Flags) of
-        true ->
-            %% Simulate a loss of connection between nodes
-            disconnect_node_by_name(Config, ct2);
-        false ->
-            ok
-    end,
-    Res#{
-        disco_name => DiscoName,
-        disco_opts => DiscoOpts,
-        disco => Disco,
-        node1 => Node1,
-        node2 => Node2,
-        peer2 => Peer2
-    }.
-
-simulate_disco_restart(#{
-    disco_opts := DiscoOpts,
-    disco2 := Disco2,
-    node1 := Node1,
-    node2 := Node2,
-    peer2 := Peer2
-}) ->
-    %% Instead of restart the node, restart the process. It is enough to get
-    %% a new start_time.
-    disconnect_node(Peer2, Node1),
-    rpc(Peer2, cets, stop, [Disco2]),
-    %% We actually would not detect the case of us just stopping the remote disco
-    %% server. Because we use nodeup/nodedown to detect downs, not monitors.
-    _RestartedDisco2 = start_disco(Node2, DiscoOpts).
 
 stopped_pid() ->
     %% Get a pid for a stopped process
@@ -3220,60 +1436,6 @@ stopped_pid() ->
     end,
     Pid.
 
-get_pd(Pid, Key) ->
-    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
-    proplists:get_value(Key, Dict).
-
-wait_till_test_stage(Pid, Stage) ->
-    cets_test_wait:wait_until(fun() -> get_pd(Pid, test_stage) end, Stage).
-
-wait_till_message_queue_length(Pid, Len) ->
-    cets_test_wait:wait_until(fun() -> get_message_queue_length(Pid) end, Len).
-
-get_message_queue_length(Pid) ->
-    {message_queue_len, Len} = erlang:process_info(Pid, message_queue_len),
-    Len.
-
-wait_for_down(Pid) ->
-    Mon = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', Mon, process, Pid, Reason} -> Reason
-    after 5000 -> ct:fail({wait_for_down_timeout, Pid})
-    end.
-
-%% Disconnect node until manually connected
-block_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
-    rpc(Peer, erlang, set_cookie, [node(), invalid_cookie]),
-    disconnect_node(Peer, node()),
-    %% Wait till node() is notified about the disconnect
-    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pang),
-    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pang).
-
-reconnect_node(Node, Peer) when is_atom(Node), is_pid(Peer) ->
-    rpc(Peer, erlang, set_cookie, [node(), erlang:get_cookie()]),
-    %% Very rarely it could return pang
-    cets_test_wait:wait_until(fun() -> rpc(Peer, net_adm, ping, [node()]) end, pong),
-    cets_test_wait:wait_until(fun() -> rpc(node(), net_adm, ping, [Node]) end, pong).
-
-disconnect_node(RPCNode, DisconnectNode) ->
-    rpc(RPCNode, erlang, disconnect_node, [DisconnectNode]).
-
-disconnect_node_by_name(Config, Id) ->
-    Peer = maps:get(Id, proplists:get_value(peers, Config)),
-    Node = maps:get(Id, proplists:get_value(nodes, Config)),
-    %% We could need to retry to disconnect, if the local node is currently trying to establish a connection
-    %% with Node2 (could be triggered by the previous tests)
-    F = fun() ->
-        disconnect_node(Peer, node()),
-        lists:member(Node, nodes())
-    end,
-    cets_test_wait:wait_until(F, false).
-
-not_leader(Leader, Other, Leader) ->
-    Other;
-not_leader(Other, Leader, Leader) ->
-    Other.
-
 bad_node_pid() ->
     binary_to_term(bad_node_pid_binary()).
 
@@ -3282,122 +1444,7 @@ bad_node_pid_binary() ->
     <<131, 88, 100, 0, 17, 98, 97, 100, 110, 111, 100, 101, 64, 108, 111, 99, 97, 108, 104, 111,
         115, 116, 0, 0, 0, 90, 0, 0, 0, 0, 100, 206, 70, 92>>.
 
-assert_nothing_is_logged(LogHandlerId, LogRef) ->
-    receive
-        {log, LogHandlerId, #{
-            level := Level,
-            msg := {report, #{log_ref := LogRef}}
-        }} when Level =:= warning; Level =:= error ->
-            ct:fail(got_logging_but_should_not)
-    after 0 ->
-        ok
-    end.
-
-send_join_start_back_and_wait_for_continue_joining() ->
-    Me = self(),
-    fun
-        (join_start) ->
-            Me ! {join_start, self()},
-            receive
-                continue_joining ->
-                    ok
-            end;
-        (_) ->
-            ok
-    end.
-
-%% Gathered after Helm update
-%% with cets_status:gather_data(mongoose_cets_discovery).
-test_data_for_duplicate_missing_table_in_status(Config) ->
-    %% Create atoms in non sorted order
-    %% maps:keys returns keys in the atom-creation order (and not sorted).
-    %% Also, compiler is smart and would optimize list_to_atom("literal_string"),
-    %% so we do a module call to disable this optimization.
-    _ = list_to_atom(?MODULE:return_same("cets_external_component")),
-    _ = list_to_atom(?MODULE:return_same("cets_bosh")),
-    Name = filename:join(proplists:get_value(data_dir, Config), "status_data.txt"),
-    {ok, [Term]} = file:consult(Name),
-    Term.
-
-return_same(X) ->
-    X.
-
-wait_for_disco_timestamp_to_appear(Disco, MapName, NodeKey) ->
-    F = fun() ->
-        #{MapName := Map} = cets_discovery:system_info(Disco),
-        maps:is_key(NodeKey, Map)
-    end,
-    cets_test_wait:wait_until(F, true).
-
-wait_for_disco_timestamp_to_be_updated(Disco, MapName, NodeKey, OldTimestamp) ->
-    Cond = fun() ->
-        NewTimestamp = get_disco_timestamp(Disco, MapName, NodeKey),
-        NewTimestamp =/= OldTimestamp
-    end,
-    cets_test_wait:wait_until(Cond, true).
-
-wait_for_unpaused(Peer, Pid, PausedByPid) ->
-    Cond = fun() ->
-        {monitors, Info} = rpc(Peer, erlang, process_info, [Pid, monitors]),
-        lists:member({process, PausedByPid}, Info)
-    end,
-    cets_test_wait:wait_until(Cond, false).
-
-wait_for_join_ref_to_match(Pid, JoinRef) ->
-    Cond = fun() ->
-        maps:get(join_ref, cets:info(Pid))
-    end,
-    cets_test_wait:wait_until(Cond, JoinRef).
-
-get_disco_timestamp(Disco, MapName, NodeKey) ->
-    Info = cets_discovery:system_info(Disco),
-    #{MapName := #{NodeKey := Timestamp}} = Info,
-    Timestamp.
-
-make_signalling_process() ->
-    proc_lib:spawn_link(fun() ->
-        receive
-            stop -> ok
-        end
-    end).
-
-mock_epmd() ->
-    meck:new(erl_epmd, [passthrough, unstick]),
-    meck:expect(erl_epmd, address_please, fun
-        ("cetsnode1", "localhost", inet) -> {ok, {192, 168, 100, 134}};
-        (Name, Host, Family) -> meck:passthrough([Name, Host, Family])
-    end).
-
-mock_pause_on_remote_node_failing() ->
-    meck:new(cets_join, [passthrough, no_link]),
-    meck:expect(cets_join, pause_on_remote_node, fun(_JoinerPid, _AllPids) ->
-        error(mock_pause_on_remote_node_failing)
-    end),
-    ok.
-
-%% Fails if List has duplicates
-assert_unique(List) ->
-    ?assertEqual([], List -- lists:usort(List)),
-    List.
-
-make_process() ->
-    proc_lib:spawn(fun() ->
-        receive
-            stop -> stop
-        end
-    end).
-
-wait_for_ready(Disco, Timeout) ->
-    try
-        ok = cets_discovery:wait_for_ready(Disco, Timeout)
-    catch
-        Class:Reason:Stacktrace ->
-            ct:pal("system_info: ~p", [cets_discovery:system_info(Disco)]),
-            erlang:raise(Class, Reason, Stacktrace)
-    end.
-
-%% Overwrites nodedown timestamp for the Node in the discovery server state
-set_nodedown_timestamp(Disco, Node, NewTimestamp) ->
-    sys:replace_state(Disco, fun(#{nodedown_timestamps := Map} = State) ->
-        State#{nodedown_timestamps := maps:put(Node, NewTimestamp, Map)}
-    end).
+not_leader(Leader, Other, Leader) ->
+    Other;
+not_leader(Other, Leader, Leader) ->
+    Other.
