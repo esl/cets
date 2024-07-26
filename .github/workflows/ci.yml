@@ -16,7 +16,7 @@ jobs:
       image: erlang:${{ matrix.erlang-version }}
     strategy:
       matrix:
-        erlang-version: [25, 26]
+        erlang-version: [25, 26, 27]
     steps:
     - uses: actions/checkout@v3
     - name: Compile
@@ -37,7 +37,7 @@ jobs:
       image: erlang:${{ matrix.erlang-version }}
     strategy:
       matrix:
-        erlang-version: [25, 26]
+        erlang-version: [25, 26, 27]
     steps:
     - uses: actions/checkout@v3
     - name: Run dialyzer
