@@ -80,3 +80,58 @@ Before making a new pull request run tests:
 ```
 rebar3 all
 ```
+
+# Three nodes example
+
+Create file with a list of cluster nodes.
+
+echo "node1@localhost\nnode2@localhost\nnode3@localhost" > /tmp/nodes.txt
+
+Open 3 shells in tmux.
+
+```bash
+rebar3 shell --sname node1@localhost
+rebar3 shell --sname node2@localhost
+rebar3 shell --sname node3@localhost
+```
+
+On each node run:
+
+```erlang
+{ok, Disco} = cets_discovery:start(#{disco_file => "/tmp/nodes.txt"}).
+cets:start(test_table, #{}).
+cets_discovery:add_table(Disco, test_table).
+```
+
+Check the list of nodes:
+
+```erlang
+cets_discovery:info(Disco).
+[#{memory => 201,size => 3,table => test_table,
+   nodes => [node1@localhost,node2@localhost,node3@localhost],
+   opts => #{},
+   join_ref => #Ref<22882.3930565377.1965031426.177252>,
+   ack_pid => <0.1066.0>,
+   other_servers => [<22882.601.0>],
+   pause_monitors => [],node_down_history => []}]
+```
+
+Insert records on one of the nodes (read about keys considerations before):
+
+```erlang
+cets:insert(test_table, {1, <<"test_info">>}).
+cets:insert(test_table, {{cool_name, self()}, <<"use CETS as a process registry">>}).
+```
+
+Check records:
+
+```erlang
+ets:tab2list(test_table).
+[{1,<<"test_info">>},
+ {{cool_name,<0.591.0>},
+  <<"use CETS as a process registry">>}]
+```
+
+Use ets API to read records.
+
+Use supervision and `start_link` instead of `start` in the real world code.
