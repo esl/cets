@@ -10,68 +10,45 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: erlang:${{ matrix.erlang-version }}
+  tests:
+    name: Tests-OTP${{matrix.otp}}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        erlang-version: [25, 26, 27]
+        os: ['ubuntu-24.04']
+        otp: ['28', '27', '26']
+        rebar3: ['3.25.0']
     steps:
-    - uses: actions/checkout@v3
-    - name: Compile
-      run: rebar3 as test compile
-    - name: Run tests
-      run: rebar3 cover_tests
-    - name: Send test coverage report
-      run: rebar3 as test codecov analyze
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    - uses: actions/checkout@v4
+    - uses: erlef/setup-beam@v1
+      with:
+        otp-version: ${{ matrix.otp }}
+        rebar3-version: ${{ matrix.rebar3 }}
+    - run: rebar3 as test compile
+    - run: rebar3 cover_tests
+    - run: rebar3 as test codecov analyze
+    - uses: codecov/codecov-action@v5
+      with:
+        files: codecov.json
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
 
-  dialyzer:
-    runs-on: ubuntu-latest
-
-    container:
-      image: erlang:${{ matrix.erlang-version }}
+  static_tools:
+    name: Static-OTP${{matrix.otp}}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        erlang-version: [25, 26, 27]
+        os: ['ubuntu-24.04']
+        otp: ['28', '27', '26']
+        rebar3: ['3.25.0']
     steps:
-    - uses: actions/checkout@v3
-    - name: Run dialyzer
-      run: rebar3 dialyzer
-
-  xref:
-    runs-on: ubuntu-latest
-
-    container:
-      image: erlang:25
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: Run xref
-      run: rebar3 xref
-
-  erlfmt:
-    runs-on: ubuntu-latest
-
-    container:
-      image: erlang:25
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: Run erlfmt
-      run: rebar3 format_check
-
-  docs:
-    runs-on: ubuntu-latest
-
-    container:
-      image: erlang:25
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: Run ex_doc
-      run: rebar3 ex_doc
+    - uses: actions/checkout@v4
+    - uses: erlef/setup-beam@v1
+      with:
+        otp-version: ${{ matrix.otp }}
+        rebar3-version: ${{ matrix.rebar3 }}
+    - run: rebar3 xref
+    - run: rebar3 dialyzer
+    - run: rebar3 format_check
+    - run: rebar3 ex_doc
