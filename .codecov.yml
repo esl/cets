@@ -1,0 +1,16 @@
+coverage:
+  status:
+    project:
+      default:
+        # Allow coverage to drop by up to 0.5%
+        threshold: 0.5%
+    patch:
+      default:
+        # Allow patch coverage to be 0.5% lower than base
+        threshold: 0.5%
+
+comment:
+  # Only comment on coverage changes > 0.5%
+  require_changes: true
+  require_base: yes
+  require_head: yes
