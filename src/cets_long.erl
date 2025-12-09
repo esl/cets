@@ -110,53 +110,69 @@ run_monitor(Info, Ref, Parent, Start, Timeout) ->
 
 monitor_loop(Mon, Info, Parent, Start, Interval, Timeout) ->
     Diff = diff(Start),
-    case Timeout =/= infinity andalso Diff >= Timeout of
-        true ->
+    case check_timeout(Timeout, Diff) of
+        timeout_exceeded ->
+            handle_timeout(Info, Parent, Diff, Timeout);
+        timeout_not_exceeded ->
+            WaitTime = calculate_wait_time(Timeout, Diff, Interval),
+            handle_monitor_messages(Mon, Info, Parent, Start, Interval, Timeout, WaitTime)
+    end.
+
+check_timeout(infinity, _Diff) ->
+    timeout_not_exceeded;
+check_timeout(Timeout, Diff) when Diff >= Timeout ->
+    timeout_exceeded;
+check_timeout(_Timeout, _Diff) ->
+    timeout_not_exceeded.
+
+handle_timeout(Info, Parent, Diff, Timeout) ->
+    ?LOG_ERROR(Info#{
+        what => task_timeout,
+        caller_pid => Parent,
+        time_ms => Diff,
+        timeout_ms => Timeout,
+        current_stacktrace => pinfo(Parent, current_stacktrace)
+    }),
+    exit(Parent, {task_timeout, Info}).
+
+calculate_wait_time(infinity, _Diff, Interval) ->
+    Interval;
+calculate_wait_time(Timeout, Diff, Interval) ->
+    min(Interval, Timeout - Diff).
+
+handle_monitor_messages(Mon, Info, Parent, Start, Interval, Timeout, WaitTime) ->
+    receive
+        {'DOWN', _MonRef, process, _Pid, shutdown} ->
+            %% Special case, the long task is stopped using exit(Pid, shutdown)
+            ok;
+        {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
             ?LOG_ERROR(Info#{
-                what => task_timeout,
+                what => task_failed,
+                reason => Reason,
+                caller_pid => Parent,
+                reported_by => monitor_process
+            }),
+            ok;
+        stop ->
+            ok
+    after WaitTime ->
+        handle_progress_logging(Info, Parent, Start, Timeout),
+        monitor_loop(Mon, Info, Parent, Start, Interval, Timeout)
+    end.
+
+handle_progress_logging(Info, Parent, Start, Timeout) ->
+    Diff = diff(Start),
+    case check_timeout(Timeout, Diff) of
+        timeout_exceeded ->
+            %% Don't log progress, let the next iteration handle timeout
+            ok;
+        timeout_not_exceeded ->
+            ?LOG_WARNING(Info#{
+                what => long_task_progress,
                 caller_pid => Parent,
                 time_ms => Diff,
-                timeout_ms => Timeout,
                 current_stacktrace => pinfo(Parent, current_stacktrace)
-            }),
-            exit(Parent, {task_timeout, Info});
-        false ->
-            WaitTime =
-                case Timeout of
-                    infinity -> Interval;
-                    _ -> min(Interval, Timeout - Diff)
-                end,
-            receive
-                {'DOWN', _MonRef, process, _Pid, shutdown} ->
-                    %% Special case, the long task is stopped using exit(Pid, shutdown)
-                    ok;
-                {'DOWN', MonRef, process, _Pid, Reason} when Mon =:= MonRef ->
-                    ?LOG_ERROR(Info#{
-                        what => task_failed,
-                        reason => Reason,
-                        caller_pid => Parent,
-                        reported_by => monitor_process
-                    }),
-                    ok;
-                stop ->
-                    ok
-            after WaitTime ->
-                Diff2 = diff(Start),
-                %% Check if timeout is reached before logging progress
-                case Timeout =/= infinity andalso Diff2 >= Timeout of
-                    true ->
-                        %% Don't log progress, let the next iteration handle timeout
-                        ok;
-                    false ->
-                        ?LOG_WARNING(Info#{
-                            what => long_task_progress,
-                            caller_pid => Parent,
-                            time_ms => Diff2,
-                            current_stacktrace => pinfo(Parent, current_stacktrace)
-                        })
-                end,
-                monitor_loop(Mon, Info, Parent, Start, Interval, Timeout)
-            end
+            })
     end.
 
 diff(Start) ->
