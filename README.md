@@ -20,7 +20,7 @@ Some features are not supported:
 Developed by [Erlang Solutions](https://www.erlang-solutions.com/) to be used in [MongooseIM](https://github.com/esl/MongooseIM/).
 It could be used in other Erlang or Elixir projects.
 
-# Merging logic
+## Merging logic
 
 When two database partitions are joined together, records from both partitions
 are put together. So, each record would be present on each node.
@@ -42,7 +42,7 @@ Without `handle_conflict`, conflicting records would overwrite each other when j
 When joining nodes we insert all data from one node to another and vice versa without any extra check.
 Check `join_works_with_existing_data_with_conflicts` test case as an example.
 
-# API
+## API
 
 The main module is cets.
 
@@ -73,10 +73,18 @@ The simplest `cets_discovery` backend is `cets_discovery_file`, which just reads
 a file with a list of nodes on each line. This file could be populated by an
 external program or by an admin.
 
-# Commands
+## Commands
 
 Before making a new pull request run tests:
 
 ```
 rebar3 all
 ```
+
+## Releasing to Hex.pm
+
+Creating a GitHub release (non-draft, non-prerelease) automatically publishes the package to [Hex.pm](https://hex.pm/) via the **Publish to Hex** workflow.
+This workflow can also be triggered manually from the Actions tab — make sure to run it from the specific tag you want to publish.
+
+To revert a published version, run the **Revert published version from Hex** workflow from the Actions tab, providing the version to revert.
+Hex.pm only allows reverting within 1 hour of publishing — after that, the version can only be *retired*.
