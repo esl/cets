@@ -171,6 +171,9 @@ cases() ->
 only_for_logger_cases() ->
     [
         run_tracked_logged_check_logger,
+        run_tracked_timeout,
+        run_tracked_with_infinity_timeout,
+        run_tracked_completes_before_timeout,
         long_call_fails_because_linked_process_dies,
         pause_owner_crashed_is_logged,
         pause_owner_crashed_is_not_logged_if_reason_is_normal,
@@ -1371,6 +1374,72 @@ run_tracked_logged_check_logger(_Config) ->
     after 5000 ->
         ct:fail(timeout)
     end.
+
+run_tracked_timeout(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    Me = self(),
+    F = fun() ->
+        Me ! task_started,
+        timer:sleep(infinity)
+    end,
+    %% Run it in a separate process with a 50ms timeout
+    %% Use high report_interval to avoid long_task_progress logs
+    Pid = proc_lib:spawn(fun() ->
+        cets_long:run_tracked(#{log_ref => LogRef, report_interval => 10000}, F, 50)
+    end),
+    receive_message(task_started),
+    wait_for_down(Pid),
+    %% Check that task_timeout was logged
+    [
+        #{
+            level := error,
+            msg :=
+                {report, #{
+                    what := task_timeout,
+                    log_ref := LogRef,
+                    timeout_ms := 50
+                }}
+        }
+    ] =
+        cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef).
+
+run_tracked_with_infinity_timeout(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    Me = self(),
+    F = fun() ->
+        Me ! task_started,
+        timer:sleep(20),
+        Me ! task_done
+    end,
+    %% Test with explicit infinity timeout - should not timeout
+    cets_long:run_tracked(#{log_ref => LogRef}, F, infinity),
+    receive_message(task_started),
+    receive_message(task_done),
+    %% No timeout should be logged
+    [] = [
+        Log
+     || #{msg := {report, #{what := task_timeout}}} = Log <-
+            cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef)
+    ].
+
+run_tracked_completes_before_timeout(_Config) ->
+    logger_debug_h:start(#{id => ?FUNCTION_NAME}),
+    LogRef = make_ref(),
+    Result = make_ref(),
+    F = fun() ->
+        timer:sleep(10),
+        Result
+    end,
+    %% Task completes in 10ms, timeout is 1000ms
+    Result = cets_long:run_tracked(#{log_ref => LogRef}, F, 1000),
+    %% No timeout should be logged
+    [] = [
+        Log
+     || #{msg := {report, #{what := task_timeout}}} = Log <-
+            cets_test_log:receive_all_logs_with_log_ref(?FUNCTION_NAME, LogRef)
+    ].
 
 %% Improves code coverage, checks logs
 long_call_fails_because_linked_process_dies(_Config) ->

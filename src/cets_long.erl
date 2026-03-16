@@ -1,6 +1,7 @@
 %% @doc Helper to log long running operations.
 -module(cets_long).
--export([run_spawn/2, run_tracked/2]).
+-export([run_spawn/2, run_tracked/2, run_tracked/3]).
+-ignore_xref([run_tracked/3]).
 
 -ifdef(TEST).
 -export([pinfo/2]).
@@ -18,6 +19,9 @@
 
 -type task_fun() :: fun(() -> task_result()).
 %% User provided function to execute.
+
+-type task_timeout() :: timeout().
+%% Timeout for task execution in milliseconds.
 
 %% @doc Spawns a new process to do some memory-intensive task.
 %%
@@ -45,18 +49,26 @@ run_spawn(Info, F) ->
             erlang:raise(Class, Reason, Stacktrace)
     end.
 
-%% @doc Runs function `Fun'.
+%% @doc Runs function `Fun' without timeout.
 %%
 %% Logs errors.
 %% Logs if function execution takes too long.
-%% Does not catches the errors - the caller would have to catch
-%% if they want to prevent an error.
+%% Catches errors and re-raises them after logging.
 -spec run_tracked(log_info(), task_fun()) -> task_result().
 run_tracked(Info, Fun) ->
+    run_tracked(Info, Fun, infinity).
+
+%% @doc Runs function `Fun' with a specified timeout.
+%%
+%% Logs errors.
+%% Logs if function execution takes too long.
+%% Catches errors and re-raises them after logging.
+-spec run_tracked(log_info(), task_fun(), task_timeout()) -> task_result().
+run_tracked(Info, Fun, Timeout) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
     ?LOG_INFO(Info#{what => task_started}),
-    Pid = spawn_mon(Info, Parent, Start),
+    Pid = spawn_mon(Info, Parent, Start, Timeout),
     try
         Fun()
     catch
@@ -80,23 +92,55 @@ run_tracked(Info, Fun) ->
         Pid ! stop
     end.
 
-spawn_mon(Info, Parent, Start) ->
+spawn_mon(Info, Parent, Start, Timeout) ->
     Ref = make_ref(),
     %% We do not link, because we want to log if the Parent dies
-    Pid = spawn(fun() -> run_monitor(Info, Ref, Parent, Start) end),
+    Pid = spawn(fun() -> run_monitor(Info, Ref, Parent, Start, Timeout) end),
     %% Ensure there is no race conditions by waiting till the monitor is added
     receive
         {monitor_added, Ref} -> ok
     end,
     Pid.
 
-run_monitor(Info, Ref, Parent, Start) ->
+run_monitor(Info, Ref, Parent, Start, Timeout) ->
     Mon = erlang:monitor(process, Parent),
     Parent ! {monitor_added, Ref},
     Interval = maps:get(report_interval, Info, 5000),
-    monitor_loop(Mon, Info, Parent, Start, Interval).
+    monitor_loop(Mon, Info, Parent, Start, Interval, Timeout).
 
-monitor_loop(Mon, Info, Parent, Start, Interval) ->
+monitor_loop(Mon, Info, Parent, Start, Interval, Timeout) ->
+    Diff = diff(Start),
+    case check_timeout(Timeout, Diff) of
+        timeout_exceeded ->
+            handle_timeout(Info, Parent, Diff, Timeout);
+        timeout_not_exceeded ->
+            WaitTime = calculate_wait_time(Timeout, Diff, Interval),
+            handle_monitor_messages(Mon, Info, Parent, Start, Interval, Timeout, WaitTime)
+    end.
+
+check_timeout(infinity, _Diff) ->
+    timeout_not_exceeded;
+check_timeout(Timeout, Diff) when Diff >= Timeout ->
+    timeout_exceeded;
+check_timeout(_Timeout, _Diff) ->
+    timeout_not_exceeded.
+
+handle_timeout(Info, Parent, Diff, Timeout) ->
+    ?LOG_ERROR(Info#{
+        what => task_timeout,
+        caller_pid => Parent,
+        time_ms => Diff,
+        timeout_ms => Timeout,
+        current_stacktrace => pinfo(Parent, current_stacktrace)
+    }),
+    exit(Parent, {task_timeout, Info}).
+
+calculate_wait_time(infinity, _Diff, Interval) ->
+    Interval;
+calculate_wait_time(Timeout, Diff, Interval) ->
+    min(Interval, Timeout - Diff).
+
+handle_monitor_messages(Mon, Info, Parent, Start, Interval, Timeout, WaitTime) ->
     receive
         {'DOWN', _MonRef, process, _Pid, shutdown} ->
             %% Special case, the long task is stopped using exit(Pid, shutdown)
@@ -111,15 +155,24 @@ monitor_loop(Mon, Info, Parent, Start, Interval) ->
             ok;
         stop ->
             ok
-    after Interval ->
-        Diff = diff(Start),
-        ?LOG_WARNING(Info#{
-            what => long_task_progress,
-            caller_pid => Parent,
-            time_ms => Diff,
-            current_stacktrace => pinfo(Parent, current_stacktrace)
-        }),
-        monitor_loop(Mon, Info, Parent, Start, Interval)
+    after WaitTime ->
+        handle_progress_logging(Info, Parent, Start, Timeout),
+        monitor_loop(Mon, Info, Parent, Start, Interval, Timeout)
+    end.
+
+handle_progress_logging(Info, Parent, Start, Timeout) ->
+    Diff = diff(Start),
+    case check_timeout(Timeout, Diff) of
+        timeout_exceeded ->
+            %% Don't log progress, let the next iteration handle timeout
+            ok;
+        timeout_not_exceeded ->
+            ?LOG_WARNING(Info#{
+                what => long_task_progress,
+                caller_pid => Parent,
+                time_ms => Diff,
+                current_stacktrace => pinfo(Parent, current_stacktrace)
+            })
     end.
 
 diff(Start) ->
