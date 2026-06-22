@@ -74,14 +74,22 @@ start_local(Name) ->
     start_local(Name, #{}).
 
 start_local(Name, Opts) ->
-    catch cets:stop(Name),
+    try
+        cets:stop(Name)
+    catch
+        _:_ -> ok
+    end,
     cets_test_wait:wait_for_name_to_be_free(node(), Name),
     {ok, Pid} = cets:start(Name, Opts),
     schedule_cleanup(Pid),
     {ok, Pid}.
 
 start(Node, Tab) ->
-    catch rpc(Node, cets, stop, [Tab]),
+    try
+        rpc(Node, cets, stop, [Tab])
+    catch
+        _:_ -> ok
+    end,
     cets_test_wait:wait_for_name_to_be_free(Node, Tab),
     {ok, Pid} = rpc(Node, cets, start, [Tab, #{}]),
     schedule_cleanup(Pid),
@@ -91,7 +99,11 @@ start_link_local(Name) ->
     start_link_local(Name, #{}).
 
 start_link_local(Name, Opts) ->
-    catch cets:stop(Name),
+    try
+        cets:stop(Name)
+    catch
+        _:_ -> ok
+    end,
     cets_test_wait:wait_for_name_to_be_free(node(), Name),
     {ok, Pid} = cets:start_link(Name, Opts),
     schedule_cleanup(Pid),
@@ -100,7 +112,11 @@ start_link_local(Name, Opts) ->
 start_disco(Node, Opts) ->
     case Opts of
         #{name := Name} ->
-            catch rpc(Node, cets, stop, [Name]),
+            try
+                rpc(Node, cets, stop, [Name])
+            catch
+                _:_ -> ok
+            end,
             cets_test_wait:wait_for_name_to_be_free(Node, Name);
         _ ->
             ok

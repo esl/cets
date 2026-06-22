@@ -563,7 +563,15 @@ handle_call(ping_all, From, State = #{other_servers := Servers}) ->
     proc_lib:spawn(fun() ->
         %% If ping crashes, the caller would not receive a reply.
         %% So, we have to use catch to still able to reply with ok.
-        Results = lists:map(fun(Server) -> {Server, catch ping(Server)} end, Servers),
+        Results = [
+            {Server,
+                try
+                    ping(Server)
+                catch
+                    _:Reason:Stacktrace -> {'EXIT', {Reason, Stacktrace}}
+                end}
+         || Server <- Servers
+        ],
         BadResults = [Res || {_Server, Result} = Res <- Results, Result =/= pong],
         case BadResults of
             [] ->
@@ -939,7 +947,7 @@ call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts, is_leader := IsLead
                 remote_node => node(RemotePid)
             },
             %% Errors would be logged inside run_tracked
-            catch cets_long:run_tracked(Info, FF);
+            cets_long:run_ignore(fun() -> cets_long:run_tracked(Info, FF) end);
         _ ->
             ok
     end.
@@ -948,7 +956,7 @@ call_user_handle_down(RemotePid, #{tab := Tab, opts := Opts, is_leader := IsLead
 handle_wrong_leader(Op, From, #{opts := #{handle_wrong_leader := F}}) ->
     %% It is used for debugging/logging
     %% Do not do anything heavy here
-    catch F(#{from => From, op => Op, server => self()}),
+    cets_long:run_ignore(fun() -> F(#{from => From, op => Op, server => self()}) end),
     ok;
 handle_wrong_leader(_Op, _From, _State) ->
     ok.

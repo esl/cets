@@ -149,7 +149,10 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     after
         checkpoint(before_unpause, JoinOpts),
         %% If unpause fails, there would be log messages
-        lists:foreach(fun({Pid, Ref}) -> catch cets:unpause(Pid, Ref) end, Paused)
+        lists:foreach(
+            fun({Pid, Ref}) -> cets_long:run_ignore(fun() -> cets:unpause(Pid, Ref) end) end,
+            Paused
+        )
     end.
 
 -spec pause_servers(AllPids :: [pid(), ...]) -> Paused :: [{pid(), cets:pause_monitor()}].
@@ -175,7 +178,10 @@ pause_on_remote_node(JoinerPid, AllPids) ->
         %% Ignore pids on the current node
         %% (because we only interested in internode connections here).
         %% Catching because we can ignore losing some connections here.
-        _Pauses = [catch cets:pause(Pid) || Pid <- AllPids, node(Pid) =/= MyNode],
+        _Pauses = [
+            cets_long:run_ignore(fun() -> cets:pause(Pid) end)
+         || Pid <- AllPids, node(Pid) =/= MyNode
+        ],
         Self ! {ready, self()},
         receive
             {'DOWN', JoinerMon, process, JoinerPid, _Reason} ->
@@ -194,7 +200,12 @@ send_dump(Pid, Paused, Pids, JoinRef, Dump, JoinOpts) ->
     PauseRef = proplists:get_value(Pid, Paused),
     checkpoint({before_send_dump, Pid}, JoinOpts),
     %% Error reporting would be done by cets_long:call_tracked
-    Result = catch cets:send_dump(Pid, Pids, JoinRef, PauseRef, Dump),
+    Result =
+        try
+            cets:send_dump(Pid, Pids, JoinRef, PauseRef, Dump)
+        catch
+            _:Reason -> Reason
+        end,
     checkpoint({after_send_dump, Pid, Result}, JoinOpts),
     ok.
 
