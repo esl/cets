@@ -1,6 +1,6 @@
 %% @doc Helper to log long running operations.
 -module(cets_long).
--export([run_spawn/2, run_tracked/2]).
+-export([run_spawn/2, run_tracked/2, run_ignore/1]).
 
 -ifdef(TEST).
 -export([pinfo/2]).
@@ -43,6 +43,19 @@ run_spawn(Info, F) ->
             Res;
         {forward_error, Ref, {Class, Reason, Stacktrace}} ->
             erlang:raise(Class, Reason, Stacktrace)
+    end.
+
+%% @doc Runs `Fun' for its side effects, ignoring any error it raises.
+%%
+%% Used for best-effort calls where a failure is acceptable and either
+%% logged elsewhere or intentionally ignored.
+-spec run_ignore(task_fun()) -> ok.
+run_ignore(Fun) ->
+    try
+        _ = Fun(),
+        ok
+    catch
+        _:_ -> ok
     end.
 
 %% @doc Runs function `Fun'.
