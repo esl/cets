@@ -563,15 +563,7 @@ handle_call(ping_all, From, State = #{other_servers := Servers}) ->
     proc_lib:spawn(fun() ->
         %% If ping crashes, the caller would not receive a reply.
         %% So, we have to use catch to still able to reply with ok.
-        Results = [
-            {Server,
-                try
-                    ping(Server)
-                catch
-                    _:Reason:Stacktrace -> {'EXIT', {Reason, Stacktrace}}
-                end}
-         || Server <- Servers
-        ],
+        Results = lists:map(fun ping_server/1, Servers),
         BadResults = [Res || {_Server, Result} = Res <- Results, Result =/= pong],
         case BadResults of
             [] ->
@@ -650,6 +642,15 @@ handle_send_dump(NewPids, JoinRef, PauseRef, Dump, State) ->
             }),
             {reply, {error, ignored}, State}
     end.
+
+-spec ping_server(server_pid()) -> {server_pid(), pong | {'EXIT', term()}}.
+ping_server(Server) ->
+    {Server,
+        try
+            ping(Server)
+        catch
+            _:Reason:Stacktrace -> {'EXIT', {Reason, Stacktrace}}
+        end}.
 
 -spec handle_down(reference(), pid(), term(), state()) -> state().
 handle_down(Mon, Pid, Reason, State = #{pause_monitors := Mons}) ->

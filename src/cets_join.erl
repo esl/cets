@@ -149,11 +149,11 @@ join2(Info, LocalPid, RemotePid, JoinOpts) ->
     after
         checkpoint(before_unpause, JoinOpts),
         %% If unpause fails, there would be log messages
-        lists:foreach(
-            fun({Pid, Ref}) -> cets_long:run_ignore(fun() -> cets:unpause(Pid, Ref) end) end,
-            Paused
-        )
+        lists:foreach(fun({Pid, Ref}) -> try_unpause(Pid, Ref) end, Paused)
     end.
+
+try_unpause(Pid, Ref) ->
+    cets_long:run_ignore(fun() -> cets:unpause(Pid, Ref) end).
 
 -spec pause_servers(AllPids :: [pid(), ...]) -> Paused :: [{pid(), cets:pause_monitor()}].
 pause_servers(AllPids) ->
@@ -178,7 +178,7 @@ pause_on_remote_node(JoinerPid, AllPids) ->
         %% Ignore pids on the current node
         %% (because we only interested in internode connections here).
         %% Catching because we can ignore losing some connections here.
-        _Pauses = [
+        [
             cets_long:run_ignore(fun() -> cets:pause(Pid) end)
          || Pid <- AllPids, node(Pid) =/= MyNode
         ],
@@ -204,7 +204,7 @@ send_dump(Pid, Paused, Pids, JoinRef, Dump, JoinOpts) ->
         try
             cets:send_dump(Pid, Pids, JoinRef, PauseRef, Dump)
         catch
-            _:Reason -> Reason
+            _:Reason -> {error, Reason}
         end,
     checkpoint({after_send_dump, Pid, Result}, JoinOpts),
     ok.
