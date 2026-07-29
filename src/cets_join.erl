@@ -107,6 +107,7 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
         aborted ->
             checkpoint(before_retry, JoinOpts),
             ?LOG_INFO(Info#{what => join_retry, reason => lock_aborted}),
+            timer:sleep(rand:uniform(3000)),
             join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts);
         Result ->
             Result
