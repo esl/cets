@@ -38,7 +38,11 @@
 -type checkpoint_handler() :: fun((checkpoint()) -> ok).
 %% Checkpoint function for debugging.
 
--type join_opts() :: #{checkpoint_handler => checkpoint_handler(), join_ref => reference()}.
+-type join_opts() :: #{
+    checkpoint_handler => checkpoint_handler(),
+    join_ref => reference(),
+    lock_retries => non_neg_integer()
+}.
 %% Joining options.
 
 -export_type([join_ref/0]).
@@ -90,8 +94,6 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     %% - to avoid deadlocks, because joining does gen_server calls
     F = fun() ->
         Diff = erlang:system_time(millisecond) - Start,
-        %% Getting the lock could take really long time in case nodes are
-        %% overloaded or joining is already in progress on another node
         ?LOG_INFO(Info#{what => join_got_lock, after_time_ms => Diff}),
         %% Do joining in a separate process to reduce GC
         FF = handle_throw(fun() -> join2(Info, LocalPid, RemotePid, JoinOpts) end),
@@ -100,7 +102,9 @@ join_loop(LockKey, Info, LocalPid, RemotePid, Start, JoinOpts) ->
     LockRequest = {LockKey, self()},
     %% Just lock all nodes, no magic here :)
     Nodes = [node() | nodes()],
-    Retries = 0,
+    %% Retries > 0 enables randomized exponential backoff in global:set_lock,
+    %% helping avoid infinite retry loops when multiple nodes contend for global locks
+    Retries = maps:get(lock_retries, JoinOpts, 1),
     %% global could abort the transaction when one of the nodes goes down.
     %% It could usually abort it during startup or update.
     case global:trans(LockRequest, F, Nodes, Retries) of

@@ -104,7 +104,8 @@ seq_cases() ->
     [
         joining_not_fully_connected_node_is_not_allowed,
         joining_not_fully_connected_node_is_not_allowed2,
-        join_interrupted_when_ping_crashes
+        join_interrupted_when_ping_crashes,
+        join_on_10_nodes_concurrently_with_the_same_lock
     ].
 
 cets_seq_no_log_cases() ->
@@ -114,7 +115,7 @@ cets_seq_no_log_cases() ->
 
 init_per_suite(Config) ->
     cets_test_setup:init_cleanup_table(),
-    cets_test_peer:start([ct2, ct3, ct5], Config).
+    cets_test_peer:start([ct2, ct3, ct4, ct5, ct6, ct7, ct8, ct9, ct10], Config).
 
 end_per_suite(Config) ->
     cets_test_setup:remove_cleanup_table(),
@@ -493,7 +494,6 @@ join_retried_if_lock_is_busy(Config) ->
         cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => SleepyF})
     end),
     receive_message(join_start),
-    %% We actually would not return from cets_join:join unless we get the lock
     proc_lib:spawn_link(fun() ->
         ok = cets_join:join(Lock, #{}, Pid1, Pid2, #{checkpoint_handler => F})
     end),
@@ -605,6 +605,51 @@ join_interrupted_when_ping_crashes(Config) ->
     Res = cets_join:join(lock_name(Config), #{}, Pid1, Pid3),
     ?assertMatch({error, {task_failed, ping_all_failed, #{}}}, Res),
     meck:unload().
+
+join_on_10_nodes_concurrently_with_the_same_lock(Config) ->
+    ct:timetrap({seconds, 60}),
+    Node1 = node(),
+    Nodes = proplists:get_value(nodes, Config),
+    Peers = proplists:get_value(peers, Config),
+    PeerIds = [ct2, ct3, ct4, ct5, ct6, ct7, ct8, ct9, ct10],
+    Tab = make_name(Config),
+    Lock = lock_name(Config),
+    {ok, CetsPid1} = start(Node1, Tab),
+
+    CetsWithNodes = [
+        begin
+            Peer = maps:get(Id, Peers),
+            Node = maps:get(Id, Nodes),
+            {ok, Pid} = start(Peer, Tab),
+            {Node, Pid}
+        end
+     || Id <- PeerIds
+    ],
+    %% insert one row into CETS per node
+    cets:insert(Tab, {0}),
+    [
+        ok = cets_test_rpc:insert(Node, Tab, {N})
+     || {N, {Node, _Pid}} <- lists:zip(lists:seq(1, 9), CetsWithNodes)
+    ],
+    %% concurrently join for the same lock key.
+    ReqIds = [
+        erpc:send_request(Node, cets_join, join, [Lock, #{}, Pid, CetsPid1, #{lock_retries => 1}])
+     || {Node, Pid} <- CetsWithNodes
+    ],
+    [ok = erpc:receive_response(ReqId, timer:seconds(60)) || ReqId <- ReqIds],
+    %% check all nodes
+    {CetsNodes, CetsPids} = lists:unzip(CetsWithNodes),
+    AllCetsPids = [CetsPid1 | CetsPids],
+    AllCetsNodes = lists:sort([Node1 | CetsNodes]),
+    CetsInfos = [cets:info(Pid) || Pid <- AllCetsPids],
+    [?assertEqual(AllCetsNodes, lists:sort(maps:get(nodes, Info))) || Info <- CetsInfos],
+    %% The last committed join stamped the same join_ref everywhere
+    ?assertMatch([_], lists:usort([maps:get(join_ref, Info) || Info <- CetsInfos])),
+    %% No pause left behind
+    [?assertEqual([], maps:get(pause_monitors, Info)) || Info <- CetsInfos],
+    %% Data from all nodes is merged into every replica
+    ExpectedRows = [{N} || N <- lists:seq(0, 9)],
+    [?assertEqual({ok, ExpectedRows}, cets:remote_dump(Pid)) || Pid <- AllCetsPids].
 
 %% Helpers
 
