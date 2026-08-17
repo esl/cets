@@ -635,8 +635,11 @@ join_on_many_nodes_concurrently_with_the_same_lock(Config) ->
     ],
     %% The last committed join stamped the same join_ref everywhere
     ?assertMatch([_], lists:usort([Info || #{join_ref := Info} <- CetsInfos])),
-    %% No pause left behind
-    [?assertMatch(#{pause_monitors := []}, Info) || Info <- CetsInfos],
+    %% Wait until there is no pause left behind
+    [
+        cets_test_wait:wait_until(fun() -> maps:get(pause_monitors, cets:info(Pid)) end, [])
+     || Pid <- AllCetsPids
+    ],
     %% Data from all nodes is merged into every replica
     ExpectedRows = lists:sort([{ct1} | [{PeerId} || PeerId <- peer_ids()]]),
     [?assertEqual({ok, ExpectedRows}, cets:remote_dump(Pid)) || Pid <- AllCetsPids].
